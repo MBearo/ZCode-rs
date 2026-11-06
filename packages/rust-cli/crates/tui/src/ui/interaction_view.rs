@@ -1,487 +1,313 @@
 // 改写自 apps/zcode-host/crates/tui/src/ui/interaction_view.rs（feat/rs 79b6691c55）：输入换成
-// `InteractionRequest`；改动预览用 transcript 的 diff（从工具输入算）。
-//! 审批的排版：强调色的 `─` 线、粗体标题，内容放在两条 dim 虚线之间，然后是原因、问题与选项，最后一行
-//! 提示。计划审批与提问的排版见 `interaction_view_plan.rs`、`interaction_view_question.rs`。
-//!
-//! 选项的焦点行（docs/specs/rust-cli/tui.md §7.6、§7.7）：权限询问、计划审批、扣住的同伴消息与提问视图同一种画法，
-//! 不铺底色条，焦点行是强调色的 `❯ ` 与名字，序号 dim；输入行（“否”行的意见、继续计划、提问的“其他”）聚焦时
-//! [`Interaction::cursor`] 给出终端光标的位置。工作线 F76（用户决定 2026-10-23）：前三种以前用选择列表组件的底色条，
-//! 底色条盖住输入、看不到光标。
-use ratatui::style::Style;
-use ratatui::text::{Line, Span};
+// `InteractionRequest`；改动预览从工具输入算。
+//! 请求在板上的行（docs/specs/rust-cli/tui-kit.md §4.2「权限询问、提问、计划审批」；docs/puffin-tui.md §4.2「请求」
+//! 「提问」「计划」，壳的 `shell/asks.rs` 的 `ask_rows`、`ask_placeholder`、`ask_slot`）：板头的问题与右边的
+//! `N more waiting`、编号的回答（kit `widgets::asks`），提问是页名与这一页的回答。行在板的顶上，下面是栈与真的输入框
+//! （占位是请求的一句，槽是请求的键）；要做的事在正文里问的那一行下面（`ask_body.rs`）。
+//! 以前请求替换整个底部区域：预览在板上面、截到 12 行，回答是 Yes / No，有自己的输入行。
+use std::time::Instant;
+
+use rust_cli_kernel_api::ids::InteractionId;
 use rust_cli_kernel_api::orchestration::InteractionRequest;
-use serde_json::Value;
+use rust_cli_tui_kit::app::element::Element;
+use rust_cli_tui_kit::app::widgets::asks::data::{Ask, AskBody, AskOptionKind, AskPreview};
+use rust_cli_tui_kit::app::widgets::asks::{self, Answer, QuestionUi};
+use rust_cli_tui_kit::render::StyledLine;
+use rust_cli_tui_kit::theme::theme::Theme;
 
-use super::cells::{self, Ctx};
-use super::highlight;
+use super::app::App;
 use super::i18n::Lang;
+use super::i18n_asks as words;
+use super::ink::Ink;
 use super::interaction::Interaction;
-use super::layout;
-use super::palette::Palette;
-use super::text::{truncate_line, width, wrap, wrap_text};
-use crate::ui::style::{bold, dim};
-use crate::view::ToolKind;
+use super::interaction_ask::ask_of;
 
-/// 改动预览与计划最多显示的行数。
-pub(super) const PREVIEW: usize = 12;
+#[path = "interaction_board.rs"]
+pub(crate) mod board;
 
-/// 视图排版所需的上下文。
+use board::{Laid, lay_all};
+
+/// 视图排版所需的上下文（同伴消息、确认框、后台面板也用）。
 pub struct View<'a> {
-    pub palette: &'a Palette,
+    /// 墨色（tui-kit.md §3.4）：这几个视图只经它取色。
+    pub ink: &'a Ink,
     pub lang: Lang,
     pub width: usize,
-    /// 终端的行数（带预览的题按它限制预览框的行数，tools-more.md §1.1）。
-    pub height: usize,
-    pub now_ms: u64,
 }
 
-/// 视图的开头：强调色的线与粗体标题。
-pub(super) fn frame(title: &str, view: &View<'_>) -> Vec<Line<'static>> {
-    vec![
-        Line::from(Span::styled(
-            "─".repeat(view.width),
-            Style::default().fg(view.palette.accent),
-        )),
-        truncate_line(
-            Line::from(Span::styled(
-                format!("  {title}"),
-                bold().fg(view.palette.accent),
-            )),
-            view.width,
-        ),
-    ]
+impl View<'_> {
+    pub(super) fn theme(&self) -> &Theme {
+        &self.ink.theme
+    }
 }
-
-pub(super) fn dashed(width: usize) -> Line<'static> {
-    Line::from(Span::styled(
-        format!("  {}", "╌".repeat(width.saturating_sub(2 * layout::INDENT))),
-        dim(),
-    ))
-}
-
-/// 焦点行的指针。
-pub(super) const POINTER: &str = "❯ ";
 
 /// 选项所在的行：（行号，选项下标）。
 pub(super) type Rows = Vec<(usize, usize)>;
 /// 终端光标：（行号，列）。
 pub(super) type At = Option<(usize, usize)>;
 
-/// 一行选项的开头：缩进、指针（焦点行是强调色的 `❯ `，其余两个空格）与 dim 的序号。
-pub(super) fn prefix(focused: bool, number: usize, view: &View<'_>) -> Vec<Span<'static>> {
-    let pointer = if focused {
-        Span::styled(POINTER, Style::default().fg(view.palette.accent))
-    } else {
-        Span::raw("  ")
-    };
-    vec![
-        Span::raw("  "),
-        pointer,
-        Span::styled(format!("{number}. "), dim()),
-    ]
+/// 开着的请求：当前会话的（按到达顺序），然后是旧会话的询问。
+pub fn open_asks(app: &App) -> Vec<(&InteractionId, &InteractionRequest)> {
+    app.view
+        .pending_all()
+        .iter()
+        .map(|(id, request)| (id, request))
+        .chain(
+            app.detached
+                .iter()
+                .map(|ask| (&ask.interaction, &ask.request)),
+        )
+        .collect()
 }
 
-/// 选项的名字：焦点行是强调色，其余不上色。
-pub(super) fn named(text: impl Into<String>, focused: bool, view: &View<'_>) -> Span<'static> {
-    if focused {
-        Span::styled(text.into(), Style::default().fg(view.palette.accent))
-    } else {
-        Span::raw(text.into())
+/// 路径类的预览的文件（板头写它的名字）。
+fn preview_path(ask: &Ask) -> &str {
+    match &ask.body {
+        AskBody::Permission {
+            preview: AskPreview::Diff { path, .. } | AskPreview::File { path, .. },
+            ..
+        } => path,
+        _ => "",
     }
 }
 
-/// 方框：勾上是成功色的 `[✔]`，没勾是 `[ ]`，后面一个空格（提问视图的多选，工作线 F74；切到完全访问的确认框，F87）。
-pub(super) fn checkbox(checked: bool, view: &View<'_>) -> [Span<'static>; 2] {
-    let mark = if checked {
-        Span::styled("[✔]", view.palette.success())
-    } else {
-        Span::raw("[ ]")
-    };
-    [mark, Span::raw(" ")]
-}
-
-/// 一行选项（放不下时截断）：不铺底色条（工作线 F76，同提问视图；以前按选择列表组件画 `› ` 加底色条）。
-pub(super) fn option(
-    focused: bool,
-    number: usize,
-    label: Vec<Span<'static>>,
-    view: &View<'_>,
-) -> Line<'static> {
-    let mut spans = prefix(focused, number, view);
-    spans.extend(label);
-    truncate_line(Line::from(spans), view.width)
-}
-
-/// 输入行：`first` 是行首（缩进、指针、序号，多选还有方框），`content` 是文字或 dim 的占位文字（`empty` 时）；按宽度
-/// 折行，续行与文字对齐。`at` 是这一行在视图里的行号。返回行与聚焦时终端光标的位置：文字末尾；空的时候在占位文字的
-/// 第一个字上；最后一行正好占满时停在这一行的最后一格（tui.md §7.6）。
-pub(super) fn input_row(
-    first: Vec<Span<'static>>,
-    content: Vec<Span<'static>>,
-    empty: bool,
-    at: usize,
-    view: &View<'_>,
-) -> (Vec<Line<'static>>, (usize, usize)) {
-    let indent = [Span::raw(" ".repeat(width(&first)))];
-    let rows = wrap(&content, view.width, &first, &indent);
-    let (row, column) = if empty {
-        (at, width(&first))
-    } else {
-        (at + rows.len() - 1, rows.last().map_or(0, Line::width))
-    };
-    (rows, (row, column.min(view.width.saturating_sub(1))))
-}
-
-/// 底部的按键提示（`{键}` 模板，按键提示组件画，tui.md §7.4）。
-pub(super) fn hint(template: &str, view: &View<'_>) -> Line<'static> {
-    truncate_line(
-        super::key_hint::line(layout::INDENT, template, view.palette),
-        view.width,
-    )
-}
-
-fn file_name(path: &str) -> &str {
-    path.rsplit(['/', '\\']).next().unwrap_or(path)
-}
-
-/// 输入行的文字：有文字时显示文字，否则 dim 的占位文字（焦点由行首的指针表示）。
-pub(super) fn input(text: &str, placeholder: &str) -> Vec<Span<'static>> {
-    if text.is_empty() {
-        vec![Span::styled(placeholder.to_owned(), dim())]
-    } else {
-        vec![Span::raw(text.to_owned())]
+impl App {
+    /// 在回答的请求（最早的那个，Puffin `head_ask`）与它的界面状态。
+    pub fn head_ask(&self) -> Option<(&InteractionId, &InteractionRequest, &Interaction)> {
+        let (id, request) = self.pending()?;
+        let ui = self.interaction.as_ref().filter(|ui| ui.id == *id)?;
+        Some((id, request, ui))
     }
-}
 
-/// 子代理发起的询问：标题行后接 dim 的 `· ` 与来源（docs/specs/rust-cli/agents.md §4.1.1，修复线 F67）；旧会话的
-/// 询问另标出会话（§4.1.2，工作线 F72）。
-fn asked_from(
-    title: &Line<'static>,
-    name: &str,
-    origin: Option<&str>,
-    view: &View<'_>,
-) -> Line<'static> {
-    let mut spans = title.spans.clone();
-    let from = match origin {
-        Some(session) => super::i18n::asked_by_session(view.lang, name, session),
-        None => super::i18n::asked_by(view.lang, name),
-    };
-    spans.extend([Span::raw(" "), Span::styled("· ", dim()), Span::raw(from)]);
-    truncate_line(Line::from(spans), view.width)
-}
+    /// 有请求开着：它的键先拿，命令架、`?`、历史不开（Puffin `asking`）。
+    pub fn asking(&self) -> bool {
+        self.head_ask().is_some()
+    }
 
-/// 远端机器上的调用（remote-exec.md §21.6）：标题行（来源之后）接 dim 的 `· ` 与 `runs on <机器>`（机器名用强调色）。
-fn runs_on(title: &Line<'static>, machine: &str, view: &View<'_>) -> Line<'static> {
-    let mut spans = title.spans.clone();
-    let (before, after) = super::i18n_machines::runs_on(view.lang);
-    spans.extend([
-        Span::raw(" "),
-        Span::styled("· ", dim()),
-        Span::raw(before),
-        Span::styled(
-            machine.to_owned(),
-            ratatui::style::Style::default().fg(view.palette.accent),
-        ),
-        Span::raw(after),
-    ]);
-    truncate_line(Line::from(spans), view.width)
-}
+    /// 在回答的请求整理成 kit 的形状。
+    pub fn head_kit_ask(&self) -> Option<Ask> {
+        let (id, request, ui) = self.head_ask()?;
+        Some(ask_of(&self.view, id, request, ui.seed.as_deref()))
+    }
 
-/// 参数的一行摘要（`键: 值, …`）。
-fn summary(input: &Value) -> String {
-    match input {
-        Value::Object(map) => map
+    /// 输入框里有字，且不是“不再询问”的前缀：⏎ 是 Deny / Keep planning，回答的说明跟着变。
+    pub(super) fn ask_typed(&self) -> bool {
+        !self.composer.area.text().trim().is_empty()
+            && !self.interaction.as_ref().is_some_and(|ui| ui.editing)
+    }
+
+    /// 全部允许会回答的请求：与在回答的那个同一工具的主 agent 的权限请求，两个以上、都能允许一次时（§4.2「全部允许」）。
+    pub fn allow_all_asks(&self) -> Vec<InteractionId> {
+        let Some(head) = self
+            .head_kit_ask()
+            .filter(|a| asks::is_permission(a) && a.origin.is_none())
+        else {
+            return Vec::new();
+        };
+        let same: Vec<Ask> = self
+            .view
+            .pending_all()
             .iter()
-            .map(|(key, value)| format!("{key}: {value}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-        Value::Null => String::new(),
-        other => other.to_string(),
-    }
-}
-
-impl Interaction {
-    /// 视图的行与选项所在的行：（行号，选项下标）。
-    pub fn lines(
-        &self,
-        request: &InteractionRequest,
-        view: &View<'_>,
-    ) -> (Vec<Line<'static>>, Rows) {
-        let (lines, options, _) = self.layout(request, view);
-        (lines, options)
-    }
-
-    /// 终端光标在视图里的（行号，列）：焦点在输入行时有（权限询问在写意见、计划审批在“继续计划”、提问在“其他”行，
-    /// tui.md §7.6、§7.7），其余时候隐藏光标。
-    pub fn cursor(&self, request: &InteractionRequest, view: &View<'_>) -> At {
-        self.layout(request, view).2
-    }
-
-    /// 排好的视图：行、选项所在的行与终端光标。
-    fn layout(
-        &self,
-        request: &InteractionRequest,
-        view: &View<'_>,
-    ) -> (Vec<Line<'static>>, Rows, At) {
-        match request {
-            InteractionRequest::Permission {
-                tool,
-                input,
-                message,
-                suggestions,
-                asked_by,
-                machine,
-                ..
-            } => {
-                let always = self.always_label(tool, suggestions, view);
-                let editing = self.editing_seed(suggestions);
-                let mut layout = self.permission_lines(tool, input, message, always, editing, view);
-                if let Some(name) = asked_by {
-                    layout.0[1] = asked_from(&layout.0[1], name, self.origin.as_deref(), view);
-                }
-                // 机器来自询问（工具输入的 `machine`，R3）或 MCP 服务器的绑定（F98），前者优先。
-                if let Some(machine) = machine.remote().or(self.bound_machine.remote()) {
-                    layout.0[1] = runs_on(&layout.0[1], machine, view);
-                }
-                layout
-            }
-            InteractionRequest::PlanApproval { plan, .. } => self.plan_lines(plan, view),
-            InteractionRequest::Question { .. } => self.question_layout(request, view),
-        }
-    }
-
-    /// 有建议规则时“不再询问”一行的文字：Bash 有种子时是 `… for: <种子>`，没有种子时列出建议规则（工作线 F72，
-    /// shell-permissions.md §4.10）；别的工具沿用 Host TUI 的 allowAlways。
-    fn always_label(
-        &self,
-        tool: &str,
-        suggestions: &[rust_cli_kernel_api::permission::PermissionRule],
-        view: &View<'_>,
-    ) -> Option<String> {
-        if suggestions.is_empty() {
-            return None;
-        }
-        let zh = view.lang == Lang::Zh;
-        let kind = ToolKind::of(tool);
-        let edit = kind.edits_files();
-        Some(match (kind, &self.seed) {
-            (ToolKind::Bash, Some(seed)) => {
-                format!(
-                    "{}{seed}",
-                    super::interaction::remember::seed_label(view.lang)
-                )
-            }
-            (ToolKind::Bash, None) => super::interaction::remember::commands_label(
-                suggestions,
-                &self.workspace,
-                view.lang,
-            ),
-            _ if edit && zh => "是，以后这些文件不再询问".to_owned(),
-            _ if edit => "Yes, and don't ask again for these files".to_owned(),
-            _ if zh => "是，以后这个工具不再询问".to_owned(),
-            _ => "Yes, and don't ask again for this tool".to_owned(),
-        })
-    }
-
-    /// `always`：判决链给了建议规则时多一行"不再询问"的文字；`editing`：焦点在这一行的可编辑前缀上。
-    fn permission_lines(
-        &self,
-        tool: &str,
-        detail: &Value,
-        message: &str,
-        always: Option<String>,
-        editing: bool,
-        view: &View<'_>,
-    ) -> (Vec<Line<'static>>, Rows, At) {
-        let zh = view.lang == Lang::Zh;
-        let path = detail["file_path"]
-            .as_str()
-            .or_else(|| detail["notebook_path"].as_str())
-            .unwrap_or_default();
-        let name = file_name(path).to_owned();
-        let (title, question) = match ToolKind::of(tool) {
-            ToolKind::Bash => (if zh { "Bash 命令" } else { "Bash command" }, None),
-            ToolKind::Edit | ToolKind::MultiEdit | ToolKind::NotebookEdit => (
-                if zh { "编辑文件" } else { "Edit file" },
-                Some(if zh {
-                    ("要对 ", " 做这处修改吗？")
-                } else {
-                    ("Do you want to make this edit to ", "?")
-                }),
-            ),
-            ToolKind::Write => (
-                if zh { "写入文件" } else { "Write file" },
-                Some(if zh {
-                    ("要写入 ", " 吗？")
-                } else {
-                    ("Do you want to write ", "?")
-                }),
-            ),
-            ToolKind::WebFetch => (if zh { "获取网页" } else { "Fetch" }, None),
-            ToolKind::Read
-            | ToolKind::Grep
-            | ToolKind::Glob
-            | ToolKind::List
-            | ToolKind::WebSearch
-            | ToolKind::AskUserQuestion
-            | ToolKind::ExitPlanMode
-            | ToolKind::Agent
-            | ToolKind::TodoRead
-            | ToolKind::ToolSearch
-            | ToolKind::WaitForMcpServers
-            | ToolKind::Mcp
-            | ToolKind::Other => (if zh { "使用工具" } else { "Tool use" }, None),
-        };
-        let mut lines = frame(title, view);
-        // 说明：工具参数里的 description（Bash 的命令说明）。
-        if let Some(description) = detail["description"]
-            .as_str()
-            .filter(|d| !d.trim().is_empty())
-        {
-            lines.extend(wrap_text(
-                description.trim(),
-                dim(),
-                view.width,
-                &[Span::raw("  ")],
-                &[Span::raw("  ")],
-            ));
-        }
-        lines.push(dashed(view.width));
-        let bar = || Span::styled("  │ ", dim());
-        if let Some(command) = detail["command"].as_str() {
-            // 命令完整显示，按宽度换行（续行也带 `│`）。
-            let highlighted = highlight::highlight(command, "bash", view.palette);
-            for (index, raw) in command.lines().enumerate() {
-                let spans = highlighted
-                    .as_ref()
-                    .and_then(|lines| lines.get(index).cloned())
-                    .unwrap_or_else(|| vec![Span::raw(raw.to_owned())]);
-                lines.extend(wrap(&spans, view.width, &[bar()], &[bar()]));
-            }
-        } else if !path.is_empty() {
-            lines.push(truncate_line(
-                Line::from(vec![bar(), Span::styled(path.to_owned(), bold())]),
-                view.width,
-            ));
-            lines.extend(self.diff_preview(tool, detail, view));
+            .map(|(id, request)| ask_of(&self.view, id, request, None))
+            .filter(|a| {
+                asks::is_permission(a) && a.origin.is_none() && a.tool_name == head.tool_name
+            })
+            .collect();
+        let all_once = same.iter().all(|a| {
+            asks::options_of(a)
+                .iter()
+                .any(|o| o.kind == AskOptionKind::AllowOnce)
+        });
+        if same.len() >= 2 && all_once {
+            same.iter().map(|a| InteractionId::new(&a.id)).collect()
         } else {
-            let target = detail["url"]
-                .as_str()
-                .map(str::to_owned)
-                .unwrap_or_else(|| format!("{tool}({})", summary(detail)));
-            lines.extend(wrap(&[Span::raw(target)], view.width, &[bar()], &[bar()]));
+            Vec::new()
         }
-        lines.push(dashed(view.width));
-        // 原因：为什么要审批（正常颜色）。
-        if !message.trim().is_empty() {
-            lines.extend(wrap_text(
-                message.trim(),
-                Style::default(),
-                view.width,
-                &[Span::raw("  ")],
-                &[Span::raw("  ")],
-            ));
-        }
-        lines.push(Line::default());
-        lines.push(Line::from(match question {
-            Some((before, after)) => vec![
-                Span::raw(format!("  {before}")),
-                Span::styled(name, bold()),
-                Span::raw(after),
-            ],
-            None => vec![Span::raw(format!(
-                "  {}",
-                if zh {
-                    "要继续吗？"
-                } else {
-                    "Do you want to proceed?"
-                }
-            ))],
-        }));
-        let mut options = Vec::new();
-        let mut cursor = None;
-        let mut rows = vec![if zh { "是" } else { "Yes" }.to_owned()];
-        rows.extend(always);
-        rows.push(if zh { "否" } else { "No" }.to_owned());
-        let last = rows.len() - 1;
-        for (index, text) in rows.into_iter().enumerate() {
-            let focused = index == self.cursor;
-            options.push((lines.len(), index));
-            // 输入意见时 No 行就是输入框；写意见时（`typing`，焦点一定在这一行）显示光标。
-            if index == last && (self.typing || !self.text.is_empty()) {
-                let placeholder = if zh {
-                    "告诉 ZCode 该怎么做"
-                } else {
-                    "tell ZCode what to do differently"
-                };
-                let content = input(&self.text, placeholder);
-                let first = prefix(focused, index + 1, view);
-                let (rows, at) = input_row(first, content, self.text.is_empty(), lines.len(), view);
-                lines.extend(rows);
-                cursor = cursor.or(self.typing.then_some(at));
-            } else if focused && editing && index == 1 {
-                // 焦点在“不再询问”的可编辑前缀上（工作线 F72）：键入改前缀，光标停在末尾。
-                let content = vec![named(text, true, view)];
-                let (rows, at) = input_row(
-                    prefix(true, index + 1, view),
-                    content,
-                    false,
-                    lines.len(),
-                    view,
-                );
-                lines.extend(rows);
-                cursor = Some(at);
-            } else {
-                lines.push(option(
-                    focused,
-                    index + 1,
-                    vec![named(text, focused, view)],
-                    view,
-                ));
-            }
-        }
-        lines.push(Line::default());
-        let text = match (self.typing, zh) {
-            (true, false) => "{Enter} to send · {Esc} to go back",
-            (true, true) => "{enter} 发送 · {esc} 返回",
-            (false, false) => "{Esc} to cancel · {Tab} to amend",
-            (false, true) => "{esc} 取消 · {tab} 补充意见",
-        };
-        lines.push(hint(text, view));
-        (lines, options, cursor)
     }
 
-    /// 改动预览：与 transcript 里的 diff 相同，最多 [`PREVIEW`] 行。
-    fn diff_preview(&self, tool: &str, input: &Value, view: &View<'_>) -> Vec<Line<'static>> {
-        let ctx = Ctx {
-            palette: view.palette,
-            lang: view.lang,
-            width: view.width,
-            expanded: false,
-            elapsed: std::time::Duration::ZERO,
-            now_ms: view.now_ms,
-            workspace: "",
-            workspace_label: "",
-            version: "",
-            mcp_machines: &[],
-            machines: &[],
-            markdown: None,
+    /// 请求的回答，按现在的草稿与模式（字照界面语言）。
+    pub fn answers_of(&self, ask: &Ask) -> Vec<Answer> {
+        let theme = &self.ink.theme;
+        let workspace = self
+            .interaction
+            .as_ref()
+            .map_or_else(|| self.workspace().to_owned(), |ui| ui.workspace.clone());
+        let mode = self.view.mode();
+        let list = asks::answers(
+            theme,
+            ask,
+            &workspace,
+            self.ask_typed(),
+            self.allow_all_asks().len(),
+            Some(words::kit_mode(mode)),
+        );
+        words::answers(self.lang, theme, list, mode)
+    }
+
+    /// 还有几个请求在等（在回答的之外，含旧会话的询问）。
+    fn more_waiting(&self) -> usize {
+        open_asks(self).len().saturating_sub(1)
+    }
+
+    /// 请求开着时板上的行：板头，然后是回答；提问是页名与这一页的回答。
+    pub fn ask_rows(&self, now: Instant) -> Vec<Element> {
+        let (Some(ask), Some((_, _, ui))) = (self.head_kit_ask(), self.head_ask()) else {
+            return Vec::new();
         };
-        let rows = cells::patch_rows(ToolKind::of(tool), input);
-        let (mut lines, hidden) = cells::diff_lines(&rows, &ctx, PREVIEW);
-        if hidden > 0 {
-            lines.push(Line::from(Span::styled(
-                format!("     … +{hidden} lines"),
-                dim(),
-            )));
+        let theme = &self.ink.theme;
+        let typed = self.ask_typed();
+        let more = words::more_waiting(self.lang, self.more_waiting());
+        let armed = if self.asks.answered.contains(&ui.id) {
+            1.0
+        } else {
+            ui.armedness(now)
+        };
+        if asks::is_question(&ask) {
+            let q = QuestionUi {
+                page: ui.page,
+                choice: ui.choice,
+                picks: &ui.picks,
+                own: &ui.own,
+            };
+            return asks::question_rows_said(
+                theme,
+                &ask,
+                &q,
+                typed,
+                armed,
+                more.as_deref(),
+                words::recommended(self.lang),
+            );
         }
-        lines
+        let head = words::head(self.lang, &ask, preview_path(&ask));
+        let risky = asks::risky(&ask).then(|| words::risky(self.lang));
+        let mut rows = vec![asks::head_row_said(theme, &head, risky, more.as_deref())];
+        rows.extend(asks::answer_rows(
+            theme,
+            &self.answers_of(&ask),
+            ui.choice,
+            armed,
+        ));
+        rows
+    }
+
+    /// 请求开着时输入框的灰字。
+    pub fn ask_placeholder(&self) -> Option<&'static str> {
+        self.head_kit_ask()
+            .map(|ask| words::placeholder(self.lang, &ask))
+    }
+
+    /// 请求开着时槽里的键（§4.2「请求」「提问」「计划」，Puffin `ask_slot`）；`below`：预览在视图下面接着。打了字时先说字：
+    /// 它们决定 ⏎ 做什么。提问的 AFK 倒计时在 `PgDn read on` 的位置（spec §11.4）。
+    pub fn ask_slot(&self, below: bool) -> Vec<(String, String)> {
+        let (Some(ask), Some((_, _, ui))) = (self.head_kit_ask(), self.head_ask()) else {
+            return Vec::new();
+        };
+        let lang = self.lang;
+        let pair = |k: &str, v: &'static str| (k.to_owned(), words::slot(lang, v).to_owned());
+        let stop = pair("esc", "stop");
+        let up_to = |n: usize| {
+            if n <= 1 {
+                "1".to_owned()
+            } else {
+                format!("1–{}", n.min(9))
+            }
+        };
+        // 旧界面多出的：输入框里是“不再询问”的前缀时 ⏎ 记住它（自拟，tui-kit.md §4.3）。
+        if ui.editing && !self.composer.area.text().trim().is_empty() {
+            return vec![pair("⏎", "always allow"), stop];
+        }
+        if self.ask_typed() {
+            return if asks::is_plan(&ask) {
+                vec![pair("⏎", "keep planning")]
+            } else if asks::is_question(&ask) {
+                // 提问页上的字是这一页自己的回答：数字与空格都是字。
+                vec![stop]
+            } else {
+                vec![pair("⏎", "deny and send")]
+            };
+        }
+        if let Some(seconds) = ui.countdown.filter(|_| asks::is_question(&ask)) {
+            return vec![(String::new(), words::countdown(lang, seconds)), stop];
+        }
+        if below {
+            return vec![pair("PgDn", "read on"), stop];
+        }
+        if asks::is_question(&ask) {
+            let pages = asks::pages_of(&ask);
+            let mut keys: Vec<(String, String)> = pages
+                .get(ui.page)
+                .map(|p| {
+                    if p.multi {
+                        pair("space", "tick")
+                    } else {
+                        (up_to(p.options.len()), words::slot(lang, "pick").to_owned())
+                    }
+                })
+                .into_iter()
+                .collect();
+            keys.push(if pages.len() > 1 {
+                pair("←→", "page")
+            } else {
+                stop
+            });
+            return keys;
+        }
+        let answers = self.answers_of(&ask);
+        // 选中 Always allow 时槽照旧是 Puffin 的 `1–N answer  esc stop`（团队决定 2026-10-31）：旧界面多出的 ⇥ 改规则
+        // 照旧能用，只列在 `?` 面板里（tui-kit.md §4.3）。以前这时槽换成 `⇥ edit rule  esc stop`，与 Puffin 不同。
+        vec![
+            (up_to(answers.len()), words::slot(lang, "answer").to_owned()),
+            stop,
+        ]
+    }
+
+    /// Bash 询问“不再询问”的前缀（改过的，或询问给的种子；工作线 F72）。
+    pub(super) fn ask_seed(&self) -> Option<String> {
+        let (_, request, ui) = self.head_ask()?;
+        ui.seed
+            .clone()
+            .or_else(|| super::interaction::remember::seed(request))
+    }
+
+    /// 视图还钉在在回答的请求的行上（Puffin `AskUi.pinned`）。
+    pub fn ask_pinned(&self) -> bool {
+        self.head_ask().is_some_and(|(_, _, ui)| ui.pinned)
+    }
+
+    /// 滚动了：放开在回答的请求的钉（Puffin 任何滚动都清掉 `pinned`；`scroll_by` 调它）。
+    pub fn unpin_ask(&mut self) {
+        if let Some(ui) = self.interaction.as_mut() {
+            ui.pinned = false;
+        }
+    }
+
+    /// 请求开着时板上的一块（`pane.rs` 放上板）：只有板上的行；草稿行照常画（占位与槽是请求的），预览在正文里。返回
+    /// 行、回答所在的行（点击选它）与光标（没有：光标在输入框里）。`below`：预览在视图下面接着，槽是 `PgDn read on`。
+    pub fn ask_laid(&self, width: usize, now: Instant, below: bool) -> Option<(Laid, Rows, At)> {
+        let ask = self.head_kit_ask()?;
+        let rows = self.ask_rows(now);
+        let lines: Vec<StyledLine> = lay_all(&rows, width);
+        // 回答的行：板头之后一行一个；提问的页名之后一行一个。
+        let count = if asks::is_question(&ask) {
+            let ui = self.interaction.as_ref()?;
+            asks::pages_of(&ask)
+                .get(ui.page)
+                .map_or(0, |p| p.options.len())
+        } else {
+            self.answers_of(&ask).len()
+        };
+        let first = lines.len().saturating_sub(count);
+        let options = (0..count).map(|i| (first + i, i)).collect();
+        let slot = board::slot_pairs(&self.ink.theme, &self.ask_slot(below));
+        // 板上的行从 0 起到末尾（`input_at`），没有自己的输入行。
+        let laid = Laid {
+            input_at: lines.len(),
+            lines,
+            slot,
+            answer: Some(self.ask_placeholder()?.to_owned()),
+            ..Laid::default()
+        };
+        Some((laid, options, None))
     }
 }
-
-#[path = "interaction_view_plan.rs"]
-mod plan;
-#[path = "interaction_view_preview.rs"]
-mod preview;
-#[path = "interaction_view_question.rs"]
-mod question;

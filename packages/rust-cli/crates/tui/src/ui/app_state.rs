@@ -26,8 +26,8 @@ pub struct Port {
 /// 鼠标与选区：上一帧的可点击区域、悬停、拖选、复制的提示与滚轮的加速。
 #[derive(Default)]
 pub struct Pointer {
-    /// 鼠标最后的位置（悬停的反馈）。
-    pub hover: Option<(u16, u16)>,
+    /// 悬停：鼠标最后移到的位置与那时那里的东西（tui-select.md §9）。
+    pub hover: Option<super::mouse::Hover>,
     /// 上一帧的可点击区域与可见行。
     pub hits: Hits,
     pub selection: Option<Selection>,
@@ -38,8 +38,8 @@ pub struct Pointer {
     pub screen_selection: Option<ScreenSelection>,
     /// 最近一次复制的提示与时间（gap 行右侧显示，时长按途径）。
     pub copied: Option<(super::clipboard::Notice, Instant)>,
-    /// 滚轮的加速状态（tui-select.md §4.2）；runner 按终端变量换成对应的参数。
-    pub wheel: super::wheel::Accel,
+    /// 一格滚轮滚几行（tui-select.md §4.2）；runner 按终端变量换成对应的行数。
+    pub wheel: super::wheel::WheelLines,
 }
 
 impl Pointer {
@@ -73,7 +73,7 @@ pub struct Snapshots {
     pub tasks: super::tasks::TaskPanel,
     /// 后台任务的最新快照（与 `agents` 同一份快照、同一个回执，tui-display.md §2.3，修复线 F34）。
     pub background: Vec<rust_cli_kernel_api::manage::BackgroundEntry>,
-    /// footer 的请求统计（TPS 与缓存命中率）的最后一份回执（tui-display.md §2.6，F27）。
+    /// `/stats` 卡的请求统计（缓存命中率与速度）的最后一份回执（tui-display.md §2.6，F27）。
     pub request_stats: super::footer_stats::FooterStats,
     /// 子代理的最后一份快照（与 `background` 同一份快照，tui-panels.md §0、§1）。
     pub agents: super::agents::AgentList,

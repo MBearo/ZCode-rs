@@ -24,8 +24,9 @@ use crate::commands::args::{Invocation, Mode, parse, version_line};
 use crate::commands::executor::ExecutorCommand;
 use crate::process::output::{eprint_line, eprint_raw, help_width, print_line, print_raw};
 use crate::{
-    VERSION, assemble::network, commands::executor, commands::flags, commands::help,
-    commands::hooks_trust, commands::login, commands::update, frontends::app_server,
+    VERSION, assemble::network, commands::desktop_app, commands::executor, commands::flags,
+    commands::help, commands::hooks_trust, commands::login, commands::update,
+    frontends::app_server,
 };
 
 /// 常驻执行器停下后等卡住的阻塞线程的上限。
@@ -43,6 +44,8 @@ pub(crate) enum Job {
     Trust(hooks_trust::TrustCommand),
     /// `zcode update`（update.md §9，F48）。
     Update(update::Command),
+    /// `zcode app [folder]`（cli-args.md §16）。
+    App(desktop_app::Command),
     /// 交互界面。
     Tui(Box<Invocation>),
     /// `-p`（headless.md）。
@@ -62,7 +65,7 @@ enum Shutdown {
 
 impl Job {
     /// 按参数选；用法错误、`--version` 与 `--help` 当场写完，返回退出码。分派的顺序：`executor`、`app-server`、
-    /// `login` / `logout`、`hooks trust`、`update`，其余是常规的命令行。
+    /// `login` / `logout`、`hooks trust`、`update`、`app`，其余是常规的命令行。
     pub(crate) fn parse(args: &[String]) -> Result<Self, ExitCode> {
         if let Some(parsed) = executor::parse(args) {
             return match parsed {
@@ -96,6 +99,13 @@ impl Job {
         if let Some(parsed) = update::parse(args) {
             return match parsed {
                 Ok(command) => Ok(Self::Update(command)),
+                Err(text) => Err(usage_error(&text)),
+            };
+        }
+        // `zcode app [folder]`（cli-args.md §16）：同 `update`，commander 的报错原样写 stderr，退出码 1。
+        if let Some(parsed) = desktop_app::parse(args) {
+            return match parsed {
+                Ok(command) => Ok(Self::App(command)),
                 Err(text) => Err(usage_error(&text)),
             };
         }
@@ -142,6 +152,7 @@ impl Job {
             | Self::Account(_)
             | Self::Trust(_)
             | Self::Update(_)
+            | Self::App(_)
             | Self::Tui(_)
             | Self::Print(_) => Shutdown::Wait,
         }
@@ -159,6 +170,11 @@ impl Job {
                 let env =
                     rust_cli_base::secret::EnvSnapshot::from(crate::assemble::setup::process_env());
                 update::command(command, &env, &mut std::io::stdout()).await
+            }
+            Self::App(command) => {
+                let env =
+                    rust_cli_base::secret::EnvSnapshot::from(crate::assemble::setup::process_env());
+                desktop_app::command(command, &env, &mut std::io::stdout()).await
             }
             Self::Tui(invocation) => crate::frontends::tui::run(*invocation).await,
             Self::Print(invocation) => crate::frontends::print::run(*invocation).await,

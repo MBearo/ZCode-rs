@@ -1,7 +1,7 @@
 //! 运行的平台与系统版本（修复线 F65）：TUI 按它判断按键的含义与颜色级别（docs/specs/rust-cli/tui-input.md §9、
 //! tui.md §7.4）。入口读一次，经 `Options::os` 与信任、更新的选择屏传给 TUI。
 
-use rust_cli_tui::{Os, WindowsRelease};
+use rust_cli_tui_ports::{Os, WindowsRelease};
 
 /// 本进程的平台。Windows 带系统版本（Node `os.release()` 的写法：libuv 用 `RtlGetVersion`，不受应用兼容清单影响）。
 pub(crate) fn current() -> Os {
@@ -91,7 +91,7 @@ mod tests {
     fn the_current_platform_is_reported() {
         let os = super::current();
         assert_eq!(os.is_windows(), cfg!(windows));
-        if let rust_cli_tui::Os::Windows(release) = os {
+        if let rust_cli_tui_ports::Os::Windows(release) = os {
             assert!(release.is_some_and(|r| r.major >= 10 && r.build > 0));
         }
     }

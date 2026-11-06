@@ -42,9 +42,4 @@ fn replacements_quote_paths_with_spaces() {
     );
     assert_eq!(replacement("src/", false, false), "@src/");
     assert_eq!(replacement("a", true, false), "@\"a\"");
-    assert_eq!(
-        common_prefix(&["src/a.rs".into(), "src/ab.rs".into()]),
-        "src/a"
-    );
-    assert_eq!(common_prefix(&[]), "");
 }

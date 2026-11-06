@@ -554,6 +554,8 @@ pub mod entry_kinds {
     pub const PEER_RESOLVED: &str = "peer_resolved";
     /// 跨会话的回执。
     pub const PEER_RECEIPT: &str = "peer_receipt";
+    /// 跨会话的消息或回执已并入对话：与并入的那条消息同一批提交（cross-session.md §2.2，F139）。
+    pub const PEER_MERGED: &str = "peer_merged";
     /// 分叉的子代理会话记下父会话（agents）。
     pub const FORK_PARENT: &str = "fork_parent";
 }

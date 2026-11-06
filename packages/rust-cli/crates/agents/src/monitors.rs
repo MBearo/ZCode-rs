@@ -49,6 +49,12 @@ impl MonitorBoard {
         self.slots().values().any(|slot| &slot.agent == agent)
     }
 
+    /// 这条后台命令有 monitor 在看（命令保活不算它，agents.md §5.2 第 5 条）。monitor 先 ack 终态通知再撤登记，所以
+    /// 命令在执行环境里列着的时候一直认得出来。
+    pub(crate) fn watches(&self, task: &str) -> bool {
+        self.slots().keys().any(|watched| watched.as_str() == task)
+    }
+
     /// 子会话的终态通知属于在看的 monitor 时交给它的任务（它送出之后自己 ack），返回 true。
     pub(crate) fn take(&self, notice: &ShellNotice) -> bool {
         let sender = self
@@ -263,7 +269,7 @@ async fn run(
     }
     core.monitors.slots().remove(&armed.task);
     // 最后一个 monitor 结束：停放着、没有别的后台工作的子代理就此结束（§5.3 第 3 条）。
-    let wakes = routing::release(core, &live.agent);
+    let wakes = routing::release(core, &live.agent).await;
     routing::wake(core, wakes).await;
 }
 

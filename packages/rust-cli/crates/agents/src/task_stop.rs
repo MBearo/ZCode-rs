@@ -170,7 +170,7 @@ impl TaskStopTool {
             return match agent.state {
                 AgentState::Finished(ending) => Err(not_running(ending.status().as_str())),
                 // 停放的也能停（agents.md §5.1）。
-                AgentState::Running { .. } | AgentState::Parked(_) => {
+                AgentState::Running { .. } | AgentState::Parked { .. } => {
                     Ok(Target::Agent(agent.agent, agent.description))
                 }
             };
@@ -285,7 +285,7 @@ impl TaskStopTool {
             }
             Ok(Target::Command(Found { session, machine })) => {
                 let key = BackgroundTask {
-                    session,
+                    session: session.clone(),
                     task: ShellTaskId::new(id),
                 };
                 match machine
@@ -293,12 +293,25 @@ impl TaskStopTool {
                     .stop_background_command(context.operation.clone(), key)
                     .await?
                 {
-                    BackgroundStop::Stopped { command } => Ok(StoppedTask {
-                        id: id.to_owned(),
-                        task_type: "local_bash",
-                        command,
-                        machine: machine.name().clone(),
-                    }),
+                    BackgroundStop::Stopped { command } => {
+                        // 停掉的命令不发通知：只为命令停放的子代理不会再被它唤醒，重新判断一次（agents.md §5.2 第 5 条）。
+                        let owner = self.core.live.with(|agents| {
+                            agents
+                                .values()
+                                .find(|agent| agent.child == session)
+                                .map(|agent| agent.agent.clone())
+                        });
+                        if let Some(owner) = owner {
+                            let wakes = routing::release(&self.core, &owner).await;
+                            routing::wake(&self.core, wakes).await;
+                        }
+                        Ok(StoppedTask {
+                            id: id.to_owned(),
+                            task_type: "local_bash",
+                            command,
+                            machine: machine.name().clone(),
+                        })
+                    }
                     BackgroundStop::NotRunning { status } => Err(ToolError::Failed {
                         message: format!("Task {id} is not running (status: {})", status.as_str()),
                     }),

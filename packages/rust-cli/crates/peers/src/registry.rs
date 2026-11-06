@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
+use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::peers::{PeerAddress, PeerRecord, PeerStatus};
 
 use crate::frames::Record;
@@ -35,6 +36,7 @@ fn status(text: Option<&str>) -> Option<PeerStatus> {
     match text {
         Some("busy") => Some(PeerStatus::Busy),
         Some("idle") => Some(PeerStatus::Idle),
+        Some("waiting") => Some(PeerStatus::Waiting),
         _ => None,
     }
 }
@@ -73,14 +75,23 @@ pub(crate) async fn list(dir: &Path, own: u32) -> Vec<PeerRecord> {
             remove(dir, pid, Path::new(&record.messaging_socket_path)).await;
             continue;
         }
-        peers.push(PeerRecord {
-            pid,
-            name: record.name,
-            address: PeerAddress::from_socket(&record.messaging_socket_path),
-            kind: record.kind,
-            status: status(record.status.as_deref()),
-            started_at_ms: record.started_at,
-        });
+        peers.push(of_record(record));
     }
     peers
+}
+
+/// 登记的文件到端口上的形状。
+pub(crate) fn of_record(record: Record) -> PeerRecord {
+    PeerRecord {
+        pid: record.pid,
+        name: record.name,
+        address: PeerAddress::from_socket(&record.messaging_socket_path),
+        kind: record.kind,
+        status: status(record.status.as_deref()),
+        started_at_ms: record.started_at,
+        session: record.session_id.map(SessionId::new),
+        status_since_ms: record.status_updated_at,
+        presence: record.presence,
+        tmux: record.tmux,
+    }
 }

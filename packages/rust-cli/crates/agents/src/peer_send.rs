@@ -127,7 +127,7 @@ pub(crate) async fn listing(core: &Core, context: &ToolUseContext) -> String {
 
 /// 解析出的收件方。
 enum Target {
-    One(PeerRecord),
+    One(Box<PeerRecord>),
     Address(PeerAddress),
     Ambiguous(Vec<(PeerRecord, String)>),
     None,
@@ -137,7 +137,7 @@ async fn resolve(core: &Core, to: &str) -> Target {
     let peers = core.ports.peers.peers().await;
     if let Some(address) = PeerAddress::parse(to.trim()) {
         return match peers.into_iter().find(|peer| peer.address == address) {
-            Some(peer) => Target::One(peer),
+            Some(peer) => Target::One(Box::new(peer)),
             None => Target::Address(address),
         };
     }
@@ -153,7 +153,7 @@ async fn resolve(core: &Core, to: &str) -> Target {
         .collect();
     match matched.len() {
         0 => Target::None,
-        1 => Target::One(matched.remove(0)),
+        1 => Target::One(Box::new(matched.remove(0))),
         _ => {
             let own = core.ports.peers.identity().await;
             let refs = peer_refs(&matched, own.as_ref().map(|own| &own.address));

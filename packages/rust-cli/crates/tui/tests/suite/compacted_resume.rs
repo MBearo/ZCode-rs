@@ -15,7 +15,8 @@ use rust_cli_kernel_api::testing::{MemoryStore, text_response};
 use super::support::{GatedModel, Setup, request_text, with_ui};
 
 const SESSION: &str = "sess_compacted";
-const COMPACTED: &str = "Conversation compacted (ctrl+o for history)";
+/// 压缩点的行（Puffin `entries::compact_row`：冷加载只知道压缩前的数，没有摘要）。
+const COMPACTED: &str = "✓ Compact";
 
 fn user(id: &str, text: &str) -> Message {
     Message::User(UserMessage {
@@ -119,7 +120,7 @@ async fn seeded() -> Arc<MemoryStore> {
 }
 
 fn idle(screen: &str) -> bool {
-    screen.contains("FIFTH-ANSWER") && !screen.contains("esc to interrupt")
+    screen.contains("FIFTH-ANSWER") && !screen.contains("esc stop")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -152,24 +153,13 @@ async fn resuming_a_compacted_session_shows_the_whole_history() {
         let marks: Vec<usize> = screen.match_indices(COMPACTED).map(|(at, _)| at).collect();
         assert!(first < marks[0] && marks[1] < screen.find("FOURTH-ANSWER").unwrap());
 
-        // ctrl+o：详细视图里同样有压缩前的内容。
+        // ctrl+o：详细的样子（Puffin `details_open`，在原地）里同样有压缩前的内容；再按一次换回来。
         ui.press(KeyCode::Char('o'), KeyModifiers::CONTROL);
-        ui.wait("the detailed transcript", |s| {
-            s.contains("Showing detailed transcript")
-        })
-        .await;
-        ui.press(KeyCode::Char('g'), KeyModifiers::NONE);
-        ui.wait("the top of the detailed transcript", |s| {
-            s.contains("first question")
-        })
-        .await;
-        ui.press(KeyCode::Esc, KeyModifiers::NONE);
+        ui.wait("the detailed transcript", |s| s.contains("first question"))
+            .await;
+        ui.press(KeyCode::Char('o'), KeyModifiers::CONTROL);
 
         // 下一个请求只从最后一个压缩点开始：摘要 2 与保留的回复在，压缩前的输入不在。
-        ui.wait("the input box", |s| {
-            !s.contains("Showing detailed transcript")
-        })
-        .await;
         ui.submit("next question");
         ui.wait("the reply", |s| s.contains("next reply")).await;
         let sent = requests.requests();

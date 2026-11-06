@@ -30,19 +30,22 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
+use rust_cli_base::TaskScope;
 use rust_cli_base::clock::SystemClock;
 use rust_cli_env_local::{LocalEnvironment, LocalMcpTransport};
+use rust_cli_kernel_api::default_model::DefaultModel;
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::machine::MachineEnv;
-use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::provider::{HeaderSource, ModelDirectory, ModelLimits};
 use rust_cli_net::Egress;
 use rust_cli_node_store::{NodeIds, NodeStore};
 use rust_cli_paths::StoragePaths;
 use rust_cli_platform::Platform;
-use rust_cli_runtime::{ContextConfig, Defaults, LocalKernel, Ports, Surface, TitleModel};
+use rust_cli_runtime::{
+    AutoCompactAt, ContextConfig, Defaults, LocalKernel, Ports, Surface, TitleModel,
+};
 
 use crate::assemble::deployment::Deployment;
 use crate::assemble::env_layout::PrimaryPaths;
@@ -134,6 +137,9 @@ pub(crate) struct Controller {
     /// 账号模型每请求鉴权的来源（G8：app-server 经 Host）；None 时平台层自己算。
     pub(crate) headers: Option<Arc<dyn HeaderSource>>,
     pub(crate) root_bypass: RootBypass,
+    /// 组装时等不等缺省模型定下（工作线 F140，performance.md §12.3）：交互界面不等（第一帧不等模型目录），`-p` 与
+    /// app-server 当场等。
+    pub(crate) wait_model: bool,
     pub(crate) cli: CliInputs,
 }
 
@@ -148,6 +154,7 @@ impl Controller {
             primary: Primary::Configured,
             headers: None,
             root_bypass: RootBypass::Refuse,
+            wait_model: false,
             cli,
         }
     }
@@ -167,6 +174,7 @@ impl Controller {
             primary: Primary::Configured,
             headers: None,
             root_bypass: RootBypass::Refuse,
+            wait_model: true,
             cli,
         }
     }
@@ -182,6 +190,7 @@ impl Controller {
             primary: Primary::LocalOnly,
             headers: Some(headers),
             root_bypass: RootBypass::Allow,
+            wait_model: true,
             cli: CliInputs::default(),
         }
     }
@@ -376,8 +385,10 @@ pub(crate) async fn open(
 pub(crate) struct Ported {
     pub(crate) opened: Opened,
     pub(crate) ports: Ports,
-    /// 新会话的模型选择（`--model`、`--effort` 已作用）。
-    pub(crate) selection: ModelSelection,
+    /// 新会话的模型选择（`--model`、`--effort` 已作用）：交互界面里可能还没定下（工作线 F140）。
+    pub(crate) selection: DefaultModel,
+    /// 等模型目录、定下缺省模型的任务（[`models::default_model`]）：持有到会话结束。
+    pub(crate) choosing: TaskScope,
     pub(crate) limits: Arc<dyn ModelLimits>,
 }
 
@@ -421,9 +432,18 @@ pub(crate) async fn ports(
         clock: clock.clone(),
         ids: opened.ids.clone(),
     };
+    // 缺省模型（工作线 F140，performance.md §12.3）：组装完就取（不等信任页）；交互界面不等它画第一帧，`-p` 与 App 当场等。
+    let (selection, choosing) = models::default_model(
+        assembled.selection,
+        opened.paths.default_model(),
+        spec.wait_model,
+        facts.process.started,
+    )
+    .await;
     Ok(Ported {
-        selection: assembled.selection.clone(),
-        limits: assembled.limits.clone(),
+        selection,
+        choosing,
+        limits: assembled.limits,
         opened,
         ports,
     })
@@ -433,7 +453,12 @@ pub(crate) async fn ports(
 pub(crate) struct Built {
     pub(crate) opened: Opened,
     pub(crate) kernel: Arc<LocalKernel>,
-    pub(crate) selection: ModelSelection,
+    pub(crate) selection: DefaultModel,
+    /// 定下缺省模型的任务（[`Ported::choosing`]）：只为持有，作用域丢掉时任务就停了（前端把 `Built` 留到会话结束）。
+    pub(crate) _choosing: TaskScope,
+    /// 内核读的自动压缩位置（配置的 `compact.autoThresholdTokens`，compact.md §2.3）：交互界面的设置页与 `/autocompact`
+    /// 改的就是这一份。
+    pub(crate) compact_at: AutoCompactAt,
     /// 新会话的权限模式（命令行 → 本机项目的持久模式 → 配置 → default）。
     pub(crate) mode: PermissionMode,
     /// 本机跨会话通信（`Peering::Off` 时没有）：退出时删掉登记与 socket。
@@ -456,6 +481,7 @@ pub(crate) async fn kernel(
         opened,
         ports,
         selection,
+        choosing,
         limits: model_limits,
     } = ported;
     let Opened {
@@ -511,6 +537,9 @@ pub(crate) async fn kernel(
     context.memory_dir = options::memory_dir(primary, &layout, &opened.paths, workspace, env).await;
     // 压缩的上限两种模式都接（显式覆盖按内置规则，修复线 F61：以前显式覆盖时是“没有目录”，按 200,000）。
     let compact = options::compact(env, facts.controller.max_output_tokens, model_limits);
+    // 所有模式都按配置的位置压缩；设置页与 `/autocompact` 写回后换掉的就是内核读的这一份（compact.md §2.3）。
+    compact.at.set(config.compact_at);
+    let compact_at = compact.at.clone();
     // stream-json 输入的 MCP prewait 看能不能用工具搜索（headless.md §6.2）：乐观判断，`ENABLE_TOOL_SEARCH` 不是关（工作线
     // F89，tools-more.md §3.2.1）。修改：F84 时看 `tool_search_mode`（禁用表里的模型不算）。
     let prewait = Prewait {
@@ -604,6 +633,8 @@ pub(crate) async fn kernel(
         opened,
         kernel,
         selection,
+        _choosing: choosing,
+        compact_at,
         mode,
         peers,
         machines,

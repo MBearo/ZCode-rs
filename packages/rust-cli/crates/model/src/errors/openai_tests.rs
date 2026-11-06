@@ -94,6 +94,44 @@ fn quota_codes_are_quota_exhausted_in_both_forms() {
     assert_eq!(limited.class, Class::RateLimited);
 }
 
+/// Kimi 套餐用量上限的原话（2026-11-01 日志）。
+const KIMI_PLAN_LIMIT: &str = "You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour \
+window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota";
+
+/// 修 bug（2026-11-02，provider-errors.md §5.1）：Kimi 的套餐用量上限带限流码到达，以前归限流、每回合重试 10 次；
+/// 现在按句式归配额用尽，不重试。句式只在 4xx 上认；不带这些句式的限流照旧重试。
+#[test]
+fn plan_limit_wording_is_quota_exhausted_even_with_a_rate_limit_code() {
+    let head = failure(
+        429,
+        &json!({"error": {"message": KIMI_PLAN_LIMIT, "type": "rate_limit_reached_error"}})
+            .to_string(),
+    );
+    assert_eq!(head.class, Class::QuotaExhausted);
+    assert_eq!(
+        head.error,
+        ModelError::QuotaExhausted {
+            message: KIMI_PLAN_LIMIT.to_owned()
+        }
+    );
+    let streamed = from_stream(
+        &json!({"error": {"message": KIMI_PLAN_LIMIT, "code": "rate_limit_reached_error"}}),
+    );
+    assert_eq!(streamed.class, Class::QuotaExhausted);
+    // 不带套餐句式的限流照旧是限流（`usage limit` 单独出现不算）。
+    let limited = failure(
+        429,
+        r#"{"error":{"message":"You have hit the per-minute usage limit, slow down","type":"rate_limit_reached_error"}}"#,
+    );
+    assert_eq!(limited.class, Class::RateLimited);
+    // 5xx 不按句式改。
+    let server = failure(
+        503,
+        &json!({"error": {"message": KIMI_PLAN_LIMIT}}).to_string(),
+    );
+    assert_eq!(server.class, Class::ServerError);
+}
+
 #[test]
 fn stream_errors_use_the_error_type() {
     let error = from_stream(&json!({"type": "error", "message": "boom"}));

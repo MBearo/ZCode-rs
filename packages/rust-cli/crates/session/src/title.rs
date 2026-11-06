@@ -10,6 +10,7 @@ use rust_cli_kernel_api::ids::{CommandId, MessageId};
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserOrigin};
 use rust_cli_kernel_api::session_api::{Ack, KernelEvent};
 use rust_cli_kernel_api::store::{Fact, SessionKind, TurnAnchor};
+use rust_cli_kernel_api::user_command::LocalCommandRecord;
 use tokio_util::sync::CancellationToken;
 
 use crate::actor::{Actor, accepted, rejected};
@@ -194,17 +195,37 @@ impl Actor {
         self.log.append(KernelEvent::TitleChanged { title });
     }
 
-    /// 用户改名（Node `setCustomSessionTitle`）：先提交，再改内存、发事件。
-    pub(crate) async fn rename(&mut self, command: CommandId, title: String) -> Ack {
+    /// 用户改名（Node `setCustomSessionTitle`）：先提交，再改内存、发事件。`record` 是 TUI `/rename <名字>` 的命令记录
+    /// （`Command::RenameRecorded`，titles.md §4）。
+    ///
+    /// 缺陷修复（MR !3465 评审 CR-01）：以前记录由 TUI 在回执之后另发，还没有会话时更是预先放进草稿，改名提交失败时
+    /// 记录照样提交，模型看到不成立的“改了名”。现在空闲时记录与改名同一批，失败时两者都不在；忙时记录照
+    /// `RecordLocalCommand` 留到收尾，那时改名已经成立。
+    pub(crate) async fn rename(
+        &mut self,
+        command: CommandId,
+        title: String,
+        record: Option<LocalCommandRecord>,
+    ) -> Ack {
         let fact = Fact::TitleChanged {
             title: title.clone(),
         };
-        if let Err(reason) = self.commit(Some(command), vec![fact]).await {
-            return rejected(reason);
-        }
+        let (now, held) = match record {
+            Some(record) if !self.busy() => (Some(record), None),
+            other => (None, other),
+        };
+        let messages = now.map_or_else(Vec::new, |record| {
+            crate::local_record::record_messages(self.deps.ids.as_ref(), &record)
+        });
+        let appended = match self.append(Some(command), messages, vec![fact]).await {
+            Ok(appended) => appended,
+            Err(reason) => return rejected(reason),
+        };
         self.titles.mark_custom();
         self.meta.title.clone_from(&title);
         self.log.append(KernelEvent::TitleChanged { title });
+        self.after_commit(appended).await;
+        self.held_records.extend(held);
         accepted()
     }
 }

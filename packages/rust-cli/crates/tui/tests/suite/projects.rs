@@ -1,17 +1,15 @@
-//! ← 项目页（修复线 F29，docs/specs/rust-cli/tui-panels.md §2）：所有项目的会话按工作目录分组（当前项目在前）、
-//! 筛选、`/` 搜索、`r` 改名、`n` 在别的项目新建、enter 切到别的项目的会话（信任检查），esc 关闭。
+//! ←：所有文件夹的会话列表（以前的项目页，tui-kit.md §4.3）：最新的在上，细节行写会话的文件夹；⏎ 别的文件夹的会话先问
+//! 在哪里打开，再做信任检查。
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyModifiers};
-use rust_cli_kernel_api::ids::SessionId;
-use rust_cli_kernel_api::store::SessionStore;
 use rust_cli_kernel_api::testing::{MemoryStore, text_response};
 
 use super::sessions_seed::{Seed, Trust, seed, services};
 use super::support::{GatedModel, Setup, with_ui};
 
 fn idle(screen: &str, reply: &str) -> bool {
-    screen.contains(reply) && !screen.contains("esc to interrupt")
+    screen.contains(reply) && !screen.contains("esc stop")
 }
 
 const SEEDS: [Seed; 4] = [
@@ -53,36 +51,8 @@ const SEEDS: [Seed; 4] = [
     },
 ];
 
-fn row(screen: &str, text: &str) -> usize {
-    screen
-        .lines()
-        .position(|line| line.contains(text))
-        .unwrap_or_else(|| panic!("no {text:?} on the screen:\n{screen}"))
-}
-
-fn focused(screen: &str) -> String {
-    screen
-        .lines()
-        .find(|line| line.starts_with("› "))
-        .unwrap_or_default()
-        .to_owned()
-}
-
-/// 按 ↓ 直到焦点行含 `text`。
-async fn focus(ui: &mut super::support::Ui, text: &str) {
-    for _ in 0..8 {
-        if focused(&ui.screen()).contains(text) {
-            return;
-        }
-        let before = focused(&ui.screen());
-        ui.key(KeyCode::Down);
-        ui.wait("the focus to move", |s| focused(s) != before).await;
-    }
-    assert!(focused(&ui.screen()).contains(text), "{}", ui.screen());
-}
-
 #[tokio::test(flavor = "multi_thread")]
-async fn left_opens_the_projects_grouped_with_the_current_one_first() {
+async fn left_opens_every_folder_newest_first() {
     let store = Arc::new(MemoryStore::default());
     seed(&store, &SEEDS).await;
     let setup = Setup {
@@ -91,85 +61,54 @@ async fn left_opens_the_projects_grouped_with_the_current_one_first() {
         store,
         ..Setup::default()
     };
-    let model = GatedModel::scripted(vec![text_response(&["first reply"])]);
-    with_ui(model, setup, |mut ui| async move {
-        let screen = ui.wait_for("← for projects · ? for shortcuts").await;
-        assert!(!screen.contains("for agents"), "{screen}");
-        ui.submit("first question");
-        ui.wait("the turn", |s| idle(s, "first reply")).await;
-        ui.key(KeyCode::Left);
-        let screen = ui.wait_for("~/work/lib  2").await;
-        assert!(screen.contains("  Projects"), "{screen}");
-        // 本进程打开着的当前会话是 Ready，只在库里的是 Inactive。
-        assert!(
-            screen.contains("All 5   Needs you 0   Working 0   Ready 1   Inactive 4"),
-            "{screen}"
-        );
-        // 当前项目的组在最前，其余按路径；组内按更新时间从新到旧。
-        assert!(
-            row(&screen, "~/project  2") < row(&screen, "~/work/app  1"),
-            "{screen}"
-        );
-        assert!(
-            row(&screen, "Old here") < row(&screen, "first question (current)"),
-            "{screen}"
-        );
-        assert!(
-            row(&screen, "~/work/app  1") < row(&screen, "~/work/lib  2"),
-            "{screen}"
-        );
-        assert!(
-            row(&screen, "Release notes") < row(&screen, "Bump version"),
-            "{screen}"
-        );
-        // 焦点在当前会话；右侧详情：状态、项目路径、首条输入与最近一条回复（宽度不小于 90 列）。
-        assert!(
-            focused(&screen).contains("first question (current)"),
-            "{screen}"
-        );
-        assert!(focused(&screen).contains("Ready"), "{screen}");
-        assert!(screen.contains("│ Session details"), "{screen}");
-        assert!(screen.contains("│ ~/project"), "{screen}");
-        assert!(screen.contains("│ first reply"), "{screen}");
-        // 当前会话按 enter：只关闭页面并提示（不重新打开）。
-        ui.key(KeyCode::Enter);
-        ui.wait_for("Already viewing first question.").await;
-        ui.key(KeyCode::Left);
-        ui.wait_for("~/work/lib  2").await;
-        assert!(
-            screen.contains(
-                "↑/↓ move · enter open · n new · / search · r rename · o resume · esc back"
-            ),
-            "{screen}"
-        );
-        // `/` 搜索：标题、首条输入、路径的子串，不分大小写。
-        ui.key(KeyCode::Char('/'));
-        ui.wait_for("Search ›").await;
-        ui.type_text("NOTES");
-        let screen = ui.wait_for("Search › NOTES").await;
-        assert!(screen.contains("~/work/lib  1 of 2"), "{screen}");
-        assert!(screen.contains("Release notes"), "{screen}");
-        assert!(!screen.contains("Bump version"), "{screen}");
-        assert!(!screen.contains("Fix login"), "{screen}");
-        assert!(screen.contains("enter open · esc cancel"), "{screen}");
-        ui.key(KeyCode::Esc);
-        let screen = ui
-            .wait("the search to close", |s| !s.contains("Search ›"))
+    with_ui(
+        GatedModel::scripted(Vec::new()),
+        setup,
+        |mut ui| async move {
+            ui.wait_for("? keys").await;
+            ui.key(KeyCode::Left);
+            let screen = ui.wait_for("Old here").await;
+            assert!(screen.contains("Agent cockpit"), "{screen}");
+            assert!(screen.contains("Type to filter"), "{screen}");
+            assert!(screen.contains("Resting"), "{screen}");
+            let at = |t: &str| {
+                screen
+                    .lines()
+                    .position(|l| l.contains(t))
+                    .unwrap_or_else(|| panic!("no {t:?}:\n{screen}"))
+            };
+            assert!(at("Fix login") < at("Release notes"), "{screen}");
+            assert!(at("Release notes") < at("Bump version"), "{screen}");
+            assert!(at("Bump version") < at("Old here"), "{screen}");
+            // 选中的（最急的、最新的）代理在窗格里：标题写两次，文件夹的路径只在窗格。
+            assert_eq!(screen.matches("Fix login").count(), 2, "{screen}");
+            assert!(screen.contains("~/work/app"), "{screen}");
+            // 点一行选中它，窗格换上它（tui-cockpit.md §3.1）。
+            let row = screen.lines().position(|l| l.contains("Old here")).unwrap();
+            let row = u16::try_from(row).unwrap();
+            let left = crossterm::event::MouseButton::Left;
+            ui.mouse(crossterm::event::MouseEventKind::Down(left), 12, row);
+            ui.mouse(crossterm::event::MouseEventKind::Up(left), 12, row);
+            ui.wait("the pane follows the click", |s| {
+                s.matches("Old here").count() == 2
+            })
             .await;
-        assert!(screen.contains("Bump version"), "{screen}");
-        // tab 切到“需要你”：没有会话。
-        ui.key(KeyCode::Tab);
-        ui.wait_for("No sessions").await;
-        ui.key(KeyCode::Esc);
-        ui.wait("the page to close", |s| !s.contains("tab/⇧tab filter"))
-            .await;
-    })
+            // 打字只进草稿：`/` 不开命令架（它匹配路径，四个都留下）；esc 先清词，再回去。
+            ui.type_text("/");
+            ui.wait_for("4 of 4 match").await;
+            ui.key(KeyCode::Esc);
+            ui.wait_for("4 resting").await;
+            ui.key(KeyCode::Esc);
+            ui.wait("back at the transcript", |s| !s.contains("Agent cockpit"))
+                .await;
+        },
+    )
     .await;
 }
 
-/// enter 打开别的项目的会话：那个目录未信任时先问；拒绝回到项目页，同意后切过去（会话自己的工作目录）。
+/// 别的文件夹的会话：先问在哪里打开，再做信任检查；`No, exit` 只取消这次切换（tui-panels.md D13）。
 #[tokio::test(flavor = "multi_thread")]
-async fn enter_switches_to_a_session_of_another_project_after_the_trust_check() {
+async fn enter_switches_to_a_session_of_another_folder_after_the_trust_check() {
     let store = Arc::new(MemoryStore::default());
     seed(&store, &SEEDS).await;
     let trust = Arc::new(Trust {
@@ -186,23 +125,39 @@ async fn enter_switches_to_a_session_of_another_project_after_the_trust_check() 
     let model = GatedModel::scripted(vec![text_response(&["continued in lib"])]);
     let checked = trust.clone();
     with_ui(model.clone(), setup, |mut ui| async move {
-        ui.wait_for("← for projects").await;
+        ui.wait_for("? keys").await;
         ui.key(KeyCode::Left);
-        ui.wait_for("~/work/lib  2").await;
-        focus(&mut ui, "Release notes").await;
+        ui.wait_for("Old here").await;
+        ui.type_text("notes");
+        ui.wait("only the notes", |s| {
+            s.contains("Release notes") && !s.contains("Old here")
+        })
+        .await;
+        ui.key(KeyCode::Enter);
+        ui.wait_for("Open “Release notes” in which folder?").await;
         ui.key(KeyCode::Enter);
         ui.wait_for("Accessing workspace").await;
-        // `No, exit` 只取消这次切换（tui-panels.md D13）。
         ui.key(KeyCode::Enter);
-        let screen = ui.wait_for("~/work/lib  2").await;
-        assert!(focused(&screen).contains("Release notes"), "{screen}");
+        ui.wait("the trust ask to close", |s| {
+            !s.contains("Accessing workspace") && !s.contains("Opening “")
+        })
+        .await;
+        ui.key(KeyCode::Left);
+        ui.wait_for("Release notes").await;
+        ui.type_text("notes");
+        ui.wait("only the notes", |s| {
+            s.contains("Release notes") && !s.contains("Old here")
+        })
+        .await;
         ui.key(KeyCode::Enter);
+        ui.wait_for("in which folder?").await;
+        ui.key(KeyCode::Char('1'));
         ui.wait_for("Accessing workspace").await;
         ui.key(KeyCode::Down);
         ui.key(KeyCode::Enter);
         let screen = ui
             .wait("the lib session", |s| {
-                s.contains("notes written") && !s.contains("tab/⇧tab filter")
+                s.contains("notes written") && !s.contains("Accessing workspace")
             })
             .await;
         assert!(screen.contains("write the notes"), "{screen}");
@@ -219,10 +174,10 @@ async fn enter_switches_to_a_session_of_another_project_after_the_trust_check() 
     );
 }
 
-/// 应用内的信任框按一次 ctrl+c：提示行换成“再按一次”，到期（800 ms）后不等下一个键自己换回按键说明，与启动时的信任框
-/// 相同（F138-2）；到期之后再按 esc 照常只取消这次切换。旧代码的提示一直留在画面上。
+/// 应用内的信任框按一次 ^C：最后一行换成 `^C again to exit`，不会过时（与启动前的信任页相同，F138-2 的决定：提示在时
+/// 再按一次就生效，显示与行为一致）；过了以前的到期时间再按 ^C，取消这次切换（同 `No, exit`，不退出进程）。
 #[tokio::test(flavor = "multi_thread")]
-async fn the_in_app_trust_hint_expires_on_its_own() {
+async fn the_in_app_trust_hint_stays_until_the_second_ctrl_c() {
     let store = Arc::new(MemoryStore::default());
     seed(&store, &SEEDS).await;
     let trust = Arc::new(Trust {
@@ -236,103 +191,37 @@ async fn the_in_app_trust_hint_expires_on_its_own() {
         services: services(&trust),
         ..Setup::default()
     };
-    let model = GatedModel::scripted(Vec::new());
-    with_ui(model, setup, |mut ui| async move {
-        ui.wait_for("← for projects").await;
-        ui.key(KeyCode::Left);
-        ui.wait_for("~/work/lib  2").await;
-        focus(&mut ui, "Release notes").await;
-        ui.key(KeyCode::Enter);
-        ui.wait_for("Enter to confirm · Esc to cancel").await;
-        ui.press(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        ui.wait_for("Press Ctrl-C again to exit").await;
-        let screen = ui
-            .wait("the hint to expire", |s| {
-                s.contains("Enter to confirm · Esc to cancel") && !s.contains("Ctrl-C again")
-            })
-            .await;
-        assert!(screen.contains("Accessing workspace"), "{screen}");
-        ui.key(KeyCode::Esc);
-        ui.wait("the projects page", |s| {
-            s.contains("~/work/lib  2") && !s.contains("Accessing workspace")
-        })
-        .await;
-    })
-    .await;
-}
-
-/// `n` 在选中行的项目新建会话；`r` 改名写进库（不是当前会话：直接写存储）。
-#[tokio::test(flavor = "multi_thread")]
-async fn n_starts_a_session_in_another_project_and_r_renames() {
-    let store = Arc::new(MemoryStore::default());
-    seed(&store, &SEEDS).await;
-    let setup = Setup {
-        width: 100,
-        height: 30,
-        store: store.clone(),
-        ..Setup::default()
-    };
-    let model = GatedModel::scripted(vec![text_response(&["hello from app"])]);
-    let session = with_ui(model, setup, |mut ui| async move {
-        ui.wait_for("← for projects").await;
-        ui.key(KeyCode::Left);
-        ui.wait_for("~/work/app  1").await;
-        focus(&mut ui, "Fix login").await;
-        ui.key(KeyCode::Char('r'));
-        ui.wait_for("Rename › Fix login").await;
-        for _ in 0.."login".len() {
-            ui.key(KeyCode::Backspace);
-        }
-        ui.type_text("sign-in");
-        ui.wait_for("Rename › Fix sign-in").await;
-        ui.key(KeyCode::Enter);
-        let screen = ui
-            .wait("the renamed row", |s| {
-                s.contains("Fix sign-in") && !s.contains("Rename ›")
-            })
-            .await;
-        assert!(focused(&screen).contains("Fix sign-in"), "{screen}");
-        ui.key(KeyCode::Char('n'));
-        ui.wait_for("Started a new session in ~/work/app.").await;
-        ui.submit("hi there");
-        ui.wait("the reply", |s| idle(s, "hello from app")).await;
-    })
-    .await;
-    assert_eq!(
-        store.title(&SessionId::new("sess_app")).as_deref(),
-        Some("Fix sign-in")
-    );
-    let id = SessionId::new(session.expect("a new session"));
-    let loaded = store.load(&id).await.unwrap();
-    assert_eq!(loaded.meta.workspace.root.as_str(), "/Users/dev/work/app");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn chinese_labels() {
-    let store = Arc::new(MemoryStore::default());
-    seed(&store, &SEEDS[..1]).await;
-    let setup = Setup {
-        lang: "zh_CN.UTF-8",
-        store,
-        ..Setup::default()
-    };
+    let checked = trust.clone();
     with_ui(
         GatedModel::scripted(Vec::new()),
         setup,
         |mut ui| async move {
-            ui.wait_for("← 查看项目").await;
+            ui.wait_for("? keys").await;
             ui.key(KeyCode::Left);
-            let screen = ui.wait_for("~/project  1").await;
-            assert!(screen.contains("  项目"), "{screen}");
-            assert!(screen.contains("全部 1"), "{screen}");
-            assert!(
-                screen.contains("{n} 新建".replace(['{', '}'], "").as_str()),
-                "{screen}"
-            );
-            ui.key(KeyCode::Char('q'));
-            ui.wait("the page to close", |s| !s.contains("tab/⇧tab 筛选"))
-                .await;
+            ui.wait_for("Old here").await;
+            ui.type_text("notes");
+            ui.wait("only the notes", |s| {
+                s.contains("Release notes") && !s.contains("Old here")
+            })
+            .await;
+            ui.key(KeyCode::Enter);
+            ui.wait_for("in which folder?").await;
+            ui.key(KeyCode::Char('1'));
+            ui.wait_for("Accessing workspace").await;
+            ui.press(KeyCode::Char('c'), KeyModifiers::CONTROL);
+            ui.wait_for("^C again to exit").await;
+            // 等过以前的到期时间（800 ms）：这里断言的是“没有发生”，只能让时间走过去。
+            tokio::time::sleep(std::time::Duration::from_millis(1_200)).await;
+            let screen = ui.screen();
+            assert!(screen.contains("^C again to exit"), "{screen}");
+            assert!(screen.contains("Accessing workspace"), "{screen}");
+            ui.press(KeyCode::Char('c'), KeyModifiers::CONTROL);
+            ui.wait("the switch to be cancelled", |s| {
+                !s.contains("Accessing workspace") && !s.contains("Opening “")
+            })
+            .await;
         },
     )
     .await;
+    assert!(checked.accepted.lock().unwrap().is_empty());
 }

@@ -59,9 +59,17 @@ impl Compactor for FakeCompactor {
 
     /// 用量的 token 是消息数、窗口随模型变（`big` 是 1000，其余 100）：看得出 actor 用的是提交之后的历史与当前模型
     /// （F27）。
-    fn context_usage(&self, history: &[Message], selection: &ModelSelection) -> Option<(u64, u64)> {
+    fn context_usage(
+        &self,
+        history: &[Message],
+        selection: &ModelSelection,
+    ) -> Option<rust_cli_kernel_api::compaction::ContextOccupancy> {
         let window = if selection.model == "big" { 1_000 } else { 100 };
-        Some((history.len() as u64, window))
+        Some(rust_cli_kernel_api::compaction::ContextOccupancy {
+            used_tokens: history.len() as u64,
+            max_tokens: window,
+            compact_at: None,
+        })
     }
 
     async fn compact(
@@ -260,7 +268,8 @@ async fn compact_runs_as_a_turn_and_commits_one_batch() {
     // 修复线 L-A 起另有 `/compact` 记录的 3 条）。
     assert!(events.contains(&KernelEvent::ContextUsage {
         used_tokens: 7,
-        max_tokens: 100
+        max_tokens: 100,
+        compact_at: None,
     }));
     assert!(matches!(
         events.last(),
@@ -348,7 +357,8 @@ async fn the_view_carries_the_context_usage_and_notice() {
         view.context_usage,
         Some(rust_cli_kernel_api::compaction::ContextOccupancy {
             used_tokens: 2,
-            max_tokens: 100
+            max_tokens: 100,
+            compact_at: None,
         })
     );
     assert_eq!(
@@ -398,7 +408,8 @@ async fn changing_the_model_recomputes_the_context() {
             },
             KernelEvent::ContextUsage {
                 used_tokens: 2,
-                max_tokens: 1_000
+                max_tokens: 1_000,
+                compact_at: None,
             }
         ]
     );

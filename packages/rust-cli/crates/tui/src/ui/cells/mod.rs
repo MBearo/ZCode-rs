@@ -2,31 +2,29 @@
 // `view::Row`（docs/specs/rust-cli/tui.md §3）。
 //! transcript 的块：视图里的行归类成块，每个块按当前宽度与紧凑 / 详细模式排版。块不保存状态；
 //! 缓存键由所含行的 id 与版本组成。
-mod agent;
-mod diff;
+pub(crate) mod calls;
 mod duration;
-mod group;
+pub(crate) mod failure;
+pub(crate) mod look;
 mod messages;
 pub(crate) mod patch;
 mod shell;
-mod tools;
 mod words;
+pub(crate) mod work;
 
 use std::time::Duration;
 
-use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span};
+use rust_cli_tui_kit::render::{Style, StyledLine};
 
 use super::i18n::Lang;
-use super::palette::Palette;
-use super::text::{plain, wrap_text};
-use crate::ui::style::{bold, dim};
-use crate::view::{Body, Row, ToolRow, ToolStatus, TurnState};
+use super::ink::Ink;
+use crate::view::{Body, Row, TurnState};
 
 /// 排版所需的上下文；只读。
 #[derive(Clone, Copy)]
 pub struct Ctx<'a> {
-    pub palette: &'a Palette,
+    /// kit 的墨色（tui-kit.md §3.4、§3.8）：块只经它取色。
+    pub ink: &'a Ink,
     pub lang: Lang,
     pub width: usize,
     pub expanded: bool,
@@ -41,6 +39,8 @@ pub struct Ctx<'a> {
     pub mcp_machines: &'a [(String, String)],
     /// 机器服务的快照（F98：远端的调用在等重连中的机器时，工具行写“等待重连”，remote-exec.md §25.4.1）。
     pub machines: &'a [crate::machines::MachineRow],
+    /// 认得的技能（composer 的目录）：用户行里光秃的 `$名字` 是它们之一时画成提及（Puffin `Names.skills`）。
+    pub skills: &'a [crate::ui::skill_mention::MentionSkill],
     /// 流式回复的 markdown 排版缓存（只在 transcript 排流式中的块时给，tui.md §4.1，修复线 F6）。
     pub markdown: Option<&'a crate::ui::markdown::Memo>,
 }
@@ -49,9 +49,7 @@ pub struct Ctx<'a> {
 pub enum Kind {
     User,
     Agent,
-    Reasoning,
-    Tool,
-    /// 工作段：连续的推理与读取类工具（rust-tui.md §8.2.1）。
+    /// 一段工作：连着的思考与工具调用（Puffin `tools::roles`，docs/puffin-tui.md §4.2「工作的收拢」）。
     Group,
     Marker,
     Error,
@@ -70,10 +68,10 @@ pub enum Kind {
 pub struct Cell<'a> {
     pub kind: Kind,
     pub rows: Vec<&'a Row>,
-    /// 工作段在回合运行中、又是回合的最后一个块：成员都结束了也算进行中。
-    pub active: bool,
-    /// 工作段里已结束的推理用时合计（毫秒）。
-    pub thought_ms: u64,
+    /// 一段工作关上了：后面还有别的，或回合不在跑（Puffin `tools::run`）。
+    pub closed: bool,
+    /// 一段工作后面还有别的行（展开时一段读据此关上，Puffin `open_roles`）。
+    pub more_after: bool,
 }
 
 impl<'a> Cell<'a> {
@@ -81,8 +79,8 @@ impl<'a> Cell<'a> {
         Self {
             kind,
             rows,
-            active: false,
-            thought_ms: 0,
+            closed: true,
+            more_after: false,
         }
     }
 
@@ -93,285 +91,215 @@ impl<'a> Cell<'a> {
 
     /// 是否还在变化：这类块每帧都要重新排版（动画）。
     pub fn live(&self) -> bool {
-        self.active || self.rows.iter().any(|row| row.live())
+        (self.kind == Kind::Group && !self.closed) || self.rows.iter().any(|row| row.live())
     }
 }
 
-/// 行 → 块。每个工具调用单独成块；中断的回合在末尾加提示。`group` 为真时（普通视图）连续的推理与
-/// 读取类工具并成工作段，详细视图不并；`mcp`（绑定到远端机器的 MCP 服务器）的调用不并（R5，remote-exec.md §22.8）。
-pub fn build<'a>(
-    rows: impl IntoIterator<Item = &'a Row>,
-    group: bool,
-    mcp: &[(String, String)],
-) -> Vec<Cell<'a>> {
-    /// 回合结束：运行中的回合以工作段结尾时，工作段算进行中；中断的回合加提示。
-    fn close<'a>(cells: &mut Vec<Cell<'a>>, turn: Option<&'a Row>, open: &mut Option<usize>) {
-        let state = turn.and_then(|turn| match turn.body {
-            Body::Turn(state) => Some(state),
-            _ => None,
-        });
-        if let Some(at) = open.take()
-            && state == Some(TurnState::Running)
-        {
-            cells[at].active = true;
-        }
-        if let (Some(turn), Some(TurnState::Interrupted)) = (turn, state) {
-            cells.push(Cell::new(Kind::Interrupted, vec![turn]));
-        }
+/// 一行是工作：思考或工具调用（Puffin `tools::work`）。空白的思考不成条目（Puffin 投影不收它）。
+fn work(row: &Row) -> bool {
+    match &row.body {
+        Body::Tool(_) => true,
+        Body::Reasoning { text, .. } => !text.trim().is_empty(),
+        _ => false,
     }
+}
+
+/// 行 → 块（Puffin `tools::roles`）：连着的思考与工具调用是一段工作，一个块；别的行各自成块；中断的回合在末尾加提示。
+/// 一段工作后面有别的行、或回合不在跑时，它关上了。回合头不显示，也不打断一段工作。以前只有推理与读取类的工具并成
+/// 工作段，每个别的调用单独成块。
+pub fn build<'a>(rows: impl IntoIterator<Item = &'a Row>) -> Vec<Cell<'a>> {
     let rows: Vec<&'a Row> = rows.into_iter().collect();
+    let busy = rows
+        .iter()
+        .rev()
+        .find_map(|row| match row.body {
+            Body::Turn(state) => Some(state == TurnState::Running),
+            _ => None,
+        })
+        .unwrap_or(false);
     let mut cells: Vec<Cell<'a>> = Vec::new();
-    let mut turn: Option<&'a Row> = None;
-    // 正在累积的工作段（cells 里的下标）；别的块出现时结束。
+    // 正在累积的一段工作（cells 里的下标）；别的块出现时结束。
     let mut open: Option<usize> = None;
-    // 上一个回合结束那一行在等几个后台子代理（用户的输入之后清零）：普通视图里相同的等待行只显示第一行（F118）。
-    let mut waiting = 0;
-    for (index, &row) in rows.iter().enumerate() {
+    // 停下的回合：「Stopped.」在它的最后一行之后（Puffin `settle_stop` 接在提交的条目末尾），即下一个回合头之前或末尾。
+    // 以前画在回合头的位置，在你的消息上面。
+    let mut stopped: Option<&'a Row> = None;
+    let stop =
+        |cells: &mut Vec<Cell<'a>>, open: &mut Option<usize>, stopped: &mut Option<&'a Row>| {
+            if let Some(turn) = stopped.take() {
+                if let Some(at) = open.take() {
+                    cells[at].closed = true;
+                }
+                cells.push(Cell::new(Kind::Interrupted, vec![turn]));
+            }
+        };
+    for &row in &rows {
         let kind = match &row.body {
-            Body::Turn(_) => {
-                close(&mut cells, turn, &mut open);
-                turn = Some(row);
+            Body::Turn(state) => {
+                stop(&mut cells, &mut open, &mut stopped);
+                if *state == TurnState::Interrupted {
+                    stopped = Some(row);
+                }
                 continue;
             }
-            // 空的推理不显示，也不打断工作段。
-            Body::Reasoning { text, .. } if group && text.trim().is_empty() => continue,
-            _ if group && group::joins(row, mcp) => {
+            Body::Reasoning { text, .. } if text.trim().is_empty() => continue,
+            _ if work(row) => {
                 let at = *open.get_or_insert_with(|| {
                     cells.push(Cell::new(Kind::Group, Vec::new()));
                     cells.len() - 1
                 });
-                if matches!(row.body, Body::Reasoning { .. }) {
-                    let next = rows.get(index + 1).map(|later| later.created_ms);
-                    cells[at].thought_ms += group::thought_ms(row, next);
-                }
                 cells[at].rows.push(row);
                 continue;
             }
-            Body::User { .. } | Body::Shell { .. } => {
-                waiting = 0;
-                Kind::User
-            }
-            Body::Duration(line) => {
-                let repeated = group && line.waiting_agents > 0 && line.waiting_agents == waiting;
-                waiting = line.waiting_agents;
-                if repeated {
-                    continue;
-                }
-                Kind::Duration
-            }
+            Body::User { .. } | Body::Shell { .. } => Kind::User,
+            Body::Duration(_) => Kind::Duration,
             Body::Agent { .. } => Kind::Agent,
-            Body::Reasoning { .. } => Kind::Reasoning,
-            Body::Tool(_) => Kind::Tool,
-            Body::Marker(_) | Body::Fire(_) => Kind::Marker,
-            Body::Error(_) => Kind::Error,
+            Body::Compact(_) => Kind::Marker,
+            Body::Failure(_) => Kind::Error,
             Body::Output(_) | Body::ShellOutput { .. } => Kind::Output,
-            Body::Notice { .. } | Body::Goal(_) => Kind::Notice,
+            Body::Notice { .. }
+            | Body::Fire(_)
+            | Body::Goal(_)
+            | Body::Returned { .. }
+            | Body::Forked { .. } => Kind::Notice,
             Body::Peer(_) => Kind::Peer,
+            Body::Reasoning { .. } | Body::Tool(_) => unreachable!("工作行在上面"),
         };
-        open = None;
+        if let Some(at) = open.take() {
+            cells[at].more_after = true;
+        }
         cells.push(Cell::new(kind, vec![row]));
     }
-    close(&mut cells, turn, &mut open);
+    stop(&mut cells, &mut open, &mut stopped);
+    if let Some(at) = open {
+        cells[at].closed = !busy;
+    }
     cells
 }
 
-/// 一个块的行。
-pub fn render(cell: &Cell<'_>, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
+/// 落定的动效年龄（kit `tool_row::age` 没有时刻时）。
+pub(crate) fn settled() -> i64 {
+    rust_cli_tui_kit::app::widgets::tool_row::age(None, 0)
+}
+
+/// 一个块的行（kit 的类型，tui-kit.md §3.1）。一段工作要这一帧的动效（[`work::Live`]），由 transcript 画
+/// （`transcript_lines.rs`）；这里按没有动效、关上的样子画（导出、搜索的完整形式）。
+pub fn lines(cell: &Cell<'_>, ctx: &Ctx<'_>) -> Vec<StyledLine> {
     let row = cell.rows[0];
     match (cell.kind, &row.body) {
         (Kind::User, Body::User { text }) => messages::user(text, ctx),
         (Kind::User, Body::Shell { command }) => shell::input(command, ctx),
-        (Kind::Output, Body::ShellOutput { stdout, stderr }) => shell::output(stdout, stderr, ctx),
+        (Kind::Output, Body::ShellOutput { stdout, stderr }) => {
+            shell::output(stdout, stderr, settled(), ctx)
+        }
         (Kind::Agent, Body::Agent { text, streaming }) => messages::agent(text, *streaming, ctx),
-        (Kind::Reasoning, Body::Reasoning { text, .. }) => messages::reasoning(text, ctx),
-        (Kind::Group, _) if ctx.expanded => group::expanded(cell, ctx),
-        (Kind::Group, _) => group::summary(cell, ctx),
-        (Kind::Marker, Body::Marker(marker)) => messages::marker(*marker, ctx),
-        (Kind::Marker, Body::Fire(fire)) => messages::fire(fire, ctx),
-        (Kind::Error, Body::Error(message)) => error_lines(message, ctx),
-        (Kind::Output, Body::Output(text)) => detail_text(text, dim(), ctx),
-        (Kind::Notice, Body::Notice { level, text }) => messages::notice(*level, text, ctx),
+        (Kind::Group, _) => {
+            let where_ = work::where_of(ctx);
+            let still = |_: u64| rust_cli_tui_kit::app::widgets::tool_row::ToolClock::default();
+            let none = |_: u64| None;
+            let live = work::Live {
+                all: &[],
+                where_: &where_,
+                tick: 0,
+                now_ms: ctx.now_ms as f64,
+                clock: &still,
+                head: &none,
+                busy: false,
+                stopping: false,
+                figures: &|_| None,
+                mark: &|_| None,
+                preview: &|_| None,
+                tasks: &[],
+            };
+            let shape = work::Shape {
+                open: ctx.expanded,
+                closed: true,
+                more_after: true,
+                pen: None,
+            };
+            work::lines(&cell.rows, ctx, &live, shape)
+        }
+        (Kind::Marker, Body::Compact(compact)) => messages::compact(compact, ctx),
+        (Kind::Error, Body::Failure(f)) => failure::lines(row, f, &[], None, None, ctx),
+        (Kind::Output, Body::Output(text)) => detail_text(text, ctx.ink.dim(), ctx),
+        (
+            Kind::Notice | Kind::Peer,
+            Body::Notice { .. } | Body::Fire(_) | Body::Peer(_) | Body::Returned { .. },
+        ) => messages::notice_entry(&row.body, ctx, 1.0).unwrap_or_default(),
         (Kind::Notice, Body::Goal(status)) => crate::ui::goal::status_lines(status, ctx),
-        (Kind::Interrupted, _) => vec![detail_line(words::interrupted(ctx.lang), dim())],
-        (Kind::Tool, Body::Tool(tool)) => tools::tool(tool, ctx),
-        (Kind::Peer, Body::Peer(peer)) => messages::peer(peer, ctx),
+        (Kind::Notice, Body::Forked { title }) => look::lay(
+            &rust_cli_tui_kit::app::widgets::rewind_rows::trace_row_said(
+                &ctx.ink.theme,
+                title.as_deref(),
+                crate::ui::i18n_kit::rewind(ctx.lang),
+            ),
+            ctx.width,
+        ),
+        (Kind::Interrupted, _) => messages::interrupted(ctx),
         (Kind::Duration, _) => duration_cell(cell, None, ctx),
         _ => Vec::new(),
     }
 }
 
-/// 普通视图里一个块的行与它能不能点击展开：紧凑形式与详细形式不同的块可以展开；`opened` 时返回
-/// 详细形式。
-pub fn lay_out(cell: &Cell<'_>, ctx: &Ctx<'_>, opened: bool) -> (Vec<Line<'static>>, bool) {
-    let form = |expanded| render(cell, &Ctx { expanded, ..*ctx });
-    let compact = form(false);
-    // 回复的两种形式相同（`messages::agent` 不看 `expanded`），不能展开：不再排第二遍、逐行比较（修复线 F6，
-    // 流式中每个换行都要排一遍整篇回复）。
-    if cell.kind == Kind::Agent {
-        return (compact, false);
+/// 普通视图里一个块的行与它能不能点击展开：一段工作点开时按展开的样子铺（Puffin `opened`）；别的块折叠与展开的样子
+/// 不同时可以展开；`opened` 时返回展开的样子。
+pub fn lay_out(cell: &Cell<'_>, ctx: &Ctx<'_>, opened: bool) -> (Vec<StyledLine>, bool) {
+    let form = |expanded| lines(cell, &Ctx { expanded, ..*ctx });
+    let compact = form(opened && cell.kind == Kind::Group);
+    if matches!(cell.kind, Kind::Agent | Kind::Group) {
+        return (compact, cell.kind == Kind::Group);
     }
-    // 工作段只要有摘要就能展开，不展开时不必排一遍详细形式。
-    let group = cell.kind == Kind::Group;
-    let full = (opened || !group).then(|| form(true));
+    let full = form(true);
     // 比显示的文字，不比片段：两种形式的同一行可能拆成不同的片段。
-    let shown = |lines: &[Line<'_>]| lines.iter().map(plain).collect::<Vec<_>>();
-    let expandable = match &full {
-        _ if group => !compact.is_empty(),
-        Some(full) => !full.is_empty() && shown(full) != shown(&compact),
-        None => false,
-    };
-    match full {
-        Some(full) if opened && expandable => (full, true),
-        _ => (compact, expandable),
+    let shown = |lines: &[StyledLine]| lines.iter().map(StyledLine::plain).collect::<Vec<_>>();
+    let expandable = !full.is_empty() && shown(&full) != shown(&compact);
+    if opened && expandable {
+        (full, true)
+    } else {
+        (compact, expandable)
     }
 }
 
-pub(crate) use agent::duration;
+pub use messages::{Door, error_lines, header, notice_entry, user};
+/// 数字与时长的写法：唯一定义在 kernel-api `metering`（F58）。
+pub(crate) use rust_cli_kernel_api::metering::format_duration as duration;
+pub use shell::{input as shell_input, output as shell_output};
 
-/// 回合结束那一行的块（修复线 F118）：`still_running` 是调用方每次画时现取的 footer pill（transcript 给，别处为 None）。
+/// 回合结束那一行的块（修复线 F118）：`still_running` 是调用方每次画时现取的在跑的命令（`manage::pill`，transcript 给，
+/// 别处为 None）。
 pub(crate) fn duration_cell(
     cell: &Cell<'_>,
     still_running: Option<&str>,
     ctx: &Ctx<'_>,
-) -> Vec<Line<'static>> {
+) -> Vec<StyledLine> {
     match &cell.rows[0].body {
         Body::Duration(line) => duration::lines(line, still_running, ctx),
         _ => Vec::new(),
     }
 }
-pub use messages::{error_lines, header};
 
-/// 流式中的回复块显示的文字（只有这一行的回复块；别的块为 None）。排版只取决于它与排版参数，transcript 的缓存据此
-/// 判断能不能用上一帧排好的行（修复线 F6）。
-pub(crate) fn streaming_reply<'a>(cell: &Cell<'a>) -> Option<&'a str> {
-    match (cell.kind, cell.rows.as_slice()) {
-        (
-            Kind::Agent,
-            [
-                Row {
-                    body:
-                        Body::Agent {
-                            text,
-                            streaming: true,
-                        },
-                    ..
-                },
-            ],
-        ) => Some(messages::visible(text, true)),
-        _ => None,
-    }
+/// 普通视图里相同的等待行只留第一行（修复线 F118，tui-display.md §2.7）：连着两行回合结束那一行都在等同样多的后台子
+/// 代理、中间没有用户的输入（用户行、`!` 命令）时去掉第二行。详细视图不调它。
+pub(crate) fn fold_waits(cells: &mut Vec<Cell<'_>>) {
+    let mut waiting = 0;
+    cells.retain(|cell| match (cell.kind, &cell.rows[0].body) {
+        (Kind::User, _) => {
+            waiting = 0;
+            true
+        }
+        (Kind::Duration, Body::Duration(line)) => {
+            let repeated = line.waiting_agents > 0 && line.waiting_agents == waiting;
+            waiting = line.waiting_agents;
+            !repeated
+        }
+        _ => true,
+    });
 }
-pub(crate) use patch::{diff_lines, patch_rows};
 
 // ── 共用 ──
 
-/// 块的前导圆点。
-pub const BULLET: &str = if cfg!(target_os = "macos") {
-    "⏺"
-} else {
-    "●"
-};
-/// 细节行的前缀与续行缩进（5 列）。
-pub(crate) const DETAIL: &str = "  ⎿  ";
-pub(crate) const INDENT: &str = "     ";
-/// 运行中圆点的闪烁周期。
-const BLINK_MS: u128 = 600;
-
-pub(crate) fn red() -> Style {
-    Style::default().fg(Color::Red)
-}
-
-/// 行首圆点的状态。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Dot {
-    Live,
-    Success,
-    Failed,
-    Idle,
-}
-
-impl From<ToolStatus> for Dot {
-    fn from(status: ToolStatus) -> Self {
-        match status {
-            ToolStatus::Pending | ToolStatus::Approval | ToolStatus::Running => Self::Live,
-            ToolStatus::Success => Self::Success,
-            ToolStatus::Error => Self::Failed,
-            ToolStatus::Cancelled => Self::Idle,
-        }
-    }
-}
-
-/// 行首圆点：运行中与等待审批时 dim 并闪烁，成功绿色，失败红色，其余 dim。
-pub(crate) fn dot(status: Dot, ctx: &Ctx<'_>) -> Span<'static> {
-    let style = match status {
-        Dot::Live => {
-            if !(ctx.elapsed.as_millis() / BLINK_MS).is_multiple_of(2) {
-                return Span::raw(" ");
-            }
-            dim()
-        }
-        Dot::Success => Style::default().fg(Color::Green),
-        Dot::Failed => red(),
-        Dot::Idle => dim(),
-    };
-    Span::styled(BULLET, style)
-}
-
-/// 一条细节行：`  ⎿  文字`。
-pub(crate) fn detail_line(text: String, style: Style) -> Line<'static> {
-    Line::from(vec![Span::styled(DETAIL, dim()), Span::styled(text, style)])
-}
-
-/// 多行细节：第一行 `  ⎿  `，其余缩进 5 列；按宽度换行。
-pub(crate) fn detail_text(text: &str, style: Style, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
-    wrap_text(
-        text,
-        style,
-        ctx.width,
-        &[Span::styled(DETAIL, dim())],
-        &[Span::raw(INDENT)],
-    )
-}
-
-/// 藏起来的行数：`     … +N lines`，dim。
-pub(crate) fn more_lines(hidden: usize, ctx: &Ctx<'_>) -> Line<'static> {
-    Line::from(Span::styled(
-        format!("{INDENT}{}", words::more_lines(ctx.lang, hidden)),
-        dim(),
-    ))
-}
-
-/// 工具行显示的路径：本机的工作区内写相对路径；远端的调用原样（F98，remote-exec.md §25.4.6：远端的路径与本机的工作区
-/// 没有关系。缺陷修复，Docker 试用 L12：以前按本机工作区缩写，远端恰好同名的路径被写成相对的）。
-pub(crate) fn shown_path(path: &str, tool: &ToolRow, ctx: &Ctx<'_>) -> String {
-    if crate::ui::machines::machine_of(&tool.input).is_some() {
-        path.to_owned()
-    } else {
-        relative(path, ctx.workspace)
-    }
-}
-
-/// 工作区内的路径显示为相对路径。
-pub(crate) fn relative(path: &str, workspace: &str) -> String {
-    let base = workspace.trim_end_matches(['/', '\\']);
-    path.strip_prefix(base)
-        .and_then(|rest| rest.strip_prefix(['/', '\\']))
-        .filter(|rest| !rest.is_empty())
-        .map_or_else(|| path.to_owned(), str::to_owned)
-}
-
-/// 输出文字的行：运行中取输出预览，结束后取完整输出。
-pub(crate) fn output_lines(tool: &ToolRow) -> Vec<String> {
-    let text = if tool.status.is_live() {
-        tool.preview.as_str()
-    } else {
-        tool.output.as_str()
-    };
-    let mut lines: Vec<String> = text.trim_end().lines().map(str::to_owned).collect();
-    while lines.first().is_some_and(|line| line.trim().is_empty()) {
-        lines.remove(0);
-    }
-    lines
+/// 多行细节：在竖线后面按正文宽度折行。
+pub(crate) fn detail_text(text: &str, style: Style, ctx: &Ctx<'_>) -> Vec<StyledLine> {
+    look::rail_text(text, style, ctx)
 }
 
 #[cfg(test)]

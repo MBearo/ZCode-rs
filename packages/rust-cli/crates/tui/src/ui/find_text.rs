@@ -1,8 +1,8 @@
 //! 搜索的匹配规则（docs/specs/rust-cli/tui-input.md §2.3.3，修复线 F114）：主界面的搜索模式与详细视图的 `/` 共用。
 //! 不区分大小写（每个字素各自转小写）、按字素算（匹配的两端都在字素边界上）、一行里从左往右不重叠；列按显示宽度算，
 //! 与选区和反色（`selection.rs`）用同一种列。
+use rust_cli_tui_kit::render::width::display_width;
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthChar;
 
 /// 一行文字的搜索索引：每个字素转小写后接起来的文字，与每个字素在里面的字节起点和显示列。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -20,10 +20,8 @@ impl Folded {
         for grapheme in line.graphemes(true) {
             marks.push((text.len(), col));
             text.extend(grapheme.chars().flat_map(char::to_lowercase));
-            col += grapheme
-                .chars()
-                .map(|c| c.width().unwrap_or(0))
-                .sum::<usize>();
+            // 列宽取 kit 的表（tui-kit.md §3.6），与高亮用的 `StyledLine::restyle_cells` 同一张表。
+            col += grapheme.chars().map(display_width).sum::<usize>();
         }
         marks.push((text.len(), col));
         Self { text, marks }

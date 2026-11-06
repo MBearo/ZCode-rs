@@ -1,69 +1,129 @@
 // 改写自 apps/zcode-host/crates/tui/src/ui/bottom.rs（feat/rs 79b6691c55）：排队的消息来自视图；`@` 文件列表按
 // tui-input.md §1.2 重写。
-//! 底部区域的两部分（docs/specs/rust-tui.md §8.3、§8.4）：排队的消息（含下面那一行立即发送的键，
-//! docs/specs/rust-cli/tui.md §5.1.1）、斜杠命令与 `@` 文件的弹出列表。
-//! 状态行见 `status_line.rs`，输入框见 `input_box.rs`，footer 与快捷键帮助见 `footer.rs`。
+//! 输入框的板上、输入行之上的几层（docs/specs/rust-tui.md §8.3、§8.4；样子照 Puffin，docs/specs/rust-cli/tui-kit.md §4.2）：
+//!
+//! - 排队的消息：Puffin 的栈（docs/puffin-tui.md §4.2「发出的消息」的「栈」，`shell/composer.rs` 的 `stack_rows`）——每条
+//!   一行，第 1 列 fg3 的 `›`、第 3 列起 fg2 的文字，换行画成空格，放不下时 `…`；至多四行，再多时最上面一行是 fg3 的
+//!   `N earlier`；全部都等下一轮时最上面一行的槽里写 fg3 的 `next turn`。下面是立即发送的键与暂存的提示（fg3，第 3 列起；tui-kit.md §4.3）。
+//! - 斜杠命令：Puffin 的命令架（§4.2「命令面板（shelf）」，`shell/composer.rs` 的 `shelf_rows`）——第 3 列起 `/名字` 补齐，
+//!   空三格接描述（去掉末尾句号）；选中的名字 brand、描述 fg2，其余名字 fg2、描述 fg3；窗口跟着选中的行，藏起来的用
+//!   `↑ n more` / `↓ n more` 代替最上或最下的一行。条目是旧界面的命令表与 skill（tui.md §6）。
+//! - `@` 文件：Puffin 的 `@` 面板（§4.2「提及（@）」）——组、行与宽终端右边的预览都由 kit 的 `at_panel::rows` 画，组由
+//!   `at_view.rs` 建。以前这里画它的窄版、没有预览。
+//!
+//! 画法：kit 的 [`Element`]，墨色经 `Ink` 的 token。
 use std::time::Duration;
 
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
+use rust_cli_kernel_api::session_api::Delivery;
+use rust_cli_tui_kit::app::element::{Element, single_line};
+use rust_cli_tui_kit::app::widgets::key_hints::{edge, on_row};
+use rust_cli_tui_kit::render::width::string_width;
+use rust_cli_tui_kit::render::{Span, Style};
+use rust_cli_tui_kit::theme::theme::Theme;
 
 use super::app::App;
-use super::commands;
 use super::composer::Popup;
-use super::layout;
-use super::text::{truncate_line, wrap_text};
-use crate::ui::style::dim;
+use super::lines::truncate;
 
-/// 排队的消息：每条 dim 的 `❯ 文字`，续行缩进 2 列，最多 3 行（超出时第 3 行末尾写 `…`）。
-pub fn queue(app: &App, width: usize) -> Vec<Line<'static>> {
-    const LIMIT: usize = 3;
-    let mut lines = Vec::new();
-    let queued = app.view.queue().iter().map(|item| item.text.clone());
-    // 新会话创建期间留下的输入排在后面（tui.md §4.1）。
-    let held = app.held.iter().filter_map(held_text);
+/// 正文从第 3 列起。
+const INDENT: &str = "   ";
+/// 栈至多这么多行（Puffin `STACK_ROWS`）。
+pub const STACK_ROWS: usize = 4;
+
+// ---- 栈 ----
+
+/// 栈的一行（Puffin `stack_rows`）：第 1 列 fg3 的 `›`，第 3 列起 fg2 的文字（一行，换行画成空格，放不下时 `…`）。`label`
+/// 是最上面一行在槽的位置写的说明（fg3）；有它时文字给它与它前面的两格让出地方。
+pub fn stack_row(theme: &Theme, text: &str, width: usize, label: Option<&str>) -> Element {
+    let room = match label {
+        Some(label) => edge(width).saturating_sub(2 + string_width(label)),
+        None => width.saturating_sub(1),
+    };
+    let words = truncate(
+        &text.replace('\n', " "),
+        room.saturating_sub(INDENT.len()).max(1),
+    );
+    let row = single_line(
+        vec![
+            Span::new(" ", Style::DEFAULT),
+            Span::new("›", theme.fg3),
+            Span::new(" ", Style::DEFAULT),
+            Span::new(words, theme.fg2),
+        ],
+        false,
+    );
+    match label {
+        Some(label) => on_row(row, vec![Span::new(label.to_owned(), theme.fg3)]),
+        None => row,
+    }
+}
+
+/// 排队的消息（栈）与它下面的提示。
+pub fn queue(app: &App, width: usize) -> Vec<Element> {
+    let theme = &app.ink.theme;
+    // 栈只放等下一轮的（Puffin ⇥ 推上栈的消息，tui-kit.md §4.0「板」）：插进这一回合的（Delivery::Steer）与新会话创建期间
+    // 留下的输入在 transcript 的尾巴里（`transcript_tail.rs`）。以前它们也在这里。
+    // 还没认领的输入也在这里（`view/in_flight.rs`）：按键的那一帧就上栈，与内核排上之后同一行。
+    let outgoing = app.view.outgoing();
+    let queued = outgoing
+        .iter()
+        .filter(|item| item.delivery == Delivery::Queue)
+        .map(|item| item.text.clone());
     // 等回合结束的 `/clear`、`/resume`（修复线 F38）排在最后。
     let after_turn = app.after_turn.iter().map(|(label, _)| label.clone());
-    for text in queued.chain(held).chain(after_turn) {
-        // 排队的 bash 模式输入写成 `! 命令`（tui-input.md §2.1）。
-        let shown = rust_cli_kernel_api::user_input::display(&text);
-        let text = shown.as_deref().unwrap_or(&text);
-        let mut item = wrap_text(
-            text.trim(),
-            dim(),
-            width.saturating_sub(layout::INDENT),
-            &[Span::styled("❯ ", dim())],
-            &[Span::raw("  ")],
+    let next_turn = true;
+    let items: Vec<String> = queued
+        .chain(after_turn)
+        .map(|text| {
+            // 排队的 bash 模式输入写成 `! 命令`（tui-input.md §2.1）。
+            let shown = rust_cli_kernel_api::user_input::display(&text);
+            // 提及写回打出来的样子（会话的链接是 `@标题`，Puffin `stack_rows` 的 `unlinked`；kit `mention_wire`）。
+            let shown = shown.unwrap_or(text);
+            rust_cli_tui_kit::app::widgets::mention_wire::unlinked(&shown)
+                .trim()
+                .to_owned()
+        })
+        .collect();
+    let mut rows = Vec::new();
+    let shown = if items.len() > STACK_ROWS {
+        &items[items.len() - (STACK_ROWS - 1)..]
+    } else {
+        &items[..]
+    };
+    let earlier = items.len() - shown.len();
+    let label = next_turn.then(|| super::i18n_input::next_turn(app.lang));
+    if earlier > 0 {
+        let row = single_line(
+            vec![
+                Span::new(INDENT, Style::DEFAULT),
+                Span::new(super::i18n_input::earlier(app.lang, earlier), theme.fg3),
+            ],
+            false,
         );
-        if item.len() > LIMIT {
-            item.truncate(LIMIT);
-            if let Some(last) = item.last_mut() {
-                last.spans.push(Span::styled(" …", dim()));
-            }
-        }
-        lines.extend(item);
+        rows.push(match label {
+            Some(label) => on_row(row, vec![Span::new(label, theme.fg3)]),
+            None => row,
+        });
     }
-    // 立即发送的键（修复线 F104，tui.md §5.1.1）：队列里有插话、回合在跑时紧跟在全部队列项之后（暂存的提示之前）。
-    // 整行一种次要色、键不加粗（修复线 F105，用户要求整行灰；原来按按键提示组件把键画成 `key` 样式）。
-    if let Some(hint) = app.send_now_hint() {
-        lines.push(Line::from(Span::styled(
-            format!("  {hint}"),
-            app.palette.secondary(),
-        )));
-    }
+    rows.extend(shown.iter().enumerate().map(|(i, text)| {
+        let top = earlier == 0 && i == 0;
+        stack_row(theme, text, width, label.filter(|_| top))
+    }));
     // ctrl+s 暂存后的提示（tui-input.md §5）。
     if app.composer.has_stash() {
-        lines.push(Line::from(Span::styled(
-            format!("  {}", super::i18n_input::stashed(app.lang)),
-            dim(),
-        )));
+        rows.push(single_line(
+            vec![
+                Span::new(INDENT, Style::DEFAULT),
+                Span::new(super::i18n_input::stashed(app.lang), theme.fg3),
+            ],
+            false,
+        ));
     }
-    lines
+    rows
 }
 
 /// 留下的输入命令要显示的文字（bash 模式写成 `! 命令`）。
-fn held_text(command: &rust_cli_kernel_api::session_api::Command) -> Option<String> {
+pub(crate) fn held_text(command: &rust_cli_kernel_api::session_api::Command) -> Option<String> {
     use rust_cli_kernel_api::message::ContentBlock;
     use rust_cli_kernel_api::session_api::Command;
     match command {
@@ -83,124 +143,24 @@ fn held_text(command: &rust_cli_kernel_api::session_api::Command) -> Option<Stri
     }
 }
 
-/// 弹出列表的行数：max(1, min(max(6, 高度 / 2), 高度 − 3))；不足时用空行补齐，框不跳动。
-pub fn popup_rows(height: usize) -> usize {
-    /// 至少 6 行；给输入框留 3 行。
-    const MIN_ROWS: usize = 6;
-    const RESERVED: usize = 3;
-    (height / 2)
-        .max(MIN_ROWS)
-        .min(height.saturating_sub(RESERVED))
-        .max(1)
-}
+// ---- 命令架与 `@` 面板 ----
 
-fn empty_row(text: &str) -> Line<'static> {
-    Line::from(Span::styled(format!("  {text}"), dim()))
-}
-
-/// 一行条目，按选择列表组件画（docs/specs/rust-cli/tui.md §7.4，修复线 F26）：当前行 `› ` 加底色条、名字粗体；
-/// 其余行名字正常、说明灰色（原来是 `❯ ` 加强调色、其余行整行 dim）。`matched` 是名称里匹配到的字符下标（粗体）。
-fn item(
-    app: &App,
-    chosen: bool,
-    name: &str,
-    matched: &[usize],
-    name_width: usize,
-    description: &str,
-    width: usize,
-) -> Line<'static> {
-    let mut spans = vec![super::pick::pointer(chosen)];
-    for (index, c) in name.chars().enumerate() {
-        let style = if matched.contains(&index) {
-            Style::default().add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-        spans.push(Span::styled(c.to_string(), style));
+/// 斜杠命令或文件的面板（在板上、输入行之上）；返回行与每一行对应的条目下标（不可点的行为 None）。
+pub fn popup(app: &App, width: usize) -> Vec<(Element, Option<usize>)> {
+    match &app.composer.popup {
+        // 命令架的行在 `shelf_rows.rs`（kit 的 `widgets::shelf`，tui-bottom）。
+        Some(Popup::Slash { selected }) => super::shelf_rows::rows(app, *selected),
+        // `@` 面板：Puffin 的组、行与右边的预览（kit `at_panel::rows`，`at_view.rs`）。
+        Some(Popup::Files { .. }) => app.at_lines(width, app.status_motion.tick(), 0),
+        // `$` 面板：kit `skill_panel::rows`（`skill_view.rs`），行不可点。
+        Some(Popup::Skills { .. }) => app
+            .skill_lines(width, app.status_motion.tick())
+            .into_iter()
+            .map(|row| (row, None))
+            .collect(),
+        // 光标在粘贴的帽上：它的预览（`input_box::paste_peek`，tui-bottom）。
+        None => super::input_box::paste_peek(app, width),
     }
-    if !description.is_empty() {
-        spans.push(Span::raw(
-            " ".repeat(name_width.saturating_sub(name.width())),
-        ));
-        spans.push(Span::styled(
-            description.to_owned(),
-            app.palette.secondary(),
-        ));
-    }
-    super::pick::paint(
-        truncate_line(Line::from(spans), width),
-        chosen,
-        &app.palette,
-        width,
-    )
-}
-
-/// 斜杠命令或文件的弹出列表（替换 footer，行数固定）；返回行与第一行对应的条目下标（没有条目时为
-/// None）。
-pub fn popup(app: &App, width: usize, height: usize) -> (Vec<Line<'static>>, Option<usize>) {
-    let rows = popup_rows(height);
-    let (mut lines, first) = match &app.composer.popup {
-        Some(Popup::Slash { selected }) => {
-            let typed = app.composer.area.text().trim_start_matches('/').to_owned();
-            let matches = app.composer.slash_matches();
-            if matches.is_empty() {
-                (vec![empty_row(app.strings.no_matches)], None)
-            } else {
-                // 命令列补到最长名称（含 `/`）+ 5，最多宽度的 40%。
-                const NAME_PAD: usize = 5;
-                const NAME_MAX_PERCENT: usize = 40;
-                let name_width = matches
-                    .iter()
-                    .map(|c| c.name().width() + 1 + NAME_PAD)
-                    .max()
-                    .unwrap_or(0)
-                    .min(width * NAME_MAX_PERCENT / super::quantities::PERCENT as usize);
-                let start = selected.saturating_sub(rows - 1);
-                let lines = matches
-                    .iter()
-                    .enumerate()
-                    .skip(start)
-                    .take(rows)
-                    .map(|(index, command)| {
-                        let name = format!("/{}", command.name());
-                        let matched: Vec<usize> =
-                            commands::matched_positions(command.name(), &typed)
-                                .into_iter()
-                                .map(|i| i + 1)
-                                .collect();
-                        let description = command.description(app.lang);
-                        item(
-                            app,
-                            index == *selected,
-                            &name,
-                            &matched,
-                            name_width,
-                            description,
-                            width,
-                        )
-                    })
-                    .collect();
-                (lines, Some(start))
-            }
-        }
-        Some(Popup::Files { selected }) => {
-            let matches = &app.composer.files.matches;
-            let start = selected.saturating_sub(rows - 1);
-            let lines = matches
-                .iter()
-                .enumerate()
-                .skip(start)
-                .take(rows)
-                .map(|(index, path)| item(app, index == *selected, path, &[], 0, "", width))
-                .collect();
-            (lines, Some(start))
-        }
-        None => (Vec::new(), None),
-    };
-    if !lines.is_empty() {
-        lines.resize(rows, Line::default());
-    }
-    (lines, first)
 }
 
 /// 动画的刷新间隔：扫光约 30 fps。

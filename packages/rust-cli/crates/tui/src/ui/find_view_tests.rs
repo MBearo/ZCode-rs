@@ -1,12 +1,8 @@
 //! 搜索模式的画面（docs/specs/rust-cli/tui-input.md §2.3.2–§2.3.5）：输入框与 footer、计数、高亮、折叠块里的匹配临时
 //! 展开、流式追加与改宽度时找回当前匹配、没有匹配时回到原处、查看子代理时搜子会话、中英文、深浅主题、窄终端。
-use std::time::Instant;
+use std::time::Duration;
 
 use crossterm::event::KeyCode;
-use ratatui::Terminal;
-use ratatui::backend::TestBackend;
-use ratatui::buffer::Buffer;
-use ratatui::style::{Color, Modifier};
 use rust_cli_kernel_api::ids::{MessageId, ToolUseId, TurnId};
 use rust_cli_kernel_api::message::{
     AssistantMessage, ContentBlock, Message, ToolResultContent, UserMessage, UserOrigin,
@@ -14,34 +10,56 @@ use rust_cli_kernel_api::message::{
 use rust_cli_kernel_api::model::BlockDelta;
 use rust_cli_kernel_api::session_api::{KernelEvent, SequencedEvent, TurnOutcome};
 use rust_cli_kernel_api::tool::ToolOutput;
+use rust_cli_tui_kit::render::width::string_width;
+use rust_cli_tui_kit::render::{Color, Style, StyledLine, attr};
 use serde_json::json;
 
 use super::tests::{app, ctrl, key, typed};
 use super::*;
-use crate::ui::palette::{ColorLevel, Palette};
+use crate::ui::probe::{ColorLevel, Colors};
 use crate::ui::transcript::Cache;
 
-/// 当前匹配的底色：深色背景、浅色背景。
-const CURRENT_DARK: Color = Color::Rgb(240, 177, 0);
-const CURRENT_LIGHT: Color = Color::Rgb(208, 135, 0);
+/// 换终端的颜色事实：墨色按新的事实与原来的主题选择重建（同入口探测后建墨色的那条路）。
+fn set_colors(app: &mut App, colors: Colors) {
+    app.ink = crate::ui::ink::Ink::chosen(
+        colors.level,
+        colors.foreground,
+        colors.background,
+        app.ink.choice,
+    );
+}
 
+/// 直接比 `draw::draw` 排出的一屏 kit 的行（tui-kit.md §3.7）。
 struct Screen {
     app: App,
     cache: Cache,
-    terminal: Terminal<TestBackend>,
+    size: (u16, u16),
+    /// 上一次 [`Screen::draw`] 的一屏。
+    lines: Vec<StyledLine>,
     seq: u64,
+    /// 画了几次：每画一次钟前进 1 秒。流式的回复按播放头逐词显示（tui-kit.md §6「流式的回答」），播放头的 tick 取自
+    /// `now - app.started`；钟不走就一直停在笔尖上。
+    frames: u32,
 }
 
 impl Screen {
     fn new(width: u16, height: u16) -> Self {
         let mut app = app();
+        // 报告了前景与背景：kit 的主题是 rich（tui-kit.md §3.4），当前匹配有 `code` 底色。
+        set_colors(
+            &mut app,
+            Colors::new(ColorLevel::TrueColor, Some((0, 0, 0)))
+                .with_foreground(Some((255, 255, 255))),
+        );
         // 有会话：不画新会话的背景标志。
         app.session = Some("sess_find".into());
         Self {
             app,
             cache: Cache::default(),
-            terminal: Terminal::new(TestBackend::new(width, height)).unwrap(),
+            size: (width, height),
+            lines: Vec::new(),
             seq: 0,
+            frames: 0,
         }
     }
 
@@ -57,57 +75,55 @@ impl Screen {
         );
     }
 
-    /// 画一帧，返回每行的文字（宽字符的续格跳过、去掉行尾空白）。
+    /// 排一帧，返回每行的文字（去掉行尾空白）。
     fn draw(&mut self) -> Vec<String> {
-        let (app, cache) = (&mut self.app, &mut self.cache);
-        self.terminal
-            .draw(|frame| crate::ui::draw::draw(frame, app, cache, Instant::now(), 0))
-            .unwrap();
-        let buffer = self.buffer();
-        (0..buffer.area.height)
-            .map(|y| {
-                let row: String = cells(&buffer, y).into_iter().map(|(_, s)| s).collect();
-                row.trim_end().to_owned()
-            })
+        let (width, height) = self.size;
+        self.frames += 1;
+        let now = self.app.started + Duration::from_secs(u64::from(self.frames));
+        let frame = crate::ui::draw::draw(&mut self.app, &mut self.cache, now, 0, width, height);
+        assert_eq!(frame.lines.len(), usize::from(height));
+        self.lines = frame.lines;
+        self.lines
+            .iter()
+            .map(|line| line.plain().trim_end().to_owned())
             .collect()
     }
 
-    fn buffer(&self) -> Buffer {
-        self.terminal.backend().buffer().clone()
-    }
-
     fn resize(&mut self, width: u16, height: u16) {
-        self.terminal.backend_mut().resize(width, height);
-        self.terminal.autoresize().unwrap();
+        self.size = (width, height);
     }
 
     /// 画面上 `needle` 第一次出现处的（列，行）。
-    fn cell(&self, needle: &str) -> Option<(u16, u16)> {
-        let buffer = self.buffer();
-        (0..buffer.area.height).find_map(|y| {
-            let cells = cells(&buffer, y);
-            let row: String = cells.iter().map(|(_, s)| s.as_str()).collect();
+    fn cell(&self, needle: &str) -> Option<(usize, usize)> {
+        self.lines.iter().enumerate().find_map(|(y, line)| {
+            let row = line.plain();
             let at = row.find(needle)?;
-            Some((cells[row[..at].chars().count()].0, y))
+            Some((string_width(&row[..at]), y))
         })
     }
 
-    fn bg(&self, needle: &str, offset: u16) -> Option<Color> {
-        let (x, y) = self.cell(needle)?;
-        Some(self.buffer()[(x + offset, y)].bg)
+    /// 第 `y` 行第 `x` 列的格子的样式。
+    fn style(&self, x: usize, y: usize) -> Option<Style> {
+        let mut col = 0;
+        for span in &self.lines.get(y)?.spans {
+            let w = string_width(&span.text);
+            if x < col + w {
+                return Some(span.style);
+            }
+            col += w;
+        }
+        None
     }
-}
 
-/// 一行的格子：（列，字）；宽字符后面的续格跳过（测试终端只更新变了的格子，续格里可能是上一帧的字）。
-fn cells(buffer: &Buffer, y: u16) -> Vec<(u16, String)> {
-    let mut out = Vec::new();
-    let mut x = 0;
-    while x < buffer.area.width {
-        let symbol = buffer[(x, y)].symbol();
-        out.push((x, symbol.to_owned()));
-        x += unicode_width::UnicodeWidthStr::width(symbol).max(1) as u16;
+    /// 当前匹配的底色：主题的 `code`（tui-kit.md §4.3）。
+    fn current(&self) -> Option<Color> {
+        Some(self.app.ink.theme.code)
     }
-    out
+
+    fn bg(&self, needle: &str, offset: usize) -> Option<Color> {
+        let (x, y) = self.cell(needle)?;
+        Some(self.style(x + offset, y)?.bg_color())
+    }
 }
 
 fn user(id: &str, text: &str) -> Message {
@@ -200,8 +216,12 @@ fn conversation(screen: &mut Screen) {
     screen.event(finished());
 }
 
-fn input_row(lines: &[String]) -> Option<&String> {
-    lines.iter().find(|line| line.starts_with("⌕ "))
+/// 搜索模式的输入行：第 1 列是 `⌕`（Puffin 输入行 `›` 的位置，tui-kit.md §4.3）。
+fn input_row(lines: &[String]) -> Option<&str> {
+    lines
+        .iter()
+        .find(|line| line.starts_with(" ⌕ "))
+        .map(String::as_str)
 }
 
 #[test]
@@ -209,9 +229,9 @@ fn the_search_box_counts_and_highlights_and_esc_restores() {
     let mut screen = Screen::new(80, 24);
     conversation(&mut screen);
     let before = screen.draw();
-    // Bash 并进工作段，折成一行摘要。
+    // Bash 并进一段工作，收成一句（Puffin 的收拢）。
     assert!(
-        before.iter().any(|l| l.contains("Ran 1 shell command")),
+        before.iter().any(|l| l.contains("✓ Ran 1 command")),
         "{before:#?}"
     );
     assert!(
@@ -220,27 +240,30 @@ fn the_search_box_counts_and_highlights_and_esc_restores() {
     );
     typed(&mut screen.app, "//");
     let lines = screen.draw();
-    assert_eq!(
-        input_row(&lines).map(String::as_str),
-        Some("⌕ Search the transcript")
-    );
+    assert_eq!(input_row(&lines), Some(" ⌕  Search the transcript"));
     assert!(
         lines
             .iter()
-            .any(|l| l.contains("↑↓ previous/next · enter stop here · esc exit")),
+            .any(|l| l.contains("↑↓ previous/next · ⏎ stop here · esc exit")),
         "{lines:#?}"
     );
-    // 边线是强调色。
-    let buffer = screen.buffer();
-    let (_, row) = screen.cell("⌕ Search").unwrap();
-    assert_eq!(buffer[(0, row - 1)].fg, screen.app.palette.accent);
-    assert_eq!(buffer[(0, row)].fg, screen.app.palette.accent);
+    // `⌕` 是强调色（brand）；plain 主题时板的两条线也是。
+    let (x, row) = screen.cell("⌕").unwrap();
+    let accent = screen.app.ink.accent();
+    assert_eq!(screen.style(x, row).map(Style::fg_color), Some(accent));
+    if !screen.app.ink.theme.rich {
+        assert_eq!(screen.style(0, row - 1).map(Style::fg_color), Some(accent));
+        assert_eq!(screen.style(0, row + 1).map(Style::fg_color), Some(accent));
+    }
     // 输入：先停在离底部最近的一处（回复里），计数在右侧；回复里的那一处是当前匹配的颜色。
     typed(&mut screen.app, "needle");
     let lines = screen.draw();
     let row = input_row(&lines).unwrap();
-    assert!(row.starts_with("⌕ needle") && row.ends_with("2/2"), "{row}");
-    assert_eq!(screen.bg("NEEDLE is", 0), Some(CURRENT_DARK));
+    assert!(
+        row.starts_with(" ⌕ needle") && row.ends_with("2/2"),
+        "{row}"
+    );
+    assert_eq!(screen.bg("NEEDLE is", 0), screen.current());
     assert!(
         !lines.iter().any(|l| l.contains("needle six")),
         "{lines:#?}"
@@ -250,11 +273,11 @@ fn the_search_box_counts_and_highlights_and_esc_restores() {
     let lines = screen.draw();
     assert!(input_row(&lines).unwrap().ends_with("1/2"), "{lines:#?}");
     assert!(lines.iter().any(|l| l.contains("needle six")), "{lines:#?}");
-    assert_eq!(screen.bg("needle six", 0), Some(CURRENT_DARK));
+    assert_eq!(screen.bg("needle six", 0), screen.current());
     let (x, y) = screen.cell("NEEDLE is").unwrap();
-    let cell = &screen.buffer()[(x, y)];
-    assert!(cell.modifier.contains(Modifier::REVERSED));
-    assert_ne!(cell.bg, CURRENT_DARK);
+    let cell = screen.style(x, y).unwrap();
+    assert!(cell.has_attr(attr::REVERSE));
+    assert_ne!(Some(cell.bg_color()), screen.current());
     // 回绕：↑ 到最后一个，↓ 回到第一个。
     key(&mut screen.app, KeyCode::Up);
     assert!(input_row(&screen.draw()).unwrap().ends_with("2/2"));
@@ -301,7 +324,7 @@ fn enter_keeps_the_peeked_block_open() {
     assert!(input_row(&lines).is_none(), "{lines:#?}");
     assert!(lines.iter().any(|l| l.contains("needle six")), "{lines:#?}");
     // 高亮随搜索模式一起去掉。
-    assert_ne!(screen.bg("six", 0), Some(CURRENT_DARK));
+    assert_ne!(screen.bg("six", 0), screen.current());
 }
 
 #[test]
@@ -326,13 +349,9 @@ fn streamed_text_adds_matches_without_moving_the_current_one() {
     let lines = screen.draw();
     // 新的两处算进总数，当前匹配还是第一处。
     assert!(input_row(&lines).unwrap().ends_with("1/3"), "{lines:#?}");
-    assert_eq!(screen.bg("first alpha", 6), Some(CURRENT_DARK));
+    assert_eq!(screen.bg("first alpha", 6), screen.current());
     let (x, y) = screen.cell("third alpha").unwrap();
-    assert!(
-        screen.buffer()[(x + 6, y)]
-            .modifier
-            .contains(Modifier::REVERSED)
-    );
+    assert!(screen.style(x + 6, y).unwrap().has_attr(attr::REVERSE));
 }
 
 #[test]
@@ -371,7 +390,7 @@ fn a_width_change_keeps_the_current_match_and_brings_it_into_view() {
         "{lines:#?}"
     );
     assert!(input_row(&lines).unwrap().ends_with("1/1"), "{lines:#?}");
-    assert_eq!(screen.bg("needle at", 0), Some(CURRENT_DARK));
+    assert_eq!(screen.bg("needle at", 0), screen.current());
     // esc 回到进入前的位置（跟随末尾）。
     key(&mut screen.app, KeyCode::Esc);
     let lines = screen.draw();
@@ -385,26 +404,26 @@ fn a_width_change_keeps_the_current_match_and_brings_it_into_view() {
 #[test]
 fn light_theme_and_chinese() {
     let mut screen = Screen::new(80, 24);
-    screen.app.palette = Palette::new(ColorLevel::TrueColor, Some((255, 255, 255)));
+    set_colors(
+        &mut screen.app,
+        Colors::new(ColorLevel::TrueColor, Some((255, 255, 255))).with_foreground(Some((0, 0, 0))),
+    );
     screen.app.set_lang(Lang::Zh);
     conversation(&mut screen);
     screen.draw();
     typed(&mut screen.app, "//");
     let lines = screen.draw();
-    assert_eq!(
-        input_row(&lines).map(String::as_str),
-        Some("⌕ 搜索对话记录")
-    );
+    assert_eq!(input_row(&lines), Some(" ⌕  搜索对话记录"));
     assert!(
         lines
             .iter()
-            .any(|l| l.contains("↑↓ 上一个/下一个 · enter 停在这里 · esc 退出")),
+            .any(|l| l.contains("↑↓ 上一个/下一个 · ⏎ 停在这里 · esc 退出")),
         "{lines:#?}"
     );
     typed(&mut screen.app, "NEEDLE");
     let lines = screen.draw();
     assert!(input_row(&lines).unwrap().ends_with("2/2"), "{lines:#?}");
-    assert_eq!(screen.bg("NEEDLE is", 0), Some(CURRENT_LIGHT));
+    assert_eq!(screen.bg("NEEDLE is", 0), screen.current());
     typed(&mut screen.app, "zz");
     let lines = screen.draw();
     assert!(
@@ -420,36 +439,31 @@ fn a_narrow_terminal_drops_the_count_and_shows_the_end_of_the_query() {
     screen.draw();
     typed(&mut screen.app, "//needle");
     let lines = screen.draw();
-    let expected = format!("⌕ needle{}2/2", " ".repeat(12));
-    assert_eq!(input_row(&lines), Some(&expected));
+    // 槽的最后一格在第 宽度 − 2 列（kit `key_hints::edge` 是宽度 − 1，不含）。
+    let expected = format!(" ⌕ needle{}2/2", " ".repeat(11));
+    assert_eq!(input_row(&lines), Some(expected.as_str()));
     // 查询比一行还长：只显示末尾，计数让位；光标在查询末尾。
     typed(&mut screen.app, " and a long tail");
     let lines = screen.draw();
     let row = input_row(&lines).unwrap();
     assert!(row.ends_with("a long tail"), "{row}");
-    assert!(
-        unicode_width::UnicodeWidthStr::width(row.as_str()) <= 23,
-        "{row}"
-    );
+    assert!(string_width(row) <= 23, "{row}");
     // footer 的提示截在宽度里。
-    assert!(
-        lines
-            .iter()
-            .all(|l| unicode_width::UnicodeWidthStr::width(l.as_str()) <= 24)
-    );
+    assert!(lines.iter().all(|l| string_width(l) <= 24));
 }
 
 #[test]
-fn the_detail_view_finds_lines_whose_lowercase_is_longer() {
-    // 修复线 F114：以前详细视图跳过“转小写后变长”的行（`İ`），这样的行里什么都搜不到。
+fn the_detailed_look_finds_lines_whose_lowercase_is_longer() {
+    // 修复线 F114：以前详细视图跳过“转小写后变长”的行（`İ`），这样的行里什么都搜不到。详细视图删掉之后（^O 在原地，
+    // tui-kit.md §4.2）同样的行在详细的样子里用 `//` 搜。
     let mut screen = Screen::new(80, 24);
     screen.event(KernelEvent::MessageDone {
         message: user("u1", "İstanbul and needle"),
     });
     screen.draw();
     ctrl(&mut screen.app, 'o');
-    typed(&mut screen.app, "/needle");
-    key(&mut screen.app, KeyCode::Enter);
+    typed(&mut screen.app, "//needle");
     let lines = screen.draw();
-    assert!(lines.last().unwrap().contains("1/1"), "{lines:#?}");
+    let row = input_row(&lines).unwrap_or_default();
+    assert!(row.ends_with("1/1"), "{lines:#?}");
 }

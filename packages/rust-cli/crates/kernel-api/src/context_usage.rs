@@ -42,6 +42,39 @@ pub struct McpToolUsage {
     pub name: String,
     pub server: String,
     pub tokens: u64,
+    /// 延迟加载、还没加载的（算在 `MCP tools (deferred)`，不占上下文）。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deferred: bool,
+}
+
+/// 系统提示的一段（context-usage.md §3.1）：名字是固定的英文（`Core instructions`、`Communication` …）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptSectionUsage {
+    pub name: String,
+    pub tokens: u64,
+}
+
+/// 一个内置工具的定义（列出的或延迟的，context-usage.md §3.1）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolUsage {
+    pub name: String,
+    pub tokens: u64,
+}
+
+/// 消息的一类（context-usage.md §3.1）：`kind` 是固定的英文（`Your messages`、`Replies`、`Thinking`、`Tool calls`、
+/// `Tool results`、`Attachments`、`Summary`）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageUsage {
+    pub kind: String,
+    pub tokens: u64,
+}
+
+/// 一个工具的结果在活动历史里占的（context-usage.md §3.1）：工具名、结果的个数与 token。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolResultUsage {
+    pub tool: String,
+    pub calls: u64,
+    pub tokens: u64,
 }
 
 /// 规则文件（memory files）。`kind` 是 `User`、`Project` 等。
@@ -100,6 +133,18 @@ pub struct ContextUsage {
     pub agents: Vec<AgentUsage>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<SkillUsage>,
+    /// 下面五项是类别的明细（context-usage.md §3.1）：每一项的和等于它的类别（`System prompt`、`System tools`、
+    /// `System tools (deferred)`、`Messages`、`Tool results` 那一类），按估算的比例分摊。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prompt_sections: Vec<PromptSectionUsage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub system_tools: Vec<ToolUsage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deferred_tools: Vec<ToolUsage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub messages: Vec<MessageUsage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_results: Vec<ToolResultUsage>,
 }
 
 impl ContextUsage {

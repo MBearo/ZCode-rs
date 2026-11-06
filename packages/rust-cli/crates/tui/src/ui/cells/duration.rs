@@ -1,14 +1,15 @@
 //! 回合结束那一行（docs/specs/rust-cli/tui-display.md §2.7，修复线 F118）：`✻ <动词> for <用时> · done <时刻>`，后台还有
 //! 在跑的命令时接 ` · <pill> still running`（pill 由调用方每次画时现取）；等后台子代理时整行换成
-//! `Waiting for N background agent(s) to finish`。整行 dim，按宽度折行，续行缩进 2 列。
-use ratatui::style::Modifier;
-use ratatui::text::{Line, Span};
+//! `Waiting for N background agent(s) to finish`。整行 fg3（kit 主题里安静的字；上游是 ratatui 的
+//! DIM，搬进 kit 的 transcript 时换成主题的 fg3，深浅主题各取各的）。位置照 transcript 的网格：`✻` 在第 1 列，文字与续行从
+//! 第 3 列起，按正文宽度折行。
 use rust_cli_base::units;
 use rust_cli_kernel_api::turn_duration::TurnDuration;
+use rust_cli_tui_kit::render::{Span, StyledLine, attr};
 
-use super::{Ctx, dim, duration};
+use super::{Ctx, duration, look};
 use crate::ui::i18n::Lang;
-use crate::ui::text::wrap;
+use crate::ui::lines::wrap;
 
 /// 动词（与对齐对象的清单相同）。
 const VERBS: [&str; 8] = [
@@ -67,8 +68,8 @@ pub(crate) fn lines(
     line: &TurnDuration,
     still_running: Option<&str>,
     ctx: &Ctx<'_>,
-) -> Vec<Line<'static>> {
-    let style = dim();
+) -> Vec<StyledLine> {
+    let style = ctx.ink.theme.fg3;
     let spans = if line.waiting_agents > 0 {
         let count = line.waiting_agents;
         let (before, after) = match ctx.lang {
@@ -83,9 +84,9 @@ pub(crate) fn lines(
             Lang::Zh => ("等待 ", " 个后台代理完成"),
         };
         vec![
-            Span::styled(before, style),
-            Span::styled(count.to_string(), style.add_modifier(Modifier::BOLD)),
-            Span::styled(after, style),
+            Span::new(before, style),
+            Span::new(count.to_string(), style.with_attr(attr::BOLD)),
+            Span::new(after, style),
         ]
     } else {
         let took = duration(line.duration_ms);
@@ -100,13 +101,15 @@ pub(crate) fn lines(
                 Lang::Zh => format!(" · {still} 仍在运行"),
             });
         }
-        vec![Span::styled(text, style)]
+        vec![Span::new(text, style)]
     };
+    // 修复原因：这一行来自没有网格的修复线（F118），合进来时只换了墨色，前缀还是自己写的 `✻ `：记号在第 0 列、文字在第 2 列，
+    // 比工具行靠左一格；折行也按整个屏幕宽，不按正文宽度。这里改用与工具行同一份网格，不再自己写前缀。
     wrap(
         &spans,
-        ctx.width,
-        &[Span::styled("✻ ", style)],
-        &[Span::raw("  ")],
+        look::measure(ctx.width),
+        &look::marked(Span::new("✻", style)),
+        &[Span::plain(look::LEAD)],
     )
 }
 

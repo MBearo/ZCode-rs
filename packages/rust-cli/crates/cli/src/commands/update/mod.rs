@@ -23,7 +23,7 @@ use anyhow::Result;
 use rust_cli_base::{Task, TaskScope};
 use rust_cli_kernel_api::clock::Clock;
 use rust_cli_net::Egress;
-use rust_cli_tui::update::{UpdateChoice, UpdateInfo};
+use rust_cli_tui_ports::update::{UpdateChoice, UpdateInfo};
 
 use crate::commands::flags::Fatal;
 pub(crate) use install::Install;

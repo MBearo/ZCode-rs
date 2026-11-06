@@ -103,15 +103,30 @@ fn the_used_percent_is_the_context_used_formula() {
     let occupancy = ContextOccupancy {
         used_tokens: 66_600,
         max_tokens: 180_000,
+        compact_at: None,
     };
     assert_eq!(occupancy.percent(), 37);
     let event = KernelEvent::ContextUsage {
         used_tokens: 1,
         max_tokens: 2,
+        compact_at: Some(3),
     };
     assert_eq!(
         serde_json::to_value(&event).unwrap(),
-        serde_json::json!({"type": "context_usage", "used_tokens": 1, "max_tokens": 2})
+        serde_json::json!({"type": "context_usage", "used_tokens": 1, "max_tokens": 2, "compact_at": 3})
+    );
+    // 没有自动压缩位置的旧事件与快照照样能读（compact.md §2.3）。
+    let old: KernelEvent = serde_json::from_value(
+        serde_json::json!({"type": "context_usage", "used_tokens": 1, "max_tokens": 2}),
+    )
+    .unwrap();
+    assert_eq!(
+        old,
+        KernelEvent::ContextUsage {
+            used_tokens: 1,
+            max_tokens: 2,
+            compact_at: None,
+        }
     );
 }
 

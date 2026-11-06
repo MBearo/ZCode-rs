@@ -14,8 +14,17 @@ use rust_cli_kernel_api::testing::{
 };
 
 use super::*;
+use rust_cli_kernel_api::default_model::DefaultModel;
 
 fn kernel(store: Arc<MemoryStore>, model: Arc<ScriptedModel>) -> LocalKernel {
+    kernel_with(store, model, selection().into())
+}
+
+fn kernel_with(
+    store: Arc<MemoryStore>,
+    model: Arc<ScriptedModel>,
+    default: DefaultModel,
+) -> LocalKernel {
     LocalKernel::new(
         Ports {
             model,
@@ -26,7 +35,7 @@ fn kernel(store: Arc<MemoryStore>, model: Arc<ScriptedModel>) -> LocalKernel {
             ids: Arc::new(SequentialIds::default()),
         },
         Defaults {
-            selection: selection(),
+            selection: default,
             mode: PermissionMode::Default,
             max_turns: None,
             search_tools: false,
@@ -147,4 +156,51 @@ async fn a_closed_session_leaves_the_kernel_and_reopens_with_a_new_actor() {
         .unwrap();
     assert!(!Arc::ptr_eq(&first, &again));
     again.view().await.unwrap();
+}
+
+/// 工作线 F140（performance.md §12.3）：缺省模型定下之前，建会话与开会话都等着（内核唯一的等待点）；定下后照常。
+#[tokio::test]
+async fn sessions_wait_for_the_default_model_to_settle() {
+    let store = Arc::new(MemoryStore::default());
+    let id = kernel(store.clone(), Arc::new(ScriptedModel::new(Vec::new())))
+        .create_session(CreateSession {
+            id: None,
+            workspace: workspace(),
+            selection: selection(),
+            mode: PermissionMode::Default,
+            plan: false,
+        })
+        .await
+        .unwrap();
+    let (settle, default) = DefaultModel::pending();
+    let late = Arc::new(kernel_with(
+        store,
+        Arc::new(ScriptedModel::new(Vec::new())),
+        default,
+    ));
+    let creating = tokio::spawn({
+        let late = late.clone();
+        async move {
+            late.create_session(CreateSession {
+                id: None,
+                workspace: workspace(),
+                selection: selection(),
+                mode: PermissionMode::Default,
+                plan: false,
+            })
+            .await
+        }
+    });
+    let opening = tokio::spawn({
+        let (late, id) = (late.clone(), id.clone());
+        async move { late.open_session(&id).await.map(|_| ()) }
+    });
+    // 单线程运行时：让出几次，两个任务都已跑到各自的等待点。
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+    assert!(!creating.is_finished() && !opening.is_finished());
+    settle.settle(selection());
+    creating.await.unwrap().unwrap();
+    opening.await.unwrap().unwrap();
 }

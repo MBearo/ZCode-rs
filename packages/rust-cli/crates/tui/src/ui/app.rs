@@ -4,163 +4,27 @@
 //! 以及插在 transcript 里的本地 cell（提示、错误）。不做 IO：按键产生 [`Action`]，由 runner 执行。
 use std::time::Instant;
 
-use rust_cli_kernel_api::ids::{InteractionId, MachineName, MessageId};
-use rust_cli_kernel_api::model::ModelSelection;
-use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::session_api::{Delivery, RewindScope};
+use rust_cli_kernel_api::session_api::Delivery;
 
 use super::app_state::{KeyState, Pointer, Port, Snapshots};
 use super::composer::Composer;
 use super::i18n::{Lang, Strings};
+use super::ink::Ink;
 use super::interaction::Interaction;
-use super::palette::Palette;
+use super::probe::Colors;
 use crate::view::Transcript;
 
-/// runner 要执行的动作（只经内核会话 API）。
-#[derive(Debug, Clone, PartialEq)]
-pub enum Action {
-    /// 发送一条输入；没有会话时先建会话（tui.md §4.1）。
-    Submit {
-        text: String,
-        delivery: Delivery,
-    },
-    /// 带图片的输入（tui-input.md §3）：文字块在前，图片在后。
-    SubmitContent {
-        content: Vec<rust_cli_kernel_api::message::ContentBlock>,
-        delivery: Delivery,
-    },
-    /// ctrl+g、ctrl+x ctrl+e：用外部编辑器编辑输入（tui-input.md §4.1）。
-    ExternalEditor,
-    /// `/memory` 选中的文件：用外部编辑器打开（tui-input.md §4.2）；`display` 是提示里的路径。
-    OpenMemory {
-        path: String,
-        display: String,
-    },
-    /// ctrl+v / alt+v：读剪贴板里的图片（tui-input.md §3.1）。
-    PasteImage,
-    /// 粘贴的文字是图片文件的路径：读出文件，不是图片时把 `text` 当文字粘贴。
-    PasteImagePath {
-        path: String,
-        text: String,
-    },
-    /// bash 模式的输入（tui-input.md §2）。
-    Bash {
-        command: String,
-        delivery: Delivery,
-    },
-    /// ctrl+enter（运行中）：低延迟投递，入队后把前台 Bash 转到后台、不中断（修复线 L-A，tui-input.md §11.1）。
-    SendNow {
-        text: String,
-        delivery: Delivery,
-    },
-    /// ctrl+x ctrl+b（运行中）：前台 Bash 转到后台（修复线 L-A，tui-input.md §11.2）。
-    BackgroundForeground,
-    /// 输入框为空时的立即发送（修复线 F105，tui.md §5.1.1）：只把前台 Bash 转到后台，排着的插话在工具边界并入。
-    DeliverQueued,
-    Interrupt,
-    Resolve {
-        interaction: InteractionId,
-        answer: rust_cli_kernel_api::orchestration::Answer,
-    },
-    /// 批准或拒绝扣住的同伴消息（cross-session.md §2.6）。
-    ResolvePeer {
-        message: String,
-        approve: bool,
-    },
-    SetModel(ModelSelection),
-    /// `/model`、meta+p 的选择：先换模型，被接受后再写成新工作区的默认模型（workspace-trust.md §3.2）。
-    ChooseModel(ModelSelection),
-    SetMode(PermissionMode),
-    /// `/plan`：打开或关掉 plan 开关（修复线 F20）。
-    SetPlan(bool),
-    Compact(Option<String>),
-    /// `/model`：读模型目录后打开列表。
-    OpenModels,
-    /// `/model 名称`：按模型目录解析后切换。
-    PickModel(String),
-    /// `/clear`：离开当前会话，下一次发送建新会话。
-    Clear,
-    /// 复制这段文字（系统剪贴板与 OSC 52，tui-select.md §3.2）。
-    Copy(String),
-    /// 复制鼠标选区：runner 先重画一次，再取选区文字（`clear` 为真时复制后清掉选区）。
-    CopySelection {
-        clear: bool,
-    },
-    /// ctrl+l：清屏并重画。
-    Redraw,
-    /// `/rewind` 或 esc 连按两次：取可选消息后打开选择器（session-lifecycle.md §5.4）。
-    OpenRewind,
-    /// 选择器确认：回退到 `target` 之前；对话被回退时把 `text` 放回输入框。
-    Rewind {
-        target: MessageId,
-        scope: RewindScope,
-        text: String,
-    },
-    /// `/resume`：列出会话后打开选择器。
-    OpenResume,
-    /// 切到这个会话。
-    Resume(String),
-    /// `/rename 名字`：改会话标题（来源记为 custom，docs/specs/rust-cli/titles.md §4）。
-    Rename(String),
-    /// 不带名字的 `/rename`：会话 actor 用模型起名（titles.md §8）。
-    GenerateName,
-    /// `/context [all]`：内核算出上下文用量后打开独立页面（context-usage.md §5.2、tui-panels.md §4）。
-    Context {
-        all: bool,
-    },
-    /// `/locale <值>`：写回配置文件，成功后切换界面语言（tui.md §7.1）。
-    SetLocale(crate::services::UiLocale),
-    /// 浏览器授权登录（tui.md §7.2）。
-    Login(crate::services::Family),
-    /// 取消在途的登录（一条消息）。
-    CancelLogin,
-    /// 保存手工 key（key 不经输入框，不进历史）。
-    ConfigureKey {
-        family: crate::services::Family,
-        key: crate::services::RedactedString,
-    },
-    Logout,
-    /// `/goal` 不带参数：取会话的目标后打开面板（goal.md §6.2）。
-    ShowGoal,
-    /// `/fork`：取可选的用户输入后打开选择器（session-lifecycle.md §6.5.3）。
-    OpenFork,
-    /// 选择器选中一条输入：新会话带到这一轮为止，成功后切过去。
-    Fork {
-        input: MessageId,
-    },
-    Quit,
-    /// L28 的管理命令（docs/specs/rust-cli/tui-display.md）。
-    Manage(super::manage::Manage),
-    /// L30 的面板（docs/specs/rust-cli/tui-panels.md）。
-    Panel(super::panels::Panel),
-    /// ← 项目页与 `/resume` 页（修复线 F29，tui-panels.md §2、tui-manage.md §10）。
-    Projects(super::projects::Request),
-    /// `/machines` 的子命令与列表里的动作（远端执行 R4，remote-exec.md §21.3）：经入口的机器服务。
-    Machines(super::machines::MachineRequest),
-}
+// 动作的类型与滚动的方法在子模块里（文件不过 800 行）；调用方照旧写 `app::Action`。
+mod action;
+mod scroll;
+
+pub use action::Action;
 
 /// 插在 transcript 里的本地 cell（不属于会话事实）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum Local {
     Info(String),
     Error(String),
-    Status(Vec<(String, String)>),
-    /// `/context [all]` 的独立页面（context-usage.md §5.2、tui-panels.md §4）；`all` 时展开明细。装箱：比其他
-    /// 变体大得多。
-    Context {
-        usage: Box<rust_cli_kernel_api::context_usage::ContextUsage>,
-        all: bool,
-    },
-    /// `/goal` 面板（goal.md §6.2）。
-    Goal(Box<super::goal::Panel>),
-    /// （名称，说明，补充）。
-    Table {
-        title: String,
-        rows: Vec<(String, String, String)>,
-        empty: String,
-    },
-    /// npm 上有更新的版本（docs/specs/rust-cli/update.md §7，F48）：圆角框的提示。
-    Update(Box<crate::update::UpdateInfo>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -170,11 +34,28 @@ pub struct LocalCell {
     pub local: Local,
 }
 
-/// 替换输入框或整个屏幕的视图；类型与它的所有分派在 `overlay.rs`。
+/// 输入框上方的话（Puffin `problems` 的 `notice` 与 `quiet`，各自一行，先失败的后安静的）：本地命令的结果。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Said {
+    /// 一时的失败：` ✗ ` 与 fg2 的一句。
+    pub failed: Option<String>,
+    /// 安静的话：fg3，可以几行（复制的途径说明接在复制的结果下面）。
+    pub quiet: Option<String>,
+}
+
+/// 替换输入框或盖在板上的视图；类型与它属于哪一层在 `overlay.rs`。
 pub use super::overlay::Overlay;
 
+/// 恢复的会话的标题行要的：它开始的时刻（epoch ms）与那一刻本地时间相对 UTC 的分钟数。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Resumed {
+    pub created_ms: u64,
+    pub utc_offset: i32,
+}
+
 pub struct App {
-    pub palette: Palette,
+    /// 墨色（tui-kit.md §3.4）：画面只经它取色。终端的颜色事实与 `theme.json` 的选择解出。
+    pub ink: Ink,
     pub lang: Lang,
     pub strings: &'static Strings,
     /// 会话的视图；没有会话时是新会话的草稿（模型与模式）。
@@ -183,19 +64,25 @@ pub struct App {
     pub session: Option<String>,
     /// 正在创建会话（第一次发送）。
     pub creating: bool,
+    /// 入口的缺省模型还没定下（在后台取模型目录，performance.md §12.3）：留下的消息说等 agent，不说等接上模型。
+    pub model_pending: bool,
     /// 创建期间的发送（tui.md §4.1）：会话打开、第一条发出后按顺序发给内核；显示在排队的输入后面。
     pub held: Vec<rust_cli_kernel_api::session_api::Command>,
-    /// 界面层完成的本地命令的记录（`/effort`、`/plan` 等，修复线 L-A，tui-manage.md §11）：runner 每轮取走。
+    /// 界面层完成的本地命令的记录（`/plan` 等，修复线 L-A，tui-manage.md §11）：runner 每轮取走。
     pub records: Vec<rust_cli_kernel_api::user_command::LocalCommandRecord>,
     /// 运行中的 `/clear`、`/resume`（修复线 F38，tui.md §6；排进队列、不中断）：（显示的文字，动作），回合结束、
     /// 内核队列空了之后按顺序执行；显示在排队的输入后面。
     pub after_turn: Vec<(String, Action)>,
+    /// 正在取回的排队消息（等内核的回执）：回执之前 ⌫ 不再请求（Puffin 的 `taking`）。
+    pub taking: Option<rust_cli_kernel_api::ids::CommandId>,
     pub composer: Composer,
     /// skill 清单第一次到之前提交、当时判定不了的命令（tui.md §6）：清单到了（`commands_arrived`）再提交一次。
     pub held_command: bool,
     pub overlay: Option<Overlay>,
     /// 当前待处理交互的选择状态；交互本身在视图里（旧会话的询问在 `detached` 里）。
     pub interaction: Option<Interaction>,
+    /// 已回答、等离开的请求与每个请求第一次出现的时刻（Puffin `answered`、`ask_seen`，interaction.rs）。
+    pub asks: super::interaction::Asks,
     /// 父会话关闭之后旧会话的询问（按到达顺序，agents.md §4.1.2，工作线 F72）：内核的 `detached_asks` 的投影。
     pub detached: Vec<rust_cli_kernel_api::orchestration::DetachedAsk>,
     /// 同伴消息批准框的焦点（0 拒绝，1 投递）；扣住的消息本身在视图里（cross-session.md §2.6）。
@@ -212,6 +99,14 @@ pub struct App {
     /// 上次排版的 transcript 总行数与可视高度。
     pub transcript_lines: usize,
     pub viewport: usize,
+    /// 上一帧画出的顶行与跟随末尾时正文的行数（`draw` 记下）：滚动从画出的帧算（Puffin `scroll`，docs/puffin-tui.md §4.4）。
+    pub shown_top: usize,
+    pub follow_rows: usize,
+    /// 按了 esc 停下的回合（它的回合头的行 id）：回合真正结束之前笔尖已经消失、字不再落定（Puffin `stop_pending`）。
+    pub stop_pending: Option<u64>,
+    /// ctrl+o：transcript 按详细的样子画（Puffin `details_open`：一段工作展开、思考显示全文、长的消息不剪）。以前 ctrl+o
+    /// 打开占满屏幕的详细视图。
+    pub details_open: bool,
     /// footer 的临时提示与等待第二次按下的按键。
     pub notice: Option<super::notice::Notice>,
     /// 最后一个会话事件到达的时间；状态行据此判断卡住。
@@ -220,30 +115,93 @@ pub struct App {
     pub home: Option<String>,
     pub version: String,
     pub started: Instant,
+    /// 新会话的背景标志与它的按压（tui.md §7.3）。
+    pub mark: super::logo::Mark,
     /// 输入框文字区的宽度（上下移动与折行用）；每帧由绘制更新。
     pub composer_width: usize,
     /// rewind 选择器的条目（打开时由 runner 填入）。
     pub rewind: Vec<super::rewind::Entry>,
+    /// 挑选回退的点（docs/puffin-tui.md §4.2「回退（/rewind）」，`rewind_pick.rs`）：不挑选时为 None。
+    pub picking: Option<super::rewind_pick::Picking>,
+    /// esc 连按两次要开始挑选：回退的点到了（`open_rewind`）就在最后一个点上挑，不开列表。
+    pub picking_wanted: bool,
     /// `/memory` 列出的文件（入口给出，tui-input.md §4.2）。
     pub memory_files: Vec<crate::services::MemoryFile>,
-    /// 主题的当前值（配置的 `ui.theme` 或 `/theme` 选的，tui-manage.md §2.1）与启动时探测到的终端背景
-    /// （`auto` 用它）。
-    pub theme: crate::services::UiTheme,
-    pub terminal_background: Option<super::palette::Rgb>,
     /// 终端通知的计时（tui-manage.md §5）。
     pub notify: super::notify::Notify,
+    /// 程序状态（OSC 7501）的界面状态（tui-manage.md §5.4）。
+    pub program_status: super::program_status::ProgramStatus,
     /// 提问框的空闲计时（tools-more.md §1.1，工作线 F72）。
     pub afk: super::afk::Afk,
+    pub(super) dock: super::agents_dock::DockSeen, // 见过在跑的顶层后台子代理（agents_dock.rs）
+    pub(super) line_seen: super::task_line::LineSeen, // 任务行出现与记号变化的时刻（task_line.rs）
+    /// 任务卡上次看的种类（tui-tasks.md §3.1）：再打开时落在这里。
+    pub task_kind: Option<super::task_card::TaskKind>,
     /// 正在查看的子代理（只读）。
     pub viewing: Option<super::agents::Viewing>,
-    /// footer 下面获得焦点的东西（pill 或子代理列表）。
-    pub focus: Option<super::agents::Focus>,
-    /// 新会话的背景标志（tui.md §7.3，修复线 F26）：这一帧画在哪里与最近一次点击。
-    pub logo: super::logo::Logo,
-    /// 启动时要打开已有会话：“有新版本”的提示在第一次切换后移到新视图的顶上（docs/specs/rust-cli/update.md §7）。
-    pub update_carry: Option<crate::update::UpdateInfo>,
+    /// npm 上有更新的版本（docs/specs/rust-cli/update.md §7）：欢迎块的版本行尾说 `X is out · zcode update`（Puffin
+    /// `newer_release`）。以前是会话头下面的一块提示，切换会话时搬到新视图的顶上。
+    pub newer_release: Option<String>,
+    /// 会话现在的目标（kit 的形状，cards.rs）：状态栏模式后面的记号与字（kit `goal::status_parts`）与目标的卡说的。runner
+    /// 在接上会话、目标的检查到达与 `/goal` 时从会话取（Puffin 投影的 `goal`）；`goal_met_seen` 是发送时达成的目标的键
+    /// （Puffin `goal_met_seen`：达成的字随下一次发送消失）。
+    pub session_goal: Option<super::cards::SessionGoal>,
+    /// `/usage` 读到的计划、额度与历史（usage_plans.rs）。
+    pub usage_plans: super::usage_plans::UsageUi,
+    /// 上下文的计数：`/stats` 卡的组成与上下文的页唯一的数据源（context_count.rs，tui-panels.md §4.1）。
+    pub context_count: super::context_count::ContextCount,
+    /// 统计的页 Session 标签的事实（MCP、hooks、账号、分支；session_page.rs，tui-panels.md §4.5）：还没问到时 None。
+    pub session_facts: Option<super::session_page::SessionFacts>,
+    /// 本地时间相对 UTC 的分钟数（按时刻）：`/usage` 的日历（runner 按 `Options.clock` 装上）。
+    pub zone: rust_cli_tui_kit::app::widgets::usage::UtcOffset,
+    /// 上一帧的页（`page_frame.rs`）：正文的行数与页的行数；页的键按它滚动（Puffin 按键时取同一几何）。
+    pub page_rows: (usize, usize),
+    /// 驾驶舱记着的分组（启动时读 `puffin-tui/cockpit.json`，⇥ 时写）。
+    pub cockpit_by_folder: bool,
+    /// 别的会话里有消息的组（不是 Rest 的；runner 在页关着时按监听重读，tui-cockpit.md §3.4）：槽的 ← 提示按它数，画的时候
+    /// 才去掉现在的会话。
+    pub cockpit_news: Vec<(String, super::cockpit::Kind)>,
+    /// 这个进程所在的 tmux（驾驶舱的“去那里”比较它，tui-cockpit.md §3.3）。
+    pub tmux_socket: Option<String>,
+    /// 上一帧的屏宽与墙上时间：复制页的键按它重排这一页（`page_copy.rs`，同 `page_rows` 取上一帧的几何）。
+    pub page_at: (usize, u64),
+    /// 上一帧设置页的页（不含输入框与状态栏）：设置页的 ⌃y 复制它（`page_copy.rs`）。
+    pub settings_shown: Vec<rust_cli_tui_kit::render::StyledLine>,
+    /// 刚复制了页：页的槽里是 `Copied the page`，到下一个键（同 Puffin 门道的 `Copied the link`）。
+    pub page_copied: Option<super::session_page::Copied>,
+    /// ^T 时会话里没有任务：卡的位置说一句，到下一个键（tui-tasks.md §3.1，`task_card::open_tasks`）。
+    pub no_tasks: bool,
+    pub goal_met_seen: Option<String>,
+    /// `!` 命令的 shell 的名字（`Services::shell_name`）与这次运行里有没有说过 shell 模式做什么（Puffin `shell_noted`）。
+    pub shell_name: String,
+    /// 在远程 shell 里（`Services::remote_shell`，Puffin `place.remote`）：门道的登录链接整段折出。
+    pub remote_shell: bool,
+    pub shell_noted: bool,
+    /// 恢复的会话（`/resume`）：transcript 的顶上是它的标题与开始的时刻，不是欢迎块（Puffin `header`）。
+    pub resumed: Option<Resumed>,
+    /// `/resume` 列表正在打开的会话上次用的时刻（毫秒，Puffin `switching` 的 `updated_at`）：到了时说 `Last active …`。
+    pub opening: Option<u64>,
+    /// 门道（`doorway.rs`）与它关上时说的接上了什么（欢迎块的第 4 行，这次运行一直在）。
+    pub door: Option<super::doorway::Door>,
+    pub connected: Option<super::doorway::Connected>,
     /// 机器服务的最新快照（远端执行 R4，remote-exec.md §21.2；runner 在服务的变化通知之后重取）：状态行与 `/machines`。
     pub machines: Vec<crate::machines::MachineRow>,
+    /// 连接中的机器从什么时候起在连（Unix 毫秒，按名字）：坞行写连了多久（Puffin `kept.connecting` 的 `since_ms`）。
+    pub machines_since: std::collections::HashMap<String, u64>,
+    /// 输入框上方的一句（[`Said`]）。
+    pub said: Said,
+    /// 开着的设置页（tui-kit.md §4.2「设置」）：正文换成它，输入框是它的搜索。
+    pub settings: Option<super::settings::Settings>,
+    /// 槽说的话与它从什么时候起这么说：槽变了时从那一刻淡入（Puffin `slot_at`，docs/puffin-tui.md §4.2「按键提示（槽）」）。
+    pub slot_seen: Option<(String, Instant)>,
+    /// 输入框里在淡入的 `!`、粘贴的帽与预览（input_motion.rs）。
+    pub bottom_motion: super::input_motion::Motion,
+    /// 状态栏的时钟与现场的速度（status_motion.rs）。
+    pub status_motion: super::status_motion::StatusMotion,
+    /// esc 关上了草稿 `?` 的按键表（草稿再变成打出的 `?` 时打开，Puffin `keys_closed`；draft_layer.rs）。
+    pub keys_closed: bool,
+    /// 已经请 runner 读模型目录、回答还没到（draft_layer.rs `request_models`）。
+    pub models_opening: bool,
     /// 入口注入了机器服务（没有时 `/machines` 提示不可用）。
     pub machines_enabled: bool,
     /// 绑定到远端机器的 MCP 服务器（规范化的服务器名，机器名；R5，remote-exec.md §22.8）：runner 启动时从服务取。
@@ -269,25 +227,28 @@ pub fn pending_of<'a>(
 
 impl App {
     pub fn new(
-        palette: Palette,
+        colors: Colors,
         lang: Lang,
         view: Transcript,
         home: Option<String>,
         version: String,
     ) -> Self {
         Self {
-            palette,
+            ink: colors.ink(),
             lang,
             strings: super::i18n::strings(lang),
             view,
             session: None,
             creating: false,
+            model_pending: false,
             held: Vec::new(),
             records: Vec::new(),
             after_turn: Vec::new(),
+            taking: None,
             composer: Composer::default(),
             overlay: None,
             interaction: None,
+            asks: Default::default(),
             detached: Vec::new(),
             peer_choice: 0,
             local: Vec::new(),
@@ -297,24 +258,60 @@ impl App {
             snapshots: Snapshots::default(),
             transcript_lines: 0,
             viewport: 0,
+            shown_top: 0,
+            follow_rows: 0,
+            stop_pending: None,
+            details_open: false,
             notice: None,
             last_frame: Instant::now(),
             home,
             version,
             started: Instant::now(),
+            mark: Default::default(),
             composer_width: super::layout::DEFAULT_WIDTH,
             rewind: Vec::new(),
+            picking: None,
+            picking_wanted: false,
             held_command: false,
             memory_files: Vec::new(),
-            theme: crate::services::UiTheme::Auto,
-            terminal_background: palette.background,
             notify: super::notify::Notify::default(),
+            program_status: Default::default(),
             afk: super::afk::Afk::default(),
+            dock: super::agents_dock::DockSeen::default(),
+            line_seen: Default::default(),
+            task_kind: None,
             viewing: None,
-            focus: None,
-            logo: super::logo::Logo::default(),
-            update_carry: None,
+            newer_release: None,
+            session_goal: None,
+            usage_plans: Default::default(),
+            context_count: Default::default(),
+            session_facts: None,
+            zone: std::sync::Arc::new(|_| 0),
+            page_rows: (1, 0),
+            cockpit_by_folder: false,
+            cockpit_news: Vec::new(),
+            tmux_socket: None,
+            page_at: (super::layout::DEFAULT_WIDTH, 0),
+            settings_shown: Vec::new(),
+            page_copied: None,
+            no_tasks: false,
+            goal_met_seen: None,
+            shell_name: "sh".to_owned(),
+            remote_shell: false,
+            shell_noted: false,
+            resumed: None,
+            opening: None,
+            door: None,
+            connected: None,
             machines: Vec::new(),
+            machines_since: std::collections::HashMap::new(),
+            said: Said::default(),
+            settings: None,
+            slot_seen: None,
+            bottom_motion: Default::default(),
+            status_motion: Default::default(),
+            keys_closed: false,
+            models_opening: false,
             machines_enabled: false,
             mcp_machines: Vec::new(),
             quit: false,
@@ -341,8 +338,19 @@ impl App {
         }
     }
 
-    /// 是否需要定时重绘（运行中的动画、拖选到边缘、复制提示、临时提示）。
-    pub fn animating(&self) -> bool {
+    /// 新会话的背景标志画不画（tui.md §7.3）：还没有会话（不在建会话，没有留下的输入）、不在查看子代理、不是恢复的会话、
+    /// 门道关着。打字时还在；发出第一条消息就没有；开着的层只是盖住它。
+    pub fn shows_mark(&self) -> bool {
+        self.session.is_none()
+            && !self.creating
+            && self.held.is_empty()
+            && self.viewing.is_none()
+            && self.resumed.is_none()
+            && self.door.is_none()
+    }
+
+    /// 是否需要定时重绘（运行中的动画、拖选到边缘、复制提示、临时提示）。`now` 是这一帧的动画时钟（同 `draw` 的 `now`）。
+    pub fn animating(&self, now: Instant) -> bool {
         let dragging_at_edge = self
             .pointer
             .selection
@@ -352,29 +360,41 @@ impl App {
             .copied
             .as_ref()
             .is_some_and(|(notice, at)| at.elapsed() < notice.duration);
-        // 背景标志只在点击后的约 2 秒里按动画节拍重画，停住后不再定时重画（tui.md §7.3）。查看在跑的子代理时状态行的
+        // 查看在跑的子代理时状态行的
         // spinner 是它的（F112），主会话空闲时也按动画节拍重画。
         let viewed_running = self.viewed_entry().is_some_and(|entry| {
             entry.status == rust_cli_kernel_api::panels::SubagentStatus::Running
         });
         self.running()
             || viewed_running
+            // 背景标志只在画着、按压或亮度还没停下时重画（tui.md §7.3）。
+            || (self.pointer.hits.mark.is_some() && self.mark.moving(now))
             || self.creating
             || self.notice_text().is_some()
             || dragging_at_edge
             || copied
-            || self.logo.animating(Instant::now())
+            || self.slot_fading()
+            || self.settings_moving()
+            || self.cards_fading()
+            || self.bottom_motion.moving()
+            || self.status_motion.moving()
+            // 缺陷修复（twin-harness，2026-10-31）：以前读 `Instant::now()`，孪生里重不重画随机器快慢；改按这一帧的时钟。
+            || self.asks_moving(now)
+            || self.line_moving(now)
+            // `@` 与 `$` 面板的淡入（at_view.rs、skill_view.rs）：以前 `@` 面板不在这里，真终端里淡入停在第一帧。
+            || self.at_moving(self.status_motion.tick())
+            || self.skills_moving(self.status_motion.tick())
+            // 驾驶舱里换组的行与窗格的淡入（cockpit_view.rs）。
+            || self.cockpit_fading(now)
     }
 
-    /// 新会话的背景标志画不画（tui.md §7.3）：还没有会话（也不在建）、输入框为空、没有打开视图、不在查看子代理。
-    pub fn shows_logo(&self) -> bool {
-        self.session.is_none()
-            && !self.creating
-            && self.held.is_empty()
-            && self.composer.is_empty()
-            && self.overlay.is_none()
-            && self.viewing.is_none()
-            && self.pending().is_none()
+    /// 槽在淡入（kit `fade::TICKS` 个 tick）：按动画节拍重画到它落定。
+    pub fn slot_fading(&self) -> bool {
+        self.slot_seen.as_ref().is_some_and(|(_, at)| {
+            at.elapsed().as_millis()
+                < u128::from(rust_cli_tui_kit::app::widgets::playhead::TICK_MS)
+                    * rust_cli_tui_kit::app::widgets::fade::TICKS as u128
+        })
     }
 
     /// 要显示的待处理交互：当前会话的在前，之后是旧会话的询问（按到达顺序，agents.md §4.1.2）。
@@ -401,39 +421,9 @@ impl App {
         }
     }
 
-    /// 视图变化后调用：交互换了就重置选择状态，交互结束就关闭视图。
+    /// 视图变化后调用：交互换了就重置选择状态，交互结束就关闭视图（`interaction_keys.rs` 的 `sync_asks`）。
     pub fn sync_interaction(&mut self, now: Instant) {
-        let Some((id, request)) = self.pending() else {
-            self.interaction = None;
-            return;
-        };
-        if self.interaction.as_ref().is_none_or(|ui| ui.id != *id) {
-            let mut ui = Interaction::new(id.clone(), request, now);
-            ui.mode = self.view.mode();
-            ui.workspace = self.workspace().to_owned();
-            // 远端执行 F98（remote-exec.md §25.4.3，Docker 试用 L4、L5）：远端的调用，“不再询问”写那台机器的工作目录（以前
-            // 写本机的工作区）；MCP 工具的机器来自服务器的绑定（以前询问框不写机器）。
-            if let rust_cli_kernel_api::orchestration::InteractionRequest::Permission {
-                tool,
-                input,
-                machine,
-                ..
-            } = request
-            {
-                if machine.is_primary() {
-                    ui.bound_machine = super::machines::remote_of(tool, input, &self.mcp_machines)
-                        .map(MachineName::new)
-                        .unwrap_or_default();
-                }
-                if let Some(remote) = machine.remote().or(ui.bound_machine.remote()) {
-                    ui.workspace = self
-                        .remote_root(remote)
-                        .unwrap_or_else(|| remote.to_owned());
-                }
-            }
-            ui.origin = self.detached_title(id).map(str::to_owned);
-            self.interaction = Some(ui);
-        }
+        self.sync_asks(now);
     }
 
     /// 把空闲计时的倒计时交给提问框显示（工作线 F72）。
@@ -451,17 +441,27 @@ impl App {
         self.port.scroll = 0;
     }
 
+    /// 本地命令的结果。一行的写在输入框上方安静的一行（Puffin `problems` 的 `quiet`，tui-kit.md §4.0「提示与安静的一行」），
+    /// 下一次发送、下一个命令或 `/clear` 时清掉；多行的（表格、`/status`）照旧是 transcript 里的本地块。
+    /// TODO(kit-k3)：kit 的 notices 落地后改用它。
     pub fn info(&mut self, text: impl Into<String>) {
-        self.push_local(Local::Info(text.into()));
+        let text = text.into();
+        if text.trim_end().contains('\n') {
+            self.push_local(Local::Info(text));
+        } else if !self.settings_say(Ok(text.trim_end())) {
+            // 设置开着时写在页的输入框上方（Puffin `machines_say`），关着时是安静的一行。
+            self.said.quiet = Some(text.trim_end().to_owned());
+        }
     }
 
+    /// 失败的结果：一行的是输入框上方的 ` ✗ ` 与 fg2 的一句（Puffin 一时的失败），多行的照旧进 transcript。
     pub fn error(&mut self, text: impl Into<String>) {
-        self.push_local(Local::Error(text.into()));
-    }
-
-    /// 启动头写的主会话的模型名（footer 写 [`Self::shown`] 的，见 [`selection_label`]）。
-    pub fn model_label(&self) -> Option<String> {
-        selection_label(self.view.selection())
+        let text = text.into();
+        if text.trim_end().contains('\n') {
+            self.push_local(Local::Error(text));
+        } else if !self.settings_say(Err(text.trim_end())) {
+            self.said.failed = Some(text.trim_end().to_owned());
+        }
     }
 
     /// 现在看的是谁的视图（修复线 F112，tui-panels.md §1.7）：查看子代理时是它的只读视图，否则是主会话的。footer 的模型、
@@ -482,29 +482,6 @@ impl App {
                 .as_deref()
                 .map(rust_cli_kernel_api::ids::SessionId::new),
         }
-    }
-
-    /// 内容变长时保持用户正在看的位置（已上滚时）。
-    pub fn content_resized(&mut self, lines: usize) {
-        if self.port.scroll > 0 && lines > self.transcript_lines {
-            self.port.scroll += lines - self.transcript_lines;
-            self.port.new_activity = true;
-        }
-        self.transcript_lines = lines;
-        self.port.scroll = self.port.scroll.min(lines.saturating_sub(self.viewport));
-        if self.port.scroll == 0 {
-            self.port.new_activity = false;
-        }
-    }
-
-    pub fn scroll_by(&mut self, lines: isize) -> Option<Action> {
-        let max = self.transcript_lines.saturating_sub(self.viewport);
-        let next = (self.port.scroll as isize + lines).clamp(0, max as isize) as usize;
-        self.port.scroll = next;
-        if next == 0 {
-            self.port.new_activity = false;
-        }
-        None
     }
 
     /// 离开当前会话（`/clear`）：界面状态回到新会话，模型与模式沿用。
@@ -532,7 +509,6 @@ impl App {
     /// 离开会话（`/clear`、切换会话）：模型、模式与工作区留作新会话的草稿（`/clear` 留在原来的工作目录：
     /// EnterWorktree 与 `/cd` 都改它）；`@` 补全的索引属于旧工作区，丢掉。
     pub fn reset(&mut self) {
-        // 读位置、选区与搜索属于离开的那份 transcript（搜索：F114）。
         self.view = Transcript::new(
             self.view.selection().clone(),
             self.view.execution(),
@@ -541,26 +517,30 @@ impl App {
         self.composer.files = Default::default();
         self.session = None;
         self.interaction = None;
+        self.asks = Default::default();
         self.local.clear();
+        // 读位置（滚动、单独展开、搜索 F114）与两种选区属于离开的那份 transcript。
         self.shown_changed();
+        self.resumed = None;
+        self.stop_pending = None;
         // 离开的会话的任务、后台任务与子代理不再显示；请求统计的在途回执作废（F27）。
         self.snapshots.clear();
+        // 目标属于离开的会话（cards.rs）。
+        self.session_goal = None;
+        // 失败回合的上限按这个视图的行 id 记（usage_back.rs）。
+        self.usage_plans.walls.clear();
+        self.usage_plans.walls_asking.clear();
+        self.goal_met_seen = None;
         self.viewing = None;
-        self.focus = None;
+        // 任务卡属于离开的会话（tui-tasks.md §3.1）。
+        if matches!(self.overlay, Some(Overlay::Tasks(_))) {
+            self.overlay = None;
+        }
         // 切到完全访问的确认框属于离开的会话：作废，不发命令（tui.md §7.8；App 在目标换代时同样作废）。
         if matches!(self.overlay, Some(Overlay::YoloConfirm(_))) {
             self.overlay = None;
         }
     }
-}
-
-/// footer 与启动头写的模型名：`模型 档位`，没有档位时只有模型；模型为空时没有。
-pub fn selection_label(selection: &ModelSelection) -> Option<String> {
-    let model = &selection.model;
-    (!model.is_empty()).then(|| match &selection.reasoning {
-        Some(reasoning) => format!("{model} {reasoning}"),
-        None => model.clone(),
-    })
 }
 
 /// 显示路径：家目录写成 `~`，两种分隔符都认。

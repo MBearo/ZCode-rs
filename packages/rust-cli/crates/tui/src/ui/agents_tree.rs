@@ -21,7 +21,7 @@ pub struct TreeRow<'a> {
     pub parent: Option<usize>,
     /// 后面还有同一有效父代理的行：连接符画 `├`，否则 `└`。
     pub more_siblings: bool,
-    /// `(+N)` 的 N：没驱逐、没隐藏的后代数；查看链上的行为 0。
+    /// `(+N)` 的 N：没驱逐的后代数；查看链上的行为 0。
     pub descendants: usize,
 }
 
@@ -33,12 +33,6 @@ pub struct Forest<'a> {
     passed_ms: u64,
     /// 正在查看的子代理；看主会话时为 None。
     viewing: Option<&'a AgentId>,
-}
-
-/// 隐藏的已完成后台代理：已完成、后台、没停放。保活原因 `agent:` / `bash:` 对应本工程的停放；只带
-/// `flag:idle-window`（缺省不开）或没有保活原因的已完成后台代理都是这一种（tui-panels.md §1.2）。
-fn hidden(entry: &SubagentEntry) -> bool {
-    entry.status == SubagentStatus::Completed && entry.background && !entry.parked
 }
 
 impl<'a> Forest<'a> {
@@ -63,24 +57,12 @@ impl<'a> Forest<'a> {
                 .is_none_or(|ago| ago + self.passed_ms >= KEEP_MS)
     }
 
-    /// 有效父代理：owner 不在快照里或已驱逐 → 顶层；owner 是隐藏的已完成后台代理 → 跳过它看它的 owner。
+    /// 有效父代理：owner 不在快照里或已驱逐 → 顶层；否则就是 owner。
+    /// 2026-10-31（用户决定的任务卡，tui-panels.md §1.2）：以前跳过「隐藏的已完成后台代理」（已完成、后台、没停放，以前的
+    /// 隐藏规则）看它的 owner；Background 面板删掉后任务卡是看它们的唯一入口，所以不再隐藏，它们照常当父代理。
     fn parent(&self, entry: &SubagentEntry) -> Option<&'a SubagentEntry> {
-        let mut seen = HashSet::new();
-        let mut owner = entry.owner.as_ref();
-        while let Some(id) = owner {
-            if !seen.insert(id) {
-                return None;
-            }
-            let found = *self.by_id.get(id)?;
-            if self.evicted(found) {
-                return None;
-            }
-            if !hidden(found) {
-                return Some(found);
-            }
-            owner = found.owner.as_ref();
-        }
-        None
+        let found = *self.by_id.get(entry.owner.as_ref()?)?;
+        (!self.evicted(found)).then_some(found)
     }
 
     fn parent_id(&self, entry: &SubagentEntry) -> Option<&'a AgentId> {
@@ -116,11 +98,11 @@ impl<'a> Forest<'a> {
         depth
     }
 
-    /// `(+N)`：有效祖先里有 `agent` 的条目数（没驱逐、没隐藏）。
+    /// `(+N)`：有效祖先里有 `agent` 的条目数（没驱逐的）。
     fn descendants(&self, agent: &AgentId) -> usize {
         self.entries
             .iter()
-            .filter(|entry| !self.evicted(entry) && !hidden(entry))
+            .filter(|entry| !self.evicted(entry))
             .filter(|entry| {
                 let mut seen = HashSet::new();
                 let mut at = self.parent(entry);
@@ -138,7 +120,7 @@ impl<'a> Forest<'a> {
             .count()
     }
 
-    /// 可见的行：没驱逐；没隐藏或在查看链上；并且是查看对象的直接子代理、与它同一个有效父代理（看主会话
+    /// 可见的行：没驱逐；并且是查看对象的直接子代理、与它同一个有效父代理（看主会话
     /// 时就是顶层），或在查看链上。按有效父代理分组、组内按启动顺序（快照顺序），深度优先展开。
     pub fn rows(&self) -> Vec<TreeRow<'a>> {
         let chain = self.chain();
@@ -151,9 +133,7 @@ impl<'a> Forest<'a> {
             .map(|entry| (entry, self.parent_id(entry)))
             .filter(|(entry, parent)| {
                 let linked = chain.contains(&&entry.agent);
-                !self.evicted(entry)
-                    && (!hidden(entry) || linked)
-                    && (*parent == target || *parent == target_parent || linked)
+                !self.evicted(entry) && (*parent == target || *parent == target_parent || linked)
             })
             .collect();
         let shown: HashSet<&AgentId> = visible.iter().map(|(entry, _)| &entry.agent).collect();
@@ -197,13 +177,5 @@ impl<'a> Forest<'a> {
                 }
             })
             .collect()
-    }
-
-    /// footer 的 `/tasks to see subagents`：有隐藏的已完成后台代理（没驱逐、不在查看链上）。
-    pub fn has_hidden(&self) -> bool {
-        let chain = self.chain();
-        self.entries
-            .iter()
-            .any(|entry| hidden(entry) && !self.evicted(entry) && !chain.contains(&&entry.agent))
     }
 }

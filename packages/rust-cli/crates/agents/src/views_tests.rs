@@ -44,6 +44,7 @@ fn running(agent: &str, root: &str) -> crate::live::LiveAgent {
             mailbox: Vec::new(),
         },
         shown: crate::live::Shown::default(),
+        delivered: Vec::new(),
         fork_prefix: None,
     }
 }
@@ -89,8 +90,10 @@ fn parked_agents_are_marked_in_the_snapshot() {
     child.owner = Some(AgentId::new("agent_p"));
     live.insert(child);
     live.with(|agents| {
-        agents.get_mut(&AgentId::new("agent_p")).unwrap().state =
-            AgentState::Parked(crate::report::Report::default());
+        agents.get_mut(&AgentId::new("agent_p")).unwrap().state = AgentState::Parked {
+            report: crate::report::Report::default(),
+            notified: false,
+        };
     });
     clock.set(5_000);
     let root = SessionId::new("sess_root");
@@ -119,8 +122,10 @@ fn the_tasks_snapshot_reads_the_rows_and_the_background_agents_together() {
     live.insert(foreground);
     live.insert(running("agent_x", "sess_other"));
     live.with(|agents| {
-        agents.get_mut(&AgentId::new("agent_a")).unwrap().state =
-            AgentState::Parked(crate::report::Report::default());
+        agents.get_mut(&AgentId::new("agent_a")).unwrap().state = AgentState::Parked {
+            report: crate::report::Report::default(),
+            notified: false,
+        };
     });
     let root = SessionId::new("sess_root");
     let ids = |snapshot: &TasksSnapshot| {
@@ -538,6 +543,7 @@ async fn the_view_carries_the_subagents_context_and_speed() {
         Some(ContextOccupancy {
             used_tokens: 1_000,
             max_tokens: 10_000,
+            compact_at: None,
         })
     );
     assert_eq!(view.context_notice, ContextNotice::Used { percent: 1 });

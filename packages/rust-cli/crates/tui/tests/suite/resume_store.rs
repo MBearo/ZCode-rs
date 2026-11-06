@@ -61,9 +61,7 @@ fn stored(store: &MemoryStore, id: &str) -> Vec<String> {
 }
 
 fn idle(screen: &str, text: &str) -> bool {
-    screen.contains(text)
-        && !screen.contains("esc to interrupt")
-        && !screen.contains("Type to search")
+    screen.contains(text) && !screen.contains("esc stop") && !screen.contains("› /resume")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -120,9 +118,9 @@ async fn the_startup_page_waits_for_the_first_input() {
         GatedModel::scripted(Vec::new()),
         setup,
         |mut ui| async move {
-            // 被中断的会话活动时间更近，排在第一行（列表显示标题）。
+            // 被中断的会话活动时间更近，排在第一行、启动时选中（Puffin 的列表选最新的别的会话）。
             ui.wait("the session list", |s| {
-                s.contains("Type to search") && s.contains("› ") && s.contains("Cut short")
+                s.contains("› /resume") && s.contains("Cut short")
             })
             .await;
             ui.key(KeyCode::Enter);
@@ -170,4 +168,75 @@ async fn switching_back_and_forth_stores_one_reply() {
         },
     )
     .await;
+}
+
+/// 这个会话的 `TitleChanged`。
+fn titles(store: &MemoryStore, id: &str) -> Vec<String> {
+    store
+        .facts(&SessionId::new(id))
+        .iter()
+        .filter_map(|fact| match fact {
+            Fact::TitleChanged { title } => Some(title.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// 从空白草稿 `/resume <id>`、会话还在读取时 `/rename`：只提示会话还在打开，不改名、不记（titles.md §4）。修复（MR !3465
+/// 评审）：以前切换没有自己的状态，从空白草稿发起时被当作草稿，提示 `Session renamed to:`，切换完成后改名却没有执行。
+#[tokio::test(flavor = "multi_thread")]
+async fn renaming_while_a_resume_from_the_draft_opens_says_it_is_still_opening() {
+    let (store, setup) = setup().await;
+    let gate = store.hold_next_load();
+    let check = store.clone();
+    with_ui(
+        GatedModel::scripted(Vec::new()),
+        setup,
+        |mut ui| async move {
+            ui.wait_for("Ask before changes").await;
+            ui.submit("/resume sess_cut");
+            ui.submit("/rename new-name");
+            let screen = ui.wait_for("The session is still opening").await;
+            assert!(!screen.contains("Session renamed to"), "{screen}");
+            gate.notify_one();
+            let screen = ui
+                .wait("the interrupted session", |s| {
+                    idle(s, "unanswered question")
+                })
+                .await;
+            assert!(!screen.contains("new-name"), "{screen}");
+            ui.settle().await;
+            assert!(titles(&check, "sess_cut").is_empty());
+        },
+    )
+    .await;
+    assert!(titles(&store, "sess_cut").is_empty());
+}
+
+/// 启动时打开（`--resume <id>`）的会话还在读取时 `/rename`：同上，只提示会话还在打开。
+#[tokio::test(flavor = "multi_thread")]
+async fn renaming_while_the_startup_session_opens_says_it_is_still_opening() {
+    let (store, mut setup) = setup().await;
+    setup.startup = rust_cli_tui::Startup::Session("sess_cut".to_owned());
+    let gate = store.hold_next_load();
+    let check = store.clone();
+    with_ui(
+        GatedModel::scripted(Vec::new()),
+        setup,
+        |mut ui| async move {
+            ui.wait_for("Ask before changes").await;
+            ui.submit("/rename new-name");
+            let screen = ui.wait_for("The session is still opening").await;
+            assert!(!screen.contains("Session renamed to"), "{screen}");
+            gate.notify_one();
+            ui.wait("the interrupted session", |s| {
+                idle(s, "unanswered question")
+            })
+            .await;
+            ui.settle().await;
+            assert!(titles(&check, "sess_cut").is_empty());
+        },
+    )
+    .await;
+    assert!(titles(&store, "sess_cut").is_empty());
 }

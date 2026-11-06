@@ -1,48 +1,11 @@
-//! 后台任务（tui-panels.md §3）：pill 的选中、Background 面板的分组与按键、Shell 详情的读取与排版。
-use std::time::Instant;
-
-use crossterm::event::KeyCode;
-use rust_cli_kernel_api::ids::{AgentId, SessionId};
+//! 后台命令（tui-panels.md §3；tui-tasks.md §3.2）：在跑的命令的行、展开的输出的读取（序号与再读）、输出的清洗。画法在
+//! `task_card_tests.rs`。
+use rust_cli_kernel_api::panels::ShellOutput;
 
 use super::*;
-use crate::ui::agents::AgentList;
-use crate::ui::test_support::{app, key};
-
-fn shell(id: &str, command: &str) -> BackgroundEntry {
-    BackgroundEntry::new(
-        id,
-        BackgroundKind::Shell,
-        command,
-        BackgroundStatus::Running,
-    )
-}
-
-fn agent(id: &str) -> SubagentEntry {
-    SubagentEntry {
-        agent: AgentId::new(id),
-        child: SessionId::new(format!("sess_subagent_{id}")),
-        agent_type: "general-purpose".into(),
-        description: "Review code".into(),
-        status: SubagentStatus::Running,
-        background: true,
-        waiting: false,
-        elapsed_ms: 0,
-        ended_ago_ms: None,
-        version: 0,
-        owner: None,
-        activity: None,
-        parked: false,
-        machine: Default::default(),
-    }
-}
-
-/// 行的文字（选中行的底色条补到整行，去掉行尾的空格）。
-fn plain(lines: &[Line<'static>]) -> Vec<String> {
-    lines
-        .iter()
-        .map(|line| crate::ui::text::plain(line).trim_end().to_owned())
-        .collect()
-}
+use crate::ui::i18n::Lang;
+use crate::ui::task_card::TaskKind;
+use crate::ui::task_line::tests::{app, shell};
 
 fn detail(status: BackgroundStatus, lines: &[&str], total: u64) -> ShellDetail {
     ShellDetail {
@@ -57,366 +20,70 @@ fn detail(status: BackgroundStatus, lines: &[&str], total: u64) -> ShellDetail {
     }
 }
 
+/// 只有在跑的命令有行（结束了的与后台子代理不是），按快照的次序；monitor 与 shell 同列（修复线 F117）。
 #[test]
-fn down_selects_the_pill_then_the_agent_list() {
-    let mut app = app();
-    let now = Instant::now();
+fn only_running_commands_have_rows() {
+    let mut app = app(Lang::En);
+    app.snapshots.background = vec![
+        shell("b1", "npm test"),
+        BackgroundEntry {
+            kind: BackgroundKind::Monitor,
+            ..shell("m1", "build log")
+        },
+        BackgroundEntry {
+            status: BackgroundStatus::Completed,
+            ..shell("b2", "ls")
+        },
+        BackgroundEntry {
+            kind: BackgroundKind::Agent,
+            ..shell("agent_a", "Review code")
+        },
+        shell("b3", "cargo watch"),
+    ];
+    let ids: Vec<&str> = app.shell_rows().iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(ids, ["b1", "m1", "b3"]);
+}
+
+/// 展开的输出只收下序号对得上的回复；在跑时请再读，结束了或内核不认识它时不再读。没展开时回复丢掉。
+#[test]
+fn the_peek_keeps_the_latest_read_only() {
+    let mut app = app(Lang::En);
     app.snapshots.background = vec![shell("b1", "npm test")];
-    app.snapshots.agents = AgentList {
-        entries: vec![agent("agent_a")],
-        at: Some(now),
-    };
-    app.on_key(key(KeyCode::Down), now);
-    assert_eq!(app.focus, Some(Focus::Pill));
-    app.on_key(key(KeyCode::Down), now);
-    assert_eq!(app.focus, Some(Focus::Agents(0)));
-    // ↑ 取消；enter 打开面板。
-    app.focus = Some(Focus::Pill);
-    app.on_key(key(KeyCode::Up), now);
-    assert_eq!(app.focus, None);
-    app.on_key(key(KeyCode::Down), now);
-    app.on_key(key(KeyCode::Enter), now);
-    assert!(matches!(app.overlay, Some(Overlay::Background(_))));
-}
-
-/// 修复线 F105（tui-display.md §2.3、tui-panels.md §3.1）：在跑的全是子代理时没有 pill，↓ 直接进子代理列表。
-/// 旧代码先选中写着 `1 local agent` 的 pill。
-#[test]
-fn down_goes_straight_to_the_list_when_only_subagents_run() {
-    let mut app = app();
-    let now = Instant::now();
-    app.snapshots.background = vec![BackgroundEntry {
-        kind: BackgroundKind::Agent,
-        description: "Review code".into(),
-        ..shell("agent_a", "")
-    }];
-    app.snapshots.agents = AgentList {
-        entries: vec![agent("agent_a")],
-        at: Some(now),
-    };
-    app.on_key(key(KeyCode::Down), now);
-    assert_eq!(app.focus, Some(Focus::Agents(0)));
-}
-
-#[test]
-fn the_panel_groups_shells_and_agents() {
-    let mut app = app();
-    let now = Instant::now();
-    app.snapshots.background = vec![shell("b1", "npm test"), shell("b2", "cargo build")];
-    app.snapshots.agents = AgentList {
-        entries: vec![agent("agent_a")],
-        at: Some(now),
-    };
-    app.open_background();
-    let (lines, rows) = app.background_lines(80, 30, now);
-    let text = plain(&lines);
-    assert_eq!(text[1], "  Background");
-    assert_eq!(text[2], "  2 active shells · 1 active agent");
-    assert_eq!(text[4], "  Shells (2)");
-    assert!(
-        text[5].starts_with("› ") && text[5].contains("npm test"),
-        "{text:?}"
-    );
-    assert!(text[5].ends_with("running"), "{text:?}");
-    assert_eq!(text[8], "  Local agents (1)");
-    assert!(text[9].contains("Review code"), "{text:?}");
-    assert_eq!(
-        text.last().unwrap(),
-        "  ↑/↓ to select · Enter to view · x to stop · Esc to close"
-    );
-    assert_eq!(rows, [(5, 0), (6, 1), (9, 2)]);
-    // x 停止焦点项；enter 查看代理（关掉面板）。
-    assert_eq!(
-        app.on_key(key(KeyCode::Char('x')), now),
-        Some(Action::Manage(Manage::StopTask {
-            id: "b1".into(),
-            label: "npm test".into(),
-        }))
-    );
-    app.on_key(key(KeyCode::Down), now);
-    app.on_key(key(KeyCode::Down), now);
-    assert_eq!(
-        app.on_key(key(KeyCode::Enter), now),
-        Some(Action::Panel(Panel::ViewAgent(Some(AgentId::new(
-            "agent_a"
-        )))))
-    );
-    assert!(app.overlay.is_none());
-    // 都没有时：No tasks currently running。
-    app.snapshots.background.clear();
-    app.snapshots.agents = AgentList::default();
-    app.open_background();
-    let text = plain(&app.background_lines(80, 30, now).0);
-    assert_eq!(text[2], "  No tasks currently running");
-}
-
-#[test]
-fn the_shell_detail_keeps_the_latest_read_only() {
-    let mut app = app();
-    let now = Instant::now();
-    app.snapshots.background = vec![shell("b1", "npm test")];
-    app.open_background();
-    assert_eq!(
-        app.on_key(key(KeyCode::Enter), now),
-        Some(Action::Panel(Panel::ReadShell("b1".into())))
-    );
+    assert!(!app.on_shell_detail("b1", 0, Some(detail(BackgroundStatus::Running, &["x"], 1))));
+    app.open_tasks();
+    assert_eq!(app.task_card().unwrap().kind, TaskKind::Commands);
+    app.task_card_mut().unwrap().peek = Some(ShellView::new("b1".into()));
     app.shell_reading("b1", 7);
-    // 旧序号的回复丢弃。
     assert!(!app.on_shell_detail(
         "b1",
         6,
         Some(detail(BackgroundStatus::Running, &["old"], 1))
     ));
-    let lines: Vec<String> = (1..=10).map(|n| format!("line {n}")).collect();
-    let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
-    assert!(app.on_shell_detail("b1", 7, Some(detail(BackgroundStatus::Running, &refs, 42))));
-    let text = plain(&app.background_lines(80, 30, now).0);
-    assert_eq!(text[1], "  Shell details");
-    assert_eq!(text[3], "  Status: running");
-    assert_eq!(text[4], "  Runtime: 1m 23s");
-    assert_eq!(text[5], "  Command: npm test");
-    assert_eq!(text[7], "  Output:");
-    assert!(text[8].starts_with("  ╭─"), "{text:?}");
-    assert!(text[9].starts_with("  │ line 1 "), "{text:?}");
-    assert_eq!(text[20], "  Showing 10 of 42 lines");
+    assert_eq!(app.task_card().unwrap().peek.as_ref().unwrap().last, None);
+    assert!(app.on_shell_detail(
+        "b1",
+        7,
+        Some(detail(BackgroundStatus::Running, &["new"], 1))
+    ));
+    let peek = app.task_card().unwrap().peek.clone().unwrap();
+    assert_eq!(peek.seq, 7);
     assert_eq!(
-        text.last().unwrap(),
-        "  ← to go back · x to stop · Esc to close"
+        peek.last.unwrap().output,
+        ShellOutput::Tail {
+            lines: vec!["new".into()],
+            total: 1
+        }
     );
-    // 内核不再认识它：不再读；状态取通知的终态，没有时是 stopped。
+    assert!(!app.on_shell_detail(
+        "b1",
+        7,
+        Some(detail(BackgroundStatus::Completed, &["done"], 1))
+    ));
     assert!(!app.on_shell_detail("b1", 7, None));
-    let text = plain(&app.background_lines(80, 30, now).0);
-    assert_eq!(text[3], "  Status: stopped");
-    assert_eq!(text.last().unwrap(), "  ← to go back · Esc to close");
-    // ← 回到列表。
-    app.on_key(key(KeyCode::Left), now);
-    let text = plain(&app.background_lines(80, 30, now).0);
-    assert_eq!(text[1], "  Background");
-}
-
-#[test]
-fn output_previews_cover_the_empty_large_and_missing_cases() {
-    let mut app = app();
-    let now = Instant::now();
-    app.snapshots.background = vec![shell("b1", "npm test")];
-    app.open_background();
-    app.on_key(key(KeyCode::Enter), now);
-    app.shell_reading("b1", 1);
-    let text = plain(&app.background_lines(80, 30, now).0);
-    assert!(text.iter().any(|l| l.contains("loading...")), "{text:?}");
-    let mut reply = detail(BackgroundStatus::Running, &[], 0);
-    app.on_shell_detail("b1", 1, Some(reply.clone()));
-    let text = plain(&app.background_lines(80, 30, now).0);
-    assert!(text.iter().any(|l| l.contains("No output yet")), "{text:?}");
-    reply.output = ShellOutput::TooLarge { bytes: 9 };
-    app.on_shell_detail("b1", 1, Some(reply.clone()));
-    let text = plain(&app.background_lines(80, 30, now).0);
-    assert!(
-        text.iter()
-            .any(|l| l.contains("Output too large to preview")),
-        "{text:?}"
-    );
-    reply.output = ShellOutput::Unavailable;
-    reply.status = BackgroundStatus::Completed;
-    assert!(!app.on_shell_detail("b1", 1, Some(reply)));
-    let text = plain(&app.background_lines(80, 30, now).0);
-    assert!(
-        text.iter().any(|l| l.contains("Output unavailable")),
-        "{text:?}"
-    );
-    assert_eq!(text[3], "  Status: completed");
+    assert!(app.task_card().unwrap().peek.as_ref().unwrap().gone);
 }
 
 #[test]
 fn ansi_and_control_characters_are_stripped() {
     assert_eq!(plain_output("\u{1b}[31mred\u{1b}[0m\tx\u{7}"), "red    x");
-}
-
-/// 远端执行 R4（remote-exec.md §21.6）：远端的后台命令与缺省在远端的子代理在名称后面标 `@机器`（强调色），Shell 详情
-/// 多一行机器。
-#[test]
-fn remote_entries_name_their_machine() {
-    let mut app = app();
-    let now = Instant::now();
-    let mut remote = shell("b2", "make data");
-    remote.machine = rust_cli_kernel_api::ids::MachineName::new("dev-a");
-    let mut helper = agent("agent_a");
-    helper.machine = rust_cli_kernel_api::ids::MachineName::new("gpu-1");
-    app.snapshots.background = vec![shell("b1", "npm test"), remote];
-    app.snapshots.agents = AgentList {
-        entries: vec![helper],
-        at: Some(now),
-    };
-    app.open_background();
-    let (lines, _) = app.background_lines(80, 30, now);
-    let text = plain(&lines);
-    assert!(
-        text.iter().any(|row| row.contains(" make data @dev-a ")),
-        "{text:?}"
-    );
-    assert!(
-        text.iter().any(|row| row.contains(" Review code @gpu-1 ")),
-        "{text:?}"
-    );
-    assert!(
-        text.iter()
-            .any(|row| row.contains(" npm test ") && !row.contains('@')),
-        "{text:?}"
-    );
-    let tag = lines
-        .iter()
-        .flat_map(|line| line.spans.iter())
-        .find(|span| span.content == "@dev-a")
-        .unwrap();
-    assert_eq!(tag.style.fg, Some(app.palette.accent));
-    // 焦点移到远端的命令，打开详情。
-    app.on_key(key(KeyCode::Down), now);
-    app.on_key(key(KeyCode::Enter), now);
-    let text = plain(&app.background_lines(80, 30, now).0);
-    assert_eq!(text[3], "  Machine: dev-a");
-    assert!(text[4].starts_with("  Status: "), "{text:?}");
-}
-
-/// 远端执行 F96（remote-exec.md §23.3）：重连中的机器上的条目是那台机器上一份的内容，`@机器` 后面接 dim 的
-/// `· reconnecting` / `· 重连中`。
-#[test]
-fn entries_of_a_reconnecting_machine_are_marked() {
-    let mut app = app();
-    let now = Instant::now();
-    let mut stale = shell("b2", "make data");
-    stale.machine = rust_cli_kernel_api::ids::MachineName::new("dev-a");
-    stale.reconnecting = true;
-    app.snapshots.background = vec![shell("b1", "npm test"), stale];
-    app.open_background();
-    let (lines, _) = app.background_lines(80, 30, now);
-    let text = plain(&lines);
-    assert!(
-        text.iter()
-            .any(|row| row.contains(" make data @dev-a · reconnecting ")),
-        "{text:?}"
-    );
-    assert!(
-        text.iter()
-            .any(|row| row.contains(" npm test ") && !row.contains("reconnecting")),
-        "{text:?}"
-    );
-    let note = lines
-        .iter()
-        .flat_map(|line| line.spans.iter())
-        .find(|span| span.content == " · reconnecting")
-        .unwrap();
-    assert!(
-        note.style
-            .add_modifier
-            .contains(ratatui::style::Modifier::DIM)
-    );
-    app.lang = Lang::Zh;
-    let text = plain(&app.background_lines(80, 30, now).0);
-    assert!(
-        text.iter()
-            .any(|row| row.contains(" make data @dev-a · 重连中 ")),
-        "{text:?}"
-    );
-}
-
-/// F98（remote-exec.md §25.4.5，Docker 试用 L9）：有缺省机器在远端的子代理时，分组名不写“本地”。
-#[test]
-fn the_agent_group_drops_local_for_an_agent_on_a_remote_machine() {
-    for (lang, header) in [(Lang::En, "  Agents (1)"), (Lang::Zh, "  代理 (1)")] {
-        let mut app = app();
-        app.lang = lang;
-        let now = Instant::now();
-        app.snapshots.background = vec![shell("b1", "npm test")];
-        let mut remote = agent("agent_a");
-        remote.machine = rust_cli_kernel_api::ids::MachineName::new("dev-a");
-        app.snapshots.agents = AgentList {
-            entries: vec![remote],
-            at: Some(now),
-        };
-        app.open_background();
-        let (lines, _) = app.background_lines(80, 30, now);
-        let text = plain(&lines);
-        assert!(text.iter().any(|line| line == header), "{text:#?}");
-    }
-}
-
-/// 修复线 F117（tui-panels.md §3.2、§3.3）：monitor 与 shell 同组，名称是它的 description（快照条目的 `description`），
-/// 副标题与组名的数都算上它；详情是 `Monitor details`，命令一行写 `Script:`（第一次读到之前不写）。修前 monitor 的
-/// 名称是命令原文、详情写 `Shell details` 与 `Command:`。
-#[test]
-fn monitors_are_listed_with_shells_under_their_description() {
-    let mut app = app();
-    let now = Instant::now();
-    let monitor = |id: &str, description: &str| BackgroundEntry {
-        kind: BackgroundKind::Monitor,
-        ..shell(id, description)
-    };
-    app.snapshots.background = vec![
-        shell("b1", "npm test"),
-        monitor("b2", "build log"),
-        monitor("s3", "deploy feed"),
-    ];
-    app.snapshots.agents = AgentList {
-        entries: vec![agent("agent_a")],
-        at: Some(now),
-    };
-    app.open_background();
-    let (lines, rows) = app.background_lines(80, 30, now);
-    let text = plain(&lines);
-    assert_eq!(text[2], "  3 active shells · 1 active agent");
-    assert_eq!(text[4], "  Shells (3)");
-    assert!(
-        text[6].contains(" build log ") && text[6].ends_with("running"),
-        "{text:?}"
-    );
-    assert!(text[7].contains(" deploy feed "), "{text:?}");
-    assert_eq!(rows[..3], [(5, 0), (6, 1), (7, 2)]);
-    // x 停止：名称是 description。
-    app.on_key(key(KeyCode::Down), now);
-    assert_eq!(
-        app.on_key(key(KeyCode::Char('x')), now),
-        Some(Action::Manage(Manage::StopTask {
-            id: "b2".into(),
-            label: "build log".into(),
-        }))
-    );
-    assert_eq!(
-        app.on_key(key(KeyCode::Enter), now),
-        Some(Action::Panel(Panel::ReadShell("b2".into())))
-    );
-    app.shell_reading("b2", 1);
-    // 第一次读到之前：标题已是 monitor 的，命令还不知道，不写 `Script:`。
-    let text = plain(&app.background_lines(80, 30, now).0);
-    assert_eq!(text[1], "  Monitor details");
-    assert!(!text.iter().any(|l| l.contains("Script:")), "{text:?}");
-    let reply = ShellDetail {
-        id: "b2".into(),
-        command: "tail -f build.log | grep --line-buffered ERROR".into(),
-        ..detail(BackgroundStatus::Running, &["ERROR one"], 1)
-    };
-    assert!(app.on_shell_detail("b2", 1, Some(reply)));
-    let text = plain(&app.background_lines(80, 30, now).0);
-    assert_eq!(text[1], "  Monitor details");
-    assert_eq!(text[3], "  Status: running");
-    assert_eq!(
-        text[5],
-        "  Script: tail -f build.log | grep --line-buffered ERROR"
-    );
-    assert!(!text.iter().any(|l| l.contains("Command:")), "{text:?}");
-    assert_eq!(
-        text.last().unwrap(),
-        "  ← to go back · x to stop · Esc to close"
-    );
-    app.lang = Lang::Zh;
-    let text = plain(&app.background_lines(80, 30, now).0);
-    assert_eq!(text[1], "  Monitor 详情");
-    assert!(text[5].starts_with("  脚本：tail -f build.log"), "{text:?}");
-    // shell 的详情不变。
-    app.lang = Lang::En;
-    app.on_key(key(KeyCode::Left), now);
-    app.on_key(key(KeyCode::Up), now);
-    app.on_key(key(KeyCode::Enter), now);
-    let text = plain(&app.background_lines(80, 30, now).0);
-    assert_eq!(text[1], "  Shell details");
-    assert!(text.iter().any(|l| l == "  Command: npm test"), "{text:?}");
 }

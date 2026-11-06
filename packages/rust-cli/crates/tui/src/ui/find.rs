@@ -3,10 +3,13 @@
 //!
 //! 全是界面状态：当前匹配按（块的键，块内第几个匹配）记，不按屏幕行记；每一帧按当前宽度重新排版、重新找，再按这个身份
 //! 找回当前匹配（流式追加、改宽度都不丢）。不用超时。
+//! 画法（docs/specs/rust-cli/tui-kit.md §3.1、§3.8，工作线 TK 的 C1）：只产出 kit 的行与片段，墨色经 `Ink`，宽度经 kit 的
+//! `render::width`。
 use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
+use rust_cli_tui_kit::app::element::{Element, single_line};
+use rust_cli_tui_kit::app::widgets::key_hints::on_row;
+use rust_cli_tui_kit::render::width::string_width;
+use rust_cli_tui_kit::render::{Color, Span, Style, StyledLine, attr};
 
 use super::app::{Action, App};
 use super::find_text::fold;
@@ -68,8 +71,8 @@ pub fn placeholder(lang: Lang) -> &'static str {
 /// footer 左侧的按键提示（按键提示组件的模板）。
 pub fn hint(lang: Lang) -> &'static str {
     lang.pick(
-        "{↑↓} previous/next · {enter} stop here · {esc} exit",
-        "{↑↓} 上一个/下一个 · {enter} 停在这里 · {esc} 退出",
+        "{↑↓} previous/next · {⏎} stop here · {esc} exit",
+        "{↑↓} 上一个/下一个 · {⏎} 停在这里 · {esc} 退出",
     )
 }
 
@@ -123,7 +126,7 @@ impl App {
     pub(super) fn find_key(&mut self, key: KeyEvent) -> Option<Action> {
         let ctrl = keyboard::ctrl(&key);
         let typed = keyboard::is_plain_text(&key);
-        let page = self.viewport.saturating_sub(1).max(1) as isize;
+        let page = self.page_rows();
         let find = self.port.find.as_mut()?;
         let swallow = std::mem::take(&mut find.swallow_slash);
         match key.code {
@@ -148,8 +151,8 @@ impl App {
                 self.open_detail();
             }
             KeyCode::Enter => self.close_find(true),
-            KeyCode::PageUp => return self.scroll_by(page),
-            KeyCode::PageDown => return self.scroll_by(-page),
+            KeyCode::PageUp => return self.scroll_shown(page),
+            KeyCode::PageDown => return self.scroll_shown(-page),
             _ => {}
         }
         None
@@ -275,8 +278,10 @@ pub(super) fn scroll(app: &mut App, layout: &Layout, settled: Option<&Settled>, 
         return;
     };
     let total = layout.len();
-    let end = total.saturating_sub(app.port.scroll);
-    if (end.saturating_sub(height)..end).contains(&at) {
+    // 锚定而内容放得下时偏移是 1、顶行是 0（`App::scroll_by`）：可见的末行按顶行算，不按偏移减。
+    let top = total.saturating_sub(app.port.scroll + height);
+    let end = total.min(top + height);
+    if (top..end).contains(&at) {
         return;
     }
     let top = at.saturating_sub(height / 2);
@@ -303,69 +308,68 @@ fn put_bottom(app: &mut App, layout: &Layout, anchor: Option<(u64, usize)>, heig
     }
 }
 
-/// 可见行（从第 `start` 行起）上的高亮：每一处出现画 `find_match`，当前匹配画 `find_current`。
-pub(super) fn paint(
+/// 可见行（从第 `start` 行起）上的高亮：每一处出现叠上 `find_match`；当前匹配先去掉反显（匹配的反显与原有的），再叠上
+/// `find_current`（同旧 `tokens.rs` 的 `remove_modifier(REVERSED)`；kit 的样式没有“去掉某一位”，在这里按位去）。
+pub(super) fn highlight(
     app: &App,
     layout: &Layout,
-    visible: &mut [Line<'static>],
+    visible: &mut [StyledLine],
     start: usize,
     settled: &Settled,
 ) {
     let range = start..start + visible.len();
-    let matched = app.palette.find_match();
+    let matched = app.ink.find_match();
     for (line, from, to) in layout.find_in(&settled.needle, range.clone()) {
-        super::selection::paint(&mut visible[line - start], from, to, matched);
+        let row = &mut visible[line - start];
+        *row = row.restyle_cells(from, to, |style| style.merge(matched));
     }
     if let Some((key, line, from, to)) = settled.current
         && let Some(at) = layout.at(key, line).filter(|at| range.contains(at))
     {
-        super::selection::paint(
-            &mut visible[at - start],
-            from,
-            to,
-            app.palette.find_current(),
-        );
+        let current = app.ink.find_current();
+        let row = &mut visible[at - start];
+        *row = row.restyle_cells(from, to, |style| {
+            let attrs = style.attrs() & !attr::REVERSE;
+            Style::new(style.fg_color(), style.bg_color(), attrs).merge(current)
+        });
     }
 }
 
-/// 搜索模式的输入框一行（tui-input.md §2.3.5）与光标所在的列：`⌕ ` 加查询，右侧是 `序号/总数` 或 `no matches`；
-/// 放不下时先省右侧，查询太长时只显示末尾。
-pub fn input_line(app: &App, find: &Find, width: usize) -> (Line<'static>, u16) {
-    /// 提示符 `⌕ ` 占 2 列；查询与右侧的序号之间至少空 2 列（其中一列留给光标）。
-    const PROMPT_WIDTH: usize = 2;
-    const STATUS_GAP: usize = 2;
-    let prompt = Span::styled("⌕ ", Style::default().fg(app.palette.accent));
+/// 搜索模式的输入行（tui-input.md §2.3.5；样子是自拟，tui-kit.md §4.3）：第 1 列是 brand 粗体的 `⌕`（代替 `›`），查询从第 3
+/// 列起，光标是查询后面反显的一格；槽里是 `序号/总数`（fg2）或 `no matches`（fg3）。查询太长时只显示末尾；放不下槽时槽让开
+/// （kit `on_row`）。搜索的按键提示在状态栏的右边（`pane.rs`）。
+pub fn input_row(app: &App, find: &Find, width: usize) -> Element {
+    let theme = &app.ink.theme;
+    let lead = super::input_box::lead("⌕", Style::new(theme.brand, Color::Default, attr::BOLD));
     if find.query.is_empty() {
-        let dim = Style::default().add_modifier(Modifier::DIM);
-        let line = Line::from(vec![prompt, Span::styled(placeholder(app.lang), dim)]);
-        return (super::text::truncate_line(line, width), PROMPT_WIDTH as u16);
+        return super::input_box::placeholder_row(theme, lead, placeholder(app.lang), Vec::new());
     }
     // 留 1 列给行尾的光标。
-    let room = width.saturating_sub(PROMPT_WIDTH + 1);
+    let room = super::input_box::text_width(width).saturating_sub(1);
     let shown = tail(&find.query, room);
-    let used = PROMPT_WIDTH + shown.width();
-    let status = match find.index {
-        Some(index) => format!("{}/{}", index + 1, find.count),
-        None => super::detail::no_matches(app.lang).to_owned(),
+    let slot = match find.index {
+        Some(index) => vec![Span::new(
+            format!("{}/{}", index + 1, find.count),
+            theme.fg2,
+        )],
+        None => vec![Span::new(super::detail::no_matches(app.lang), theme.fg3)],
     };
-    let mut spans = vec![prompt, Span::raw(shown)];
-    if used + STATUS_GAP + status.width() <= width {
-        spans.push(Span::raw(" ".repeat(width - used - status.width() - 1)));
-        spans.push(Span::styled(status, app.palette.secondary()));
-    }
-    (Line::from(spans), used.min(width.saturating_sub(1)) as u16)
+    let mut spans = lead;
+    spans.push(Span::new(shown, Style::DEFAULT));
+    spans.push(Span::new(" ", Style::CARET));
+    on_row(single_line(spans, false), slot)
 }
 
 /// `text` 的末尾不超过 `room` 列的那一段（按字素截）。
 fn tail(text: &str, room: usize) -> String {
     use unicode_segmentation::UnicodeSegmentation;
-    if text.width() <= room {
+    if string_width(text) <= room {
         return text.to_owned();
     }
     let mut used = 0;
     let mut start = text.len();
     for (at, grapheme) in text.grapheme_indices(true).rev() {
-        used += grapheme.width();
+        used += string_width(grapheme);
         if used > room {
             break;
         }

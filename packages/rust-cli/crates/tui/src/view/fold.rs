@@ -7,7 +7,9 @@ use rust_cli_kernel_api::permission::ExecutionState;
 use rust_cli_kernel_api::session_api::{KernelEvent, SequencedEvent, SessionView, TurnOutcome};
 use serde_json::Value;
 
-use super::{Body, Fire, Marker, Row, Segment, ToolRow, ToolStatus, Transcript, TurnState};
+use rust_cli_tui_kit::app::widgets::entries::Compaction;
+
+use super::{Body, Compact, Fire, Row, Segment, ToolRow, ToolStatus, Transcript, TurnState};
 
 #[path = "fold_message.rs"]
 mod message;
@@ -21,6 +23,12 @@ impl Transcript {
         let execution = ExecutionState::from_parts(view.mode, view.plan);
         let mut transcript = Self::new(view.selection, execution, view.meta.workspace);
         transcript.title = view.meta.title;
+        // 子代理的会话也有 parent：只有 fork 出来的会话画痕迹行（Puffin `load`）。
+        if view.meta.parent.is_some()
+            && view.meta.kind != rust_cli_kernel_api::store::SessionKind::Subagent
+        {
+            transcript.push(Body::Forked { title: None }, now_ms);
+        }
         // 冷加载的上下文提示与用量来自快照（F27：以前要等下一条回复）。
         transcript.context = view.context_notice;
         transcript.occupancy = view.context_usage;
@@ -28,7 +36,17 @@ impl Transcript {
         for message in view.messages {
             transcript.message(message, now_ms);
         }
+        transcript.returned.clear();
         transcript.settle(None);
+        // 快照里的 `!` 命令都跑完了（被中断的没有输出消息）。
+        transcript.shell_open = false;
+        // 冷加载的回合数是用户消息的条数（Puffin `from_view`）。
+        let users = transcript
+            .rows
+            .iter()
+            .filter(|row| matches!(row.body, Body::User { .. }))
+            .count();
+        transcript.extras.turns.0 = u32::try_from(users).unwrap_or(u32::MAX);
         transcript.pending = view.pending;
         for (_, request) in &transcript.pending.clone() {
             transcript.mark_approval(request, true);
@@ -40,6 +58,7 @@ impl Transcript {
         if view.running {
             transcript.push(Body::Turn(TurnState::Running), now_ms);
         }
+        transcript.cold = transcript.next_id;
         transcript
     }
 
@@ -78,10 +97,12 @@ impl Transcript {
         for message in &view.messages[folded..] {
             self.message(message.clone(), now_ms);
         }
+        self.returned.clear();
         self.settle(None);
         if view.running {
             self.push(Body::Turn(TurnState::Running), now_ms);
         }
+        self.cold = self.next_id;
         true
     }
 
@@ -91,15 +112,33 @@ impl Transcript {
             return;
         }
         self.last_seq = event.seq;
+        // 内核认领了发出的输入（`in_flight.rs`）：与它的队列、它的回合在同一次折叠里交接。
+        self.in_flight.claim(&event.event);
         match event.event {
             KernelEvent::TurnStarted { .. } => {
                 self.settle(None);
                 self.streamed_chars = 0;
+                self.live_chars = 0;
+                self.live_wide = 0;
                 self.notice = None;
+                self.retried = None;
+                self.turn_user = None;
                 self.push(Body::Turn(TurnState::Running), now_ms);
             }
             KernelEvent::TurnFinished { outcome, .. } => {
                 self.notice = None;
+                // 被中断的 `!` 命令没有输出消息：回合结束时它也不在跑了。
+                self.shell_open = false;
+                // `/stats` 的回合数与时长（Puffin `turn_finished`）：从这一回合的行出现时算起。
+                let started = self.rows.iter().rev().find_map(|row| match row.body {
+                    Body::Turn(TurnState::Running) => Some(row.created_ms),
+                    _ => None,
+                });
+                let (turns, active) = &mut self.extras.turns;
+                *turns = turns.saturating_add(1);
+                if let Some(started) = started {
+                    *active += now_ms.saturating_sub(started);
+                }
                 self.finish(outcome, now_ms);
             }
             // 流增量与工具开始说明请求已经往前走了：清掉重试或停顿通知（stall-visibility.md §3.2）。
@@ -112,7 +151,12 @@ impl Transcript {
                 self.notice = None;
                 self.delta(response, index, delta, now_ms);
             }
-            KernelEvent::MessageDone { message } => self.message(message, now_ms),
+            KernelEvent::MessageDone { message } => {
+                self.message(message, now_ms);
+                for title in std::mem::take(&mut self.returned) {
+                    self.push(Body::Returned { title }, now_ms);
+                }
+            }
             KernelEvent::ToolStarted {
                 tool_use,
                 name,
@@ -138,10 +182,27 @@ impl Transcript {
                     ToolStatus::Success
                 };
                 let text = text_of(&output.content);
+                // 修 bug：子代理的数字按“Agent 调用 → 子会话”的关联查（`subagents`）。以前只在 `KernelEvent::Subagent`
+                // 到达时记下，可内核从来不发这个事件（feat/rust-cli 已把它删掉），关联一直是空的：结束的子代理不显示它报告
+                // 的 token，transcript 的 Agent 行没有数字。现在从 Agent 工具结果的 display 取子会话（kernel-api
+                // `agents::DISPLAY_KEY` 的 `childSessionId`，同内核落库的 `SubagentLinked`）：后台的启动时就有，前台的结束时有。
+                if let Some(child) =
+                    output.display[rust_cli_kernel_api::agents::DISPLAY_KEY]["childSessionId"]
+                        .as_str()
+                        .filter(|child| !child.is_empty())
+                {
+                    self.subagents.insert(
+                        tool_use.to_string(),
+                        rust_cli_kernel_api::ids::SessionId::new(child),
+                    );
+                }
                 self.update_tool(&tool_use, |tool| {
                     tool.status = status;
                     tool.output = text;
                     tool.display = output.display;
+                    if tool.started_ms > 0 {
+                        tool.ended_ms = now_ms;
+                    }
                 });
             }
             KernelEvent::InteractionAsked {
@@ -170,19 +231,46 @@ impl Transcript {
             KernelEvent::ContextUsage {
                 used_tokens,
                 max_tokens,
+                compact_at,
             } => {
                 self.occupancy = Some(rust_cli_kernel_api::compaction::ContextOccupancy {
                     used_tokens,
                     max_tokens,
+                    compact_at,
                 });
+                if let Some((id, true)) = self.compact {
+                    self.compact = None;
+                    self.edit_compact(id, |compact| {
+                        compact.status = Compaction::Success;
+                        compact.after = Some(used_tokens);
+                    });
+                }
             }
             // footer 的 TPS（F105）：只取最新的一份。
             KernelEvent::OutputSpeed { speed } => self.speed = Some(speed),
+            // 压缩是一行（Puffin `compact_started` … `context_usage`）：开始时在跑，边界消息给压缩前的 token，做完之后的第一次
+            // 上下文占用给压缩后的 token 并定为成功。以前开始与做完各是一行标记。
             KernelEvent::CompactStarted { .. } => {
-                self.push(Body::Marker(Marker::Compacting), now_ms);
+                let at = self.push(
+                    Body::Compact(Compact {
+                        status: Compaction::Running,
+                        before: None,
+                        after: None,
+                    }),
+                    now_ms,
+                );
+                self.compact = Some((self.rows[at].id, false));
             }
             KernelEvent::CompactDone { .. } => {
-                self.push(Body::Marker(Marker::Compacted), now_ms);
+                if let Some((_, done)) = self.compact.as_mut() {
+                    *done = true;
+                }
+            }
+            // 开始了的压缩失败了（compact.md §4.1）：压缩的行定为失败（Puffin 不写原因）。以前接一行红色的原因。
+            KernelEvent::CompactFailed { .. } => {
+                if let Some((id, _)) = self.compact.take() {
+                    self.edit_compact(id, |compact| compact.status = Compaction::Failed);
+                }
             }
             // 任务清单与每回合的改动只进投影，不加行（tui-display.md §2.2、§2.4）。
             KernelEvent::TasksChanged { tasks } => self.tasks_changed(tasks),
@@ -201,6 +289,12 @@ impl Transcript {
                 self.push(Body::Notice { level, text }, now_ms);
             }
             KernelEvent::ModelNotice { notice } => {
+                if let rust_cli_kernel_api::model::ModelNotice::Retrying {
+                    attempt, error, ..
+                } = &notice
+                {
+                    self.retrying(*attempt, error);
+                }
                 super::Notice::fold(&mut self.notice, notice, now_ms);
             }
             // 扣住的同伴消息不进记录：批准框只看会话视图与这个快照（cross-session.md §2.6）。
@@ -266,8 +360,12 @@ impl Transcript {
         let (text, reasoning) = match delta {
             BlockDelta::Text(text) => (text, false),
             BlockDelta::Thinking(text) => (text, true),
-            // 工具输入在 ToolStarted 时完整给出；签名不显示。
-            BlockDelta::InputJson(_) | BlockDelta::Signature(_) => return,
+            // 工具输入在 ToolStarted 时完整给出，这里只计现场速度的字数（Puffin 同）；签名不显示。
+            BlockDelta::InputJson(text) => {
+                self.count_live(&text);
+                return;
+            }
+            BlockDelta::Signature(_) => return,
         };
         if self
             .segment
@@ -278,11 +376,20 @@ impl Transcript {
             self.settle(None);
         }
         let start = self.rows.len();
+        if self.segment.is_none() {
+            self.segments += 1;
+        }
+        let key = format!("s{}", self.segments);
         let segment = self.segment.get_or_insert_with(|| Segment {
+            key: key.clone(),
             response: Some(response),
             start,
             blocks: Vec::new(),
         });
+        // 工具开始时开的段（还没有流）：第一个增量给它序号（Puffin 在这里才有段，之前的调用没有 `response`）。
+        if segment.key.is_empty() {
+            segment.key = key;
+        }
         segment.response = Some(response);
         let existing = segment
             .blocks
@@ -290,6 +397,7 @@ impl Transcript {
             .find(|(block, _)| *block == index)
             .map(|(_, at)| *at);
         self.streamed_chars += text.chars().count();
+        self.count_live(&text);
         match existing {
             Some(at) => self.edit(at, |body| match body {
                 Body::Agent { text: shown, .. } | Body::Reasoning { text: shown, .. } => {
@@ -323,23 +431,25 @@ impl Transcript {
             self.update_tool(&id, |tool| {
                 tool.status = ToolStatus::Running;
                 tool.input = input;
+                tool.started_ms = now_ms;
             });
             return;
         }
         let start = self.rows.len();
-        self.segment.get_or_insert_with(|| Segment {
+        let segment = self.segment.get_or_insert_with(|| Segment {
+            key: String::new(),
             response: None,
             start,
             blocks: Vec::new(),
         });
-        self.push(
-            Body::Tool(Box::new(ToolRow::new(id, name, input, ToolStatus::Running))),
-            now_ms,
-        );
+        let mut tool = ToolRow::new(id, name, input, ToolStatus::Running);
+        tool.response = segment.key.clone();
+        tool.started_ms = now_ms;
+        self.push(Body::Tool(Box::new(tool)), now_ms);
     }
 
-    /// 定稿：流式行不再流式；`tools` 不为空时把还在运行的工具行改成它。
-    fn settle(&mut self, tools: Option<ToolStatus>) {
+    /// 定稿：流式行不再流式；`tools` 不为空时把还在运行的工具行改成它（开始过的在 `now_ms` 结束）。
+    fn settle(&mut self, tools: Option<(ToolStatus, u64)>) {
         self.segment = None;
         for at in 0..self.rows.len() {
             let live = match &self.rows[at].body {
@@ -352,15 +462,45 @@ impl Transcript {
                     Body::Agent { streaming, .. } | Body::Reasoning { streaming, .. } => {
                         *streaming = false;
                     }
-                    Body::Tool(tool) => tool.status = tools.unwrap_or(tool.status),
+                    Body::Tool(tool) => {
+                        if let Some((status, now_ms)) = tools {
+                            tool.status = status;
+                            if tool.started_ms > 0 {
+                                tool.ended_ms = now_ms;
+                            }
+                        }
+                    }
                     _ => {}
                 });
             }
         }
     }
 
+    /// 改压缩的行 `id`。
+    pub(super) fn edit_compact(&mut self, id: u64, f: impl FnOnce(&mut Compact)) {
+        if let Some(at) = self.rows.iter().rposition(|row| row.id == id) {
+            self.edit(at, |body| {
+                if let Body::Compact(compact) = body {
+                    f(compact);
+                }
+            });
+        }
+    }
+
     fn finish(&mut self, outcome: TurnOutcome, now_ms: u64) {
-        self.settle(Some(ToolStatus::Cancelled));
+        self.settle(Some((ToolStatus::Cancelled, now_ms)));
+        // 回合结束时还在跑的压缩定稿（Puffin `settle_all`）：做完了的成功，停下的取消，失败的回合失败。
+        if let Some((id, done)) = self.compact.take() {
+            let status = match &outcome {
+                _ if done => Compaction::Success,
+                TurnOutcome::Success
+                | TurnOutcome::HookStopped
+                | TurnOutcome::StopHookPrevented => Compaction::Success,
+                TurnOutcome::Interrupted => Compaction::Cancelled,
+                TurnOutcome::Failed { .. } => Compaction::Failed,
+            };
+            self.edit_compact(id, |compact| compact.status = status);
+        }
         let (state, error) = match outcome {
             // 工具的 hook 要求停止、Stop hook 阻止继续都不是失败，按成功结束显示（query.md §3，工作线 F131、F134）。
             TurnOutcome::Success | TurnOutcome::HookStopped | TurnOutcome::StopHookPrevented => {
@@ -377,7 +517,7 @@ impl Transcript {
             self.edit(at, |body| *body = Body::Turn(state));
         }
         if let Some(message) = error {
-            self.push(Body::Error(message), now_ms);
+            self.failed(message, now_ms);
         }
     }
 }

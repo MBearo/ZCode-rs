@@ -307,9 +307,13 @@ impl rust_cli_kernel_api::compaction::Compactor for ContextFake {
         &self,
         history: &[Message],
         selection: &rust_cli_kernel_api::model::ModelSelection,
-    ) -> Option<(u64, u64)> {
+    ) -> Option<rust_cli_kernel_api::compaction::ContextOccupancy> {
         self.ask(selection);
-        Some((history.len() as u64 * 1_000, 10_000))
+        Some(rust_cli_kernel_api::compaction::ContextOccupancy {
+            used_tokens: history.len() as u64 * 1_000,
+            max_tokens: 10_000,
+            compact_at: None,
+        })
     }
 
     fn context_notice(
@@ -523,7 +527,7 @@ fn built_full(
             hidden,
         }),
         AgentsConfig {
-            task_tools: true,
+            task_tools: crate::TaskTools::On,
             keep_alive,
             // 交互模式（停放）时后台子代理也能询问（agents.md §4.1.1）；测试的交互替身不给会话级入口。
             background_prompts: keep_alive,

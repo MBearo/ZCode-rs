@@ -172,6 +172,7 @@ fn notices_follow_the_level_the_window_source_and_the_switches() {
                 pct_override: None,
                 window_override: Some(100_000),
                 max_output_tokens: None,
+                at: None,
             },
             true,
             true,
@@ -185,6 +186,7 @@ fn notices_follow_the_level_the_window_source_and_the_switches() {
                 pct_override: Some(50.0),
                 window_override: None,
                 max_output_tokens: None,
+                at: None,
             },
             true,
             true,
@@ -205,4 +207,46 @@ fn notices_follow_the_level_the_window_source_and_the_switches() {
             "{tokens} {facts:?} {thresholds:?} auto={auto} command={command}"
         );
     }
+}
+
+/// `compact.autoThresholdTokens`（compact.md §2.3）：阈值与它取小，比模型的阈值大时没有作用；设了时窗口来源是 `auto`
+/// 也主动压缩，提示、阻塞线与 `/context` 的缓冲随之按“不是 `auto`”算。
+#[test]
+fn the_configured_threshold_lowers_the_point_and_turns_on_proactive_compaction() {
+    let set = |at: u64| Thresholds {
+        at: Some(at),
+        ..Thresholds::default()
+    };
+    let opus = ModelFacts::resolve(&selection(OPUS_5_5), None);
+    assert_eq!(threshold(&opus, &set(400_000)), 400_000);
+    assert_eq!(threshold(&opus, &set(2_000_000)), 967_000);
+    assert!(should_compact(400_000, &opus, &set(400_000)));
+    assert!(!should_compact(399_999, &opus, &set(400_000)));
+    assert_eq!(compact_at(&opus, &set(400_000), true), Some(400_000));
+    assert_eq!(
+        compact_at(&opus, &Thresholds::default(), true),
+        Some(967_000)
+    );
+    assert_eq!(compact_at(&opus, &set(400_000), false), None);
+    assert_eq!(
+        context_buffer(&opus, &set(400_000), true),
+        Some(("Autocompact buffer", 600_000))
+    );
+
+    let small = small_known();
+    let none = Thresholds::default();
+    assert_eq!(compact_at(&small, &none, true), None);
+    assert!(!should_compact(150_000, &small, &none));
+    assert!(!blocks(190_000, &small, &none, true));
+    assert!(should_compact(150_000, &small, &set(150_000)));
+    assert!(blocks(190_000, &small, &set(150_000), true));
+    assert_eq!(compact_at(&small, &set(150_000), true), Some(150_000));
+    assert_eq!(
+        context_buffer(&small, &set(150_000), true),
+        Some(("Autocompact buffer", 50_000))
+    );
+    assert_eq!(
+        notice(140_000, &small, &set(150_000), true, true),
+        ContextNotice::UntilAutoCompact { percent: 7 }
+    );
 }

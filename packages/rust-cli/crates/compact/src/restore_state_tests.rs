@@ -71,6 +71,7 @@ async fn files_are_reread_after_the_state_is_cleared() {
             &request(history, CompactTrigger::Manual),
             true,
             &CancellationToken::new(),
+            None,
         )
         .await
         .unwrap();

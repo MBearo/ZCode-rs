@@ -17,7 +17,7 @@ const MARKER: &str = "[Request interrupted by user]";
 
 /// 回合不在跑（画面上没有中断提示）时画面里有 `text`。
 fn idle(screen: &str, text: &str) -> bool {
-    screen.contains(text) && !screen.contains("esc to interrupt")
+    screen.contains(text) && !screen.contains("esc stop")
 }
 
 /// 停住哪一次提交：这一批里有满足条件的事实。
@@ -111,12 +111,16 @@ async fn esc_before_the_turn_is_drawn_puts_the_input_back() {
         actor.held().await;
         ui.submit("first prompt");
         ui.key(KeyCode::Esc);
-        // esc 按空闲处理了（连按两次编辑的提示）：这时画面上还没有这个回合。
-        let screen = ui.wait_for("Esc again to edit previous message").await;
-        assert!(!screen.contains("esc to interrupt"), "{screen}");
+        // esc 按空闲处理了（槽里是连按两次回退的提示）：这时画面上还没有这个回合。
+        let screen = ui.wait_for("esc rewind").await;
+        assert!(!screen.contains("esc stop"), "{screen}");
         actor.release();
+        // 草稿回到输入行（有草稿时右边是 `⇧⏎ newline`）：发出、还没认领的那一行在按键的那一帧也写着它（in_flight.rs）。
         ui.wait("the input back in the box", |s| {
-            s.contains("first prompt") && idle(s, "hello") && !s.contains("Interrupted")
+            s.lines()
+                .any(|l| l.contains("› first prompt") && l.contains("newline"))
+                && idle(s, "hello")
+                && !s.contains("Interrupted")
         })
         .await;
         ui.key(KeyCode::Enter);
@@ -154,13 +158,13 @@ async fn esc_after_the_turn_ended_reports_nothing() {
         ui.submit("hi");
         actor.held().await;
         ui.wait("the reply of a running turn", |s| {
-            s.contains("hello") && s.contains("esc to interrupt")
+            s.contains("hello") && s.contains("esc stop")
         })
         .await;
         ui.key(KeyCode::Esc);
         // 按键按顺序处理：输入框里出现这行字时，esc 已经按运行中处理了。
         ui.type_text("/rename later");
-        ui.wait_for("❯ /rename later").await;
+        ui.wait_for("› /rename later").await;
         actor.release();
         ui.wait("the turn to end", |s| idle(s, "hello")).await;
         ui.key(KeyCode::Enter);

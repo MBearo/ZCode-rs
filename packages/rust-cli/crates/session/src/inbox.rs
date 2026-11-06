@@ -232,6 +232,17 @@ impl Inbox {
         }
     }
 
+    /// 在工具边界交给主循环、attachment 用消息 ID `attachment` 的那一项（还在通道里）：提交这条 attachment 时把它并入的
+    /// 事实放进同一批（append.rs，F139）。
+    pub(crate) fn absorbing_item(&self, attachment: &MessageId) -> Option<&Waiting> {
+        self.items.iter().find_map(|item| match item {
+            Item::Notice(notice) if notice.attachment.as_ref() == Some(attachment) => {
+                Some(&notice.waiting)
+            }
+            _ => None,
+        })
+    }
+
     /// 消息 ID 是 `attachment` 的那条通知已经并入对话：取走它。
     pub(crate) fn take_absorbed(&mut self, attachment: &MessageId) -> Option<Waiting> {
         let at = self.items.iter().position(|item| {

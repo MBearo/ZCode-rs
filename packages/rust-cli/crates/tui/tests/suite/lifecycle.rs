@@ -1,45 +1,36 @@
-//! 会话生命周期的界面（docs/specs/rust-cli/session-lifecycle.md §3.3.1、§5.4、§6.2）：esc 连按两次的 rewind
-//! 选择器、`/clear` 之后立刻 `/resume` 回旧会话。`/fork` 在 `fork.rs`。
+//! 会话生命周期的界面（docs/specs/rust-cli/session-lifecycle.md §3.3.1、§5.4、§6.2）：esc 连按两次挑选回退的点、`/clear` 之后立刻 `/resume` 回旧会话。`/fork` 在 `fork.rs`。
 use crossterm::event::KeyCode;
 use rust_cli_kernel_api::testing::{environments, text_response};
 
 use super::support::{GatedModel, Setup, with_ui};
 
-/// esc 连按两次 → 选择器（Rewind）→ 选第一条 → `Restore conversation`：历史截掉，消息放回输入框。
+/// esc 连按两次 → 在最后一条消息上挑选回退的点（Puffin 的挑选）→ esc 离开，什么都没有发生。
 #[tokio::test(flavor = "multi_thread")]
-async fn double_esc_rewinds_the_conversation_and_restores_the_prompt() {
+async fn double_esc_picks_the_last_message_to_go_back_to() {
     let model = GatedModel::scripted(vec![text_response(&["first answer"])]);
     with_ui(model, Setup::default(), |mut ui| async move {
         ui.submit("first try");
         ui.wait_for("first answer").await;
-        ui.wait("the turn to end", |s| !s.contains("esc to interrupt"))
+        ui.wait("the turn to end", |s| !s.contains("esc stop"))
             .await;
+        // 第一次 esc 槽里说 `esc rewind`，第二次在最后一条消息上开始挑选（docs/puffin-tui.md §4.2「回退（/rewind）」）：
+        // 切线在它之前，草稿是它的原文，`↶` 代替 `›`。
         ui.key(KeyCode::Esc);
+        ui.wait_for("esc rewind").await;
         ui.key(KeyCode::Esc);
-        let picker = ui.wait_for("Rewind").await;
+        let picking = ui.wait_for("↶ Back to the start").await;
         assert!(
-            picker.contains("Restore the code and/or conversation"),
-            "{picker}"
+            picking.contains("the turn below stays behind, in /resume"),
+            "{picking}"
         );
-        assert!(picker.contains("first try"), "{picker}");
-        assert!(picker.contains("No code changes"), "{picker}");
-        // 默认选中 `(current)`；上移到第一条消息。
-        ui.key(KeyCode::Up);
-        ui.key(KeyCode::Enter);
-        let confirm = ui.wait_for("Restore conversation").await;
-        assert!(
-            confirm.contains("Confirm you want to restore the conversation"),
-            "{confirm}"
-        );
-        assert!(confirm.contains("Never mind"), "{confirm}");
-        ui.key(KeyCode::Enter);
+        assert!(picking.contains(" ↶ first try"), "{picking}");
+        // esc 离开挑选：什么都没有发生，输入框是空的。
+        ui.key(KeyCode::Esc);
         let after = ui
-            .wait("the history to be rewound", |s| !s.contains("first answer"))
+            .wait("picking to end", |s| !s.contains("↶ Back to"))
             .await;
-        assert!(
-            after.contains("first try"),
-            "the prompt is back in the input: {after}"
-        );
+        assert!(after.contains("first answer"), "{after}");
+        assert!(after.contains("Send a message"), "{after}");
     })
     .await;
 }
@@ -61,27 +52,28 @@ async fn resume_right_after_clear_reopens_the_old_session() {
     with_ui(model, setup, |mut ui| async move {
         ui.submit("hello");
         ui.wait("the first reply", |s| {
-            s.contains("⏺ first") && !s.contains("esc to interrupt")
+            s.contains("   first") && !s.contains("esc stop")
         })
         .await;
         ui.submit("/clear");
         ui.wait_for("Started a new session.").await;
         // 旧会话的关闭停在 `close_session`：它的 actor 已经退出，条目还在会话表里。
         env.closing(1).await;
+        // `/resume` 的会话列表（Puffin 的列表，板上）：旧会话的行是它的第一条输入。
         ui.submit("/resume");
         ui.wait("the old session in the list", |s| {
-            s.contains("Type to search") && s.contains("hello")
+            s.contains("› /resume") && s.lines().any(|l| l.trim_end().ends_with("   hello"))
         })
         .await;
         ui.key(KeyCode::Enter);
-        ui.wait("the page to close", |s| !s.contains("Type to search"))
+        ui.wait("the list to close", |s| !s.contains("› /resume"))
             .await;
         // 选中之后的那一帧画出时打开已经开始；再等一会儿只为让旧代码确定地先用上旧句柄（报错），新代码不依赖它。
         ui.settle().await;
         env.release();
         let screen = ui
             .wait("the old session to reopen", |s| {
-                s.contains("⏺ first") || s.contains("the session is closed")
+                s.contains("   first") || s.contains("the session is closed")
             })
             .await;
         assert!(!screen.contains("the session is closed"), "{screen}");

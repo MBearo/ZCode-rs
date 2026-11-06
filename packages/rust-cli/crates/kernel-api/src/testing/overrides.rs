@@ -55,6 +55,10 @@ pub trait SinkOverride: Send + Sync {
         self.sink().compact_started(trigger).await;
     }
 
+    async fn compact_failed(&self, trigger: CompactTrigger, message: String) {
+        self.sink().compact_failed(trigger, message).await;
+    }
+
     async fn take_absorbed(&self) -> Vec<Absorbed> {
         self.sink().take_absorbed().await
     }
@@ -92,6 +96,10 @@ impl<T: SinkOverride + Interactions + SessionOps> RunSink for T {
 
     async fn compact_started(&self, trigger: CompactTrigger) {
         SinkOverride::compact_started(self, trigger).await;
+    }
+
+    async fn compact_failed(&self, trigger: CompactTrigger, message: String) {
+        SinkOverride::compact_failed(self, trigger, message).await;
     }
 
     async fn take_absorbed(&self) -> Vec<Absorbed> {

@@ -34,6 +34,17 @@ pub(crate) fn rough(text: &str, per: u64) -> u64 {
     tokens::estimate(text.encode_utf16().count() as u64, per)
 }
 
+/// 一个内容块的估算：文字按字符数 / 每 token 字符数，图片 2000，其他块按 JSON 长度。消息的估算与 `/context` 消息明细
+/// 的权重（context-usage.md §3.1）共用。
+pub(crate) fn block(block: &ContentBlock, per: u64) -> u64 {
+    match block {
+        ContentBlock::Text { text } => rough(text, per),
+        // 每张图的估计与压缩共用（2000，F55）。
+        ContentBlock::Image { .. } => rust_cli_compact::IMAGE_TOKENS,
+        other => rough(&serde_json::to_string(other).unwrap_or_default(), per),
+    }
+}
+
 /// 本地估算（context-usage.md §3）：消息按内容块（字符数 / 每 token 字符数，图片 2000，其他块按 JSON 长度），有工具时加
 /// JSON 长度 / 2 与开销。没有消息时消息部分是 0（计数请求的占位 `foo` 不算）。每 token 字符数按模型（修 bug（F10，
 /// context-usage.md D5）：以前一律按 4）。
@@ -41,12 +52,7 @@ fn estimate(messages: &[ApiMessage], tools: &[ToolDefinition], per: u64) -> u64 
     let mut total: u64 = messages
         .iter()
         .flat_map(|message| &message.content)
-        .map(|content| match &content.block {
-            ContentBlock::Text { text } => rough(text, per),
-            // 每张图的估计与压缩共用（2000，F55）。
-            ContentBlock::Image { .. } => rust_cli_compact::IMAGE_TOKENS,
-            other => rough(&serde_json::to_string(other).unwrap_or_default(), per),
-        })
+        .map(|content| block(&content.block, per))
         .sum();
     if !tools.is_empty() {
         let json = serde_json::to_string(tools).unwrap_or_default();

@@ -341,6 +341,20 @@ pub async fn file_len(path: &Path) -> io::Result<Option<u64>> {
     }
 }
 
+/// 路径（跟随符号链接）是不是目录；不存在或读不到时为假（`zcode app` 的文件夹，docs/specs/rust-cli/cli-args.md §16）。
+pub async fn is_dir(path: &Path) -> bool {
+    tokio::fs::metadata(path)
+        .await
+        .is_ok_and(|metadata| metadata.is_dir())
+}
+
+/// 路径（跟随符号链接）是不是普通文件；不存在或读不到时为假（`zcode app` 找桌面端，cli-args.md §16）。
+pub async fn is_file(path: &Path) -> bool {
+    tokio::fs::metadata(path)
+        .await
+        .is_ok_and(|metadata| metadata.is_file())
+}
+
 /// 文件的修改时间；不存在时为 `None`（模型轨迹按修改时间从旧到新淘汰文件，docs/specs/rust-cli/model-io.md §3.3）。
 pub async fn file_modified(path: &Path) -> io::Result<Option<SystemTime>> {
     match tokio::fs::metadata(path).await {

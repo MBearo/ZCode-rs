@@ -1,16 +1,22 @@
-//! 终端通知（docs/specs/rust-cli/tui-manage.md §5）：什么时候发（待处理交互 6 s、回合结束后空闲 60 s）、
-//! 发到哪个渠道（只看终端给出的事实）、写出什么转义序列。计时与“上一次按键”都是界面状态，不同步任何业务状态。
+//! 终端通知（docs/specs/rust-cli/tui-manage.md §5；照 Puffin 壳的 `asks.rs` 的 `asked` 与
+//! `naming.rs` 的 `window_title`）：什么时候发、发到哪个渠道（只看终端给出的事实）、写出什么转义序列、窗口标题。
+//!
+//! - 终端不在前台时（见过失去焦点、还没回来），每个新到的请求、每个该响的通知（定时任务的触发、同伴发来的消息、目标的
+//!   结论，[`rings`]）响一次铃（BEL），再按终端发 OSC 9 / 99 / 777，窗口标题前加 `● `；请求都离开、到达过的通知也看到了
+//!   （回到终端）之后恢复标题（以前是请求开着 6 s 没有按键才发，没有铃与标题，通知不响）。
+//! - 回合结束后空闲 60 s 的提醒是旧界面多出的（tui-kit.md §4.3），照旧。
+//!
+//! 计时、焦点与“上一次按键”都是界面状态，不同步任何业务状态。
 use std::collections::BTreeMap;
 
-use rust_cli_kernel_api::ids::InteractionId;
+use rust_cli_kernel_api::interaction::NOTIFY_AFTER as RECHECK;
 use rust_cli_kernel_api::orchestration::InteractionRequest;
+use rust_cli_tui_kit::render::ansi::{BELL, POP_TITLE, PUSH_TITLE, set_title};
 use tokio::time::{Duration, Instant};
 
 use super::i18n::Lang;
+use crate::view::{Body, PeerRow, Row};
 
-/// 待处理交互的提醒间隔：只定义在
-/// kernel-api，权限询问的 Notification hook 用同一个值（F58：以前这里与 session 各写一份）。
-pub use rust_cli_kernel_api::interaction::NOTIFY_AFTER as DIALOG_AFTER;
 /// 空闲提醒的缺省门槛。
 pub const IDLE_AFTER: Duration = Duration::from_secs(60);
 /// 通知的标题。
@@ -87,7 +93,8 @@ pub struct Due {
     pub kind: &'static str,
 }
 
-fn dialog_text(request: &InteractionRequest, lang: Lang) -> &'static str {
+/// 请求到达时的说法（Puffin `notify::ask_message`）。
+pub fn ask_text(request: &InteractionRequest, lang: Lang) -> &'static str {
     match (lang, request) {
         (Lang::En, InteractionRequest::Permission { .. }) => "ZCode needs your permission",
         (Lang::En, InteractionRequest::PlanApproval { .. }) => {
@@ -100,20 +107,30 @@ fn dialog_text(request: &InteractionRequest, lang: Lang) -> &'static str {
     }
 }
 
+/// 通知（不是请求）响铃时的说法（Puffin `NOTICE_MESSAGE`）。
+pub fn notice_text(lang: Lang) -> &'static str {
+    match lang {
+        Lang::En => "ZCode has news for you",
+        Lang::Zh => "ZCode 有新消息",
+    }
+}
+
+/// 终端在后台时它的到达响铃（Puffin `notices::rings` 与 `goals::rings`）：定时任务的触发、后台子代理回来了、同伴发来的消息（回执不响）、
+/// 目标达成或判为不可能。系统提示不响。
+pub fn rings(body: &Body) -> bool {
+    match body {
+        Body::Fire(_) | Body::Returned { .. } => true,
+        Body::Peer(peer) => matches!(peer.as_ref(), PeerRow::Message { .. }),
+        Body::Goal(status) => status.met || status.failed,
+        _ => false,
+    }
+}
+
 fn idle_text(lang: Lang) -> &'static str {
     match lang {
         Lang::En => "ZCode is waiting for your input",
         Lang::Zh => "ZCode 正在等你输入",
     }
-}
-
-#[derive(Debug, Clone)]
-struct Dialog {
-    id: InteractionId,
-    message: &'static str,
-    shown: Instant,
-    next: Instant,
-    fired: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -124,13 +141,37 @@ struct Idle {
 }
 
 /// 通知的界面状态。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Notify {
     last_input: Option<Instant>,
-    dialog: Option<Dialog>,
     idle: Option<Idle>,
     /// 本次运行发过输入。
     submitted: bool,
+    /// 终端有焦点（终端报告之前当作有，Puffin `ShellState::focused`）。
+    focused: bool,
+    /// 窗口标题前有 `● `（Puffin `titled`）。
+    titled: bool,
+    /// 终端在后台时到过该响的通知，还没回到终端（Puffin `notice_unseen`）：标题的 `●` 留着。
+    unseen: bool,
+    /// 看过的行：会话与其中最大的行 id。换了会话（打开、切换）时只记下，不响：那些行不是新到的。
+    rows_seen: Option<(Option<String>, u64)>,
+    /// 上次写到终端的标题；没写过（终端原来的标题）为 None。
+    title: Option<String>,
+}
+
+impl Default for Notify {
+    fn default() -> Self {
+        Self {
+            last_input: None,
+            idle: None,
+            submitted: false,
+            focused: true,
+            titled: false,
+            unseen: false,
+            rows_seen: None,
+            title: None,
+        }
+    }
 }
 
 impl Notify {
@@ -143,27 +184,78 @@ impl Notify {
         self.submitted = true;
     }
 
-    /// 视图里的待处理交互（每次视图变化后）：换了交互就重新计时，没有了就停。
-    pub fn dialog(
-        &mut self,
-        pending: Option<(&InteractionId, &InteractionRequest)>,
-        lang: Lang,
-        now: Instant,
-    ) {
-        match pending {
-            None => self.dialog = None,
-            Some((id, request)) => {
-                if self.dialog.as_ref().is_none_or(|dialog| dialog.id != *id) {
-                    self.dialog = Some(Dialog {
-                        id: id.clone(),
-                        message: dialog_text(request, lang),
-                        shown: now,
-                        next: now + DIALOG_AFTER,
-                        fired: false,
-                    });
-                }
+    /// 终端报告焦点（Puffin 的 `FocusIn` / `FocusOut`）：回到终端、没有请求开着时恢复标题。
+    pub fn focus(&mut self, focused: bool, asks_open: bool) {
+        self.focused = focused;
+        if focused {
+            self.unseen = false;
+            if !asks_open {
+                self.titled = false;
             }
         }
+    }
+
+    /// 视图里新到的行有没有该响的（[`rings`]）；记下看到了哪一行。`session` 换了时只记下。
+    pub fn fresh_rows(&mut self, session: Option<&str>, rows: &[Row]) -> bool {
+        let last = rows.iter().map(|row| row.id).max().unwrap_or(0);
+        let seen = match &self.rows_seen {
+            Some((s, id)) if s.as_deref() == session => Some(*id),
+            _ => None,
+        };
+        self.rows_seen = Some((session.map(str::to_owned), last.max(seen.unwrap_or(0))));
+        seen.is_some_and(|seen| {
+            rows.iter()
+                .filter(|row| row.id > seen)
+                .any(|row| rings(&row.body))
+        })
+    }
+
+    /// 视图变化之后（Puffin `asked`）：`fresh` 是刚到的请求，`noticed` 是新到的行里有该响的通知。终端不在前台时响铃，
+    /// 返回要发的说法（请求的优先）；请求都离开、到达过的通知也看到了之后恢复标题。
+    pub fn asked(
+        &mut self,
+        fresh: &[&InteractionRequest],
+        noticed: bool,
+        asks_open: bool,
+        lang: Lang,
+    ) -> Option<&'static str> {
+        let away = !self.focused;
+        let notice_rang = away && noticed;
+        let ring = (away && !fresh.is_empty()) || notice_rang;
+        self.unseen = self.unseen || notice_rang;
+        let unmark = !asks_open && !self.unseen;
+        self.titled = (self.titled || ring) && !unmark;
+        ring.then(|| {
+            fresh
+                .first()
+                .map_or_else(|| notice_text(lang), |r| ask_text(r, lang))
+        })
+    }
+
+    /// 离开界面时：写过标题就弹回终端原来的。
+    pub fn restore_title(&mut self) -> Option<&'static str> {
+        self.title.take().map(|_| POP_TITLE)
+    }
+
+    /// 要写到终端的标题字节（Puffin `window_titled`）：想要的与上次写的不同才写；第一次写之前推下终端原来的标题，不要了
+    /// 时弹回去。`name` 是会话的标题（可为空）。
+    pub fn title_bytes(&mut self, name: &str) -> Option<String> {
+        let name = name.trim();
+        let want = if self.titled {
+            Some(format!("● {}", if name.is_empty() { TITLE } else { name }))
+        } else {
+            (!name.is_empty()).then(|| name.to_owned())
+        };
+        if want == self.title {
+            return None;
+        }
+        let out = match &want {
+            Some(t) if self.title.is_none() => format!("{PUSH_TITLE}{}", set_title(t)),
+            Some(t) => set_title(t),
+            None => POP_TITLE.to_owned(),
+        };
+        self.title = want;
+        Some(out)
     }
 
     /// 一个回合结束：空闲通知重新计时。
@@ -177,33 +269,16 @@ impl Notify {
 
     /// 下一次要检查的时刻；没有要检查的为 None。
     pub fn next_due(&self) -> Option<Instant> {
-        let dialog = self.dialog.as_ref().filter(|d| !d.fired).map(|d| d.next);
-        let idle = self
-            .idle
+        self.idle
             .as_ref()
             .filter(|idle| !idle.fired && self.submitted)
-            .map(|idle| idle.next);
-        match (dialog, idle) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+            .map(|idle| idle.next)
     }
 
-    /// 到点的检查：返回要发的通知。`quiet` 是空闲通知的其余条件（没有在跑的回合、待处理交互、打开的页面与
+    /// 到点的检查：返回要发的空闲提醒。`quiet` 是空闲通知的其余条件（没有在跑的回合、待处理交互、打开的页面与
     /// 在跑的后台子代理）。
     pub fn due(&mut self, now: Instant, quiet: bool, lang: Lang) -> Option<Due> {
         let last_input = self.last_input;
-        if let Some(dialog) = self.dialog.as_mut().filter(|d| !d.fired && d.next <= now) {
-            let since = last_input.map_or(dialog.shown, |input| input.max(dialog.shown));
-            if now.duration_since(since) >= DIALOG_AFTER {
-                dialog.fired = true;
-                return Some(Due {
-                    message: dialog.message,
-                    kind: "permission_prompt",
-                });
-            }
-            dialog.next = now + DIALOG_AFTER;
-        }
         let submitted = self.submitted;
         if let Some(idle) = self
             .idle
@@ -216,7 +291,7 @@ impl Notify {
                 return None;
             }
             if !quiet {
-                idle.next = now + DIALOG_AFTER;
+                idle.next = now + RECHECK;
                 return None;
             }
             idle.fired = true;
@@ -232,3 +307,6 @@ impl Notify {
 #[cfg(test)]
 #[path = "notify_tests.rs"]
 mod tests;
+
+/// 铃的字节（Puffin `ansi::BELL`）。
+pub const RING: &str = BELL;

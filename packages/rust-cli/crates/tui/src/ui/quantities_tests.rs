@@ -3,12 +3,10 @@
 use rust_cli_base::civil;
 
 use super::*;
-use crate::ui::i18n::{self, Lang};
-use crate::ui::{export, goal, notify, retry_status, session_rows, usage_stats};
+use crate::ui::{export, goal, notify, retry_status, usage_local_data};
 
 /// 收拢前的实现（逐字照抄，只改了名字）。
 mod old {
-    use crate::ui::i18n::Lang;
 
     pub fn goal_duration(ms: u64) -> String {
         let seconds = ms / 1000;
@@ -34,51 +32,6 @@ mod old {
         } else {
             count.to_string()
         }
-    }
-
-    pub fn relative(lang: Lang, now_ms: u64, at_ms: u64) -> String {
-        let seconds = now_ms.saturating_sub(at_ms) / 1000;
-        match (lang, seconds) {
-            (Lang::En, 0) => "now".to_owned(),
-            (Lang::En, 1..60) => format!("{seconds}s ago"),
-            (Lang::En, 60..3600) => format!("{}m ago", seconds / 60),
-            (Lang::En, 3600..86_400) => format!("{}h ago", seconds / 3600),
-            (Lang::En, _) => format!("{}d ago", seconds / 86_400),
-            (Lang::Zh, 0) => "刚刚".to_owned(),
-            (Lang::Zh, 1..60) => format!("{seconds} 秒前"),
-            (Lang::Zh, 60..3600) => format!("{} 分钟前", seconds / 60),
-            (Lang::Zh, 3600..86_400) => format!("{} 小时前", seconds / 3600),
-            (Lang::Zh, _) => format!("{} 天前", seconds / 86_400),
-        }
-    }
-
-    pub fn relative_long(lang: Lang, now_ms: u64, at_ms: u64) -> String {
-        let seconds = now_ms.saturating_sub(at_ms) / 1000;
-        let (value, unit) = match seconds {
-            0 => return relative(lang, now_ms, at_ms),
-            1..60 => (seconds, "second"),
-            60..3600 => (seconds / 60, "minute"),
-            3600..86_400 => (seconds / 3600, "hour"),
-            _ => (seconds / 86_400, "day"),
-        };
-        match lang {
-            Lang::En if value == 1 => format!("1 {unit} ago"),
-            Lang::En => format!("{value} {unit}s ago"),
-            Lang::Zh => relative(lang, now_ms, at_ms),
-        }
-    }
-
-    pub fn timestamp(at_ms: u64, offset_minutes: i32) -> String {
-        let local = at_ms as i64 + i64::from(offset_minutes) * 60_000;
-        let local = u64::try_from(local).unwrap_or(0);
-        let seconds = (local / 1000) % 86_400;
-        format!(
-            "{} {:02}:{:02}:{:02}",
-            rust_cli_kernel_api::clock::civil_date(local),
-            seconds / 3600,
-            seconds / 60 % 60,
-            seconds % 60
-        )
     }
 
     pub fn export_timestamp(now_ms: u64, offset_minutes: i32) -> String {
@@ -111,15 +64,6 @@ mod old {
             format!("{hours}h")
         } else {
             format!("{minutes}m")
-        }
-    }
-
-    pub fn elapsed_plain(seconds: u64) -> String {
-        let (h, m, s) = (seconds / 3600, (seconds % 3600) / 60, seconds % 60);
-        match (h, m) {
-            (0, 0) => format!("{s}s"),
-            (0, _) => format!("{m}m {s}s"),
-            _ => format!("{h}h {m}m {s}s"),
         }
     }
 
@@ -166,32 +110,12 @@ fn largest_unit_texts_are_unchanged() {
         assert_eq!(goal::duration(ms), old::goal_duration(ms), "{s}");
         let late = ms.saturating_add(999);
         assert_eq!(goal::duration(late), old::goal_duration(late), "{s}");
-        for lang in [Lang::En, Lang::Zh] {
-            let now = ms.saturating_add(SECOND / 2);
-            assert_eq!(
-                session_rows::relative(lang, now, 0),
-                old::relative(lang, now, 0),
-                "{s}"
-            );
-            assert_eq!(
-                session_rows::relative_long(lang, now, 0),
-                old::relative_long(lang, now, 0),
-                "{s}"
-            );
-        }
     }
     // 倒计时按毫秒向上取整到秒，边界在整秒的两侧（旧实现在 `u64::MAX` 附近溢出，不扫那一段）。
     for s in seconds().filter(|s| *s < u64::MAX / SECOND) {
         for ms in [s * SECOND, (s * SECOND).saturating_sub(1), s * SECOND + 1] {
             assert_eq!(retry_status::countdown(ms), old::countdown(ms), "{ms}");
         }
-    }
-}
-
-#[test]
-fn hours_minutes_and_seconds_are_unchanged() {
-    for s in seconds() {
-        assert_eq!(i18n::elapsed_plain(s), old::elapsed_plain(s), "{s}");
     }
 }
 
@@ -203,11 +127,6 @@ fn timestamps_are_unchanged() {
         let at = base + step * 997;
         for offset in OFFSETS {
             assert_eq!(
-                session_rows::timestamp(at, offset),
-                old::timestamp(at, offset),
-                "{at} {offset}"
-            );
-            assert_eq!(
                 export::default_name(None, at, offset),
                 format!("conversation-{}.txt", old::export_timestamp(at, offset)),
                 "{at} {offset}"
@@ -217,10 +136,6 @@ fn timestamps_are_unchanged() {
     // 纪元附近：偏移是负的时本地时间在纪元之前，两份都钉到 0。
     for at in [0, 1, 59_999, 60_000, 43_200_000] {
         for offset in OFFSETS {
-            assert_eq!(
-                session_rows::timestamp(at, offset),
-                old::timestamp(at, offset)
-            );
             assert_eq!(
                 export::default_name(None, at, offset),
                 format!("conversation-{}.txt", old::export_timestamp(at, offset))
@@ -245,20 +160,6 @@ fn thousands_are_unchanged() {
 }
 
 #[test]
-fn tenths_are_unchanged_for_non_negative_values() {
-    let context = |value: f64| format!("{:.1}", (value * 10.0).round() / 10.0);
-    let footer = |value: f64| format!("{:.1}", (value * 10.0).round().max(0.0) / 10.0);
-    for step in 0..=200_000_u32 {
-        let value = f64::from(step) * 0.000_73;
-        assert_eq!(tenths(value), context(value), "{value}");
-        assert_eq!(tenths(value), footer(value), "{value}");
-    }
-    for value in [0.05, 0.15, 0.25, 99.95, 100.0, 1e9] {
-        assert_eq!(tenths(value), context(value), "{value}");
-    }
-}
-
-#[test]
 fn day_numbers_match_the_civil_calendar() {
     // 1600-01-01 到 2400-12-31 逐日。
     let (first, last) = (
@@ -268,7 +169,7 @@ fn day_numbers_match_the_civil_calendar() {
     for day in first..=last {
         let (year, month, date) = civil::civil_from_days(day);
         let text = format!("{year:04}-{month:02}-{date:02}");
-        assert_eq!(usage_stats::day_number(&text), Some(day), "{text}");
+        assert_eq!(usage_local_data::day_number(&text), Some(day), "{text}");
         assert_eq!(old::day_number(&text), Some(day), "{text}");
         // 周日为 0（1970-01-01 是周四）。
         assert_eq!(
@@ -279,7 +180,7 @@ fn day_numbers_match_the_civil_calendar() {
     }
     for text in ["", "2026", "2026-10", "2026-x-01", "2026-10-y"] {
         assert_eq!(
-            usage_stats::day_number(text),
+            usage_local_data::day_number(text),
             old::day_number(text),
             "{text}"
         );

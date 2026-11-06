@@ -8,9 +8,13 @@ use rust_cli_base::units;
 use serde::{Deserialize, Serialize};
 
 use crate::context_usage::format_tokens;
+
+#[path = "metering_speeds.rs"]
+mod speeds;
 use crate::ids::{MessageId, ToolUseId};
 use crate::message::{StopReason, Usage};
 use crate::model::{ModelError, ModelSelection, QuerySource};
+pub use speeds::{MIN_OUTPUT, SpeedHistory, Speeds};
 
 /// 一次调用或一个回合的结局（Node 用量表的 `status`；`running` 不写）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,6 +146,14 @@ pub struct RequestStats {
     /// 最近一个完成的主回合请求（按完成时刻）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last: Option<LastRequest>,
+    /// 累计输出：输出已知的请求的输出之和（子代理的 token 列，tui-panels.md §1.3）。
+    #[serde(default)]
+    pub output_tokens: u64,
+    /// 量得到速度的请求（输出已知且大于 0、生成时长大于 0）的输出之和与生成时长之和（子代理结束后的平均速度）。
+    #[serde(default)]
+    pub measured_output_tokens: u64,
+    #[serde(default)]
+    pub generation_ms: u64,
 }
 
 /// 最近一个完成的主回合请求：TPS 的输入（用量表那一行的 `output_tokens`、`duration_ms`、`time_to_first_token_ms`）。
@@ -171,6 +183,17 @@ impl RequestStats {
     pub fn tokens_per_second(&self) -> Option<f64> {
         let last = self.last?;
         output_tps(last.output_tokens, last.generation_ms())
+    }
+
+    /// 子代理的 token（Puffin `subagentUsage` 的 `tokens`）：完成的请求的输入（含缓存）加输出；还没有完成的请求时没有值。
+    pub fn tokens(&self) -> Option<u64> {
+        let tokens = self.input_tokens.saturating_add(self.output_tokens);
+        (self.requests > 0 && tokens > 0).then_some(tokens)
+    }
+
+    /// 全部量到的请求的平均速度（Puffin `subagentUsage` 的 `avg`）：输出之和 ÷ 生成时长之和（[`output_tps`]）。
+    pub fn average_tps(&self) -> Option<f64> {
+        output_tps(Some(self.measured_output_tokens), Some(self.generation_ms))
     }
 
     /// 累计缓存命中率 `缓存读 ÷ 输入`：有一次未知或累计输入为 0 时没有值（Node 调试面板的 `cache.hitRate`）。

@@ -44,13 +44,6 @@ struct Saved {
 }
 
 impl rust_cli_tui::Preferences for Saved {
-    fn save_theme(
-        &self,
-        _theme: rust_cli_tui::UiTheme,
-    ) -> BoxFuture<'static, Result<String, String>> {
-        Box::pin(async { Ok(String::new()) })
-    }
-
     fn save_default_model(
         &self,
         selection: ModelSelection,
@@ -96,12 +89,13 @@ async fn the_picked_model_becomes_the_default_after_the_session_accepts_it() {
         |mut ui| async move {
             ui.submit("hello");
             ui.wait("the first reply", |s| {
-                s.contains("\u{23fa} hi") && !s.contains("esc to interrupt")
+                s.contains("   hi") && !s.contains("esc stop")
             })
             .await;
             // meta+p 打开同一个列表（tui-input.md §5）。
             ui.press(KeyCode::Char('p'), KeyModifiers::ALT);
-            ui.wait_for("Select model").await;
+            // 选择器没有头一行（Puffin）：等它的条目。
+            ui.wait_for("other-model").await;
             ui.key(KeyCode::Down);
             ui.key(KeyCode::Enter);
             ui.wait_for("Set model to other-model").await;
@@ -111,7 +105,7 @@ async fn the_picked_model_becomes_the_default_after_the_session_accepts_it() {
             .await;
             ui.submit("again please");
             ui.wait("the second turn", |s| {
-                s.contains("\u{23fa} again") && !s.contains("esc to interrupt")
+                s.contains("   again") && !s.contains("esc stop")
             })
             .await;
         },
@@ -130,7 +124,7 @@ async fn without_a_session_the_draft_choice_is_saved_at_once() {
     let probe = saved.clone();
     with_ui(model, setup(&saved, Some(directory)), |mut ui| async move {
         ui.wait_for("Ask before changes").await;
-        ui.submit("/model fixture/other-model");
+        ui.pick_model("other-model").await;
         ui.wait_for("Set model to other-model").await;
         ui.wait("the default write", |_| {
             !probe.models.lock().unwrap().is_empty()
@@ -154,13 +148,19 @@ async fn a_failed_write_warns_and_keeps_the_switch() {
         setup(&saved, Some(directory)),
         |mut ui| async move {
             ui.wait_for("Ask before changes").await;
-            ui.submit("/model other-model");
-            let screen = ui.wait_for(WARNING).await;
+            ui.pick_model("other-model").await;
+            // 失败行按正文宽 `min(宽 − 2, 99)` 折行（tui-kit.md §4.2「回合失败」）：把各行接起来再找整句。
+            let screen = ui
+                .wait("the warning", |s| {
+                    let joined: Vec<&str> = s.lines().map(str::trim).collect();
+                    joined.join(" ").contains(WARNING)
+                })
+                .await;
             assert!(screen.contains("disk full"), "{screen}");
             assert!(screen.contains("Set model to other-model"), "{screen}");
             ui.submit("go");
             ui.wait("the turn", |s| {
-                s.contains("\u{23fa} done") && !s.contains("esc to interrupt")
+                s.contains("   done") && !s.contains("esc stop")
             })
             .await;
         },
@@ -179,7 +179,7 @@ async fn a_selection_without_a_level_is_not_saved() {
     setup.lang = "zh_CN.UTF-8";
     with_ui(model, setup, |mut ui| async move {
         ui.wait_for("变更前确认").await;
-        ui.submit("/model other-model");
+        ui.pick_model("other-model").await;
         let screen = ui
             .wait_for("警告：当前选择已生效，但没能保存为新会话的默认模型")
             .await;
@@ -193,14 +193,59 @@ async fn a_selection_without_a_level_is_not_saved() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_explicit_endpoint_does_not_write_a_default() {
+async fn the_explicit_endpoint_has_no_picker_and_writes_no_default() {
     let model = GatedModel::scripted(Vec::new());
     let saved = Arc::new(Saved::default());
     with_ui(model, setup(&saved, None), |mut ui| async move {
         ui.wait_for("Ask before changes").await;
+        // 没有模型目录：2026-10-31 起 `/model 词` 不按名字换（模型由启动时的 `--model` 定），只说没有可选的。
         ui.submit(&format!("/model {GLM_5_3}"));
-        ui.wait_for(&format!("Set model to {GLM_5_3}")).await;
+        ui.wait_for("No model is configured").await;
     })
     .await;
+    assert!(saved.models.lock().unwrap().is_empty());
+}
+
+/// 选择器的 `auto` 一档（tui-kit.md §4.2 对应表的 `/model` 一行，用户决定 2026-10-31）：没有档位的在用模型打开在 `auto` 上，⏎
+/// 只对本会话，不写默认模型也不报不完整；别的模型 ← 走到最低一档之前的 `auto`，同样。
+#[tokio::test(flavor = "multi_thread")]
+async fn auto_stays_in_this_session() {
+    let model = GatedModel::scripted(vec![text_response(&["hi"]), text_response(&["again"])]);
+    let saved = Arc::new(Saved::default());
+    let directory: Arc<dyn ModelDirectory> = Arc::new(LeveledDirectory);
+    with_ui(
+        model.clone(),
+        setup(&saved, Some(directory)),
+        |mut ui| async move {
+            ui.submit("hello");
+            ui.wait("the first reply", |s| {
+                s.contains("   hi") && !s.contains("esc stop")
+            })
+            .await;
+            ui.submit("/model");
+            ui.wait("the picker on auto", |s| {
+                s.contains("←→") && s.contains("auto")
+            })
+            .await;
+            ui.key(KeyCode::Down);
+            ui.wait_for("high").await;
+            ui.key(KeyCode::Left);
+            ui.key(KeyCode::Left);
+            ui.wait("auto on the other model", |s| {
+                s.contains("auto") && !s.contains("low")
+            })
+            .await;
+            ui.key(KeyCode::Enter);
+            let screen = ui.wait_for("Set model to other-model").await;
+            assert!(!screen.contains("incomplete"), "{screen}");
+            ui.submit("again please");
+            ui.wait("the second turn", |s| {
+                s.contains("   again") && !s.contains("esc stop")
+            })
+            .await;
+        },
+    )
+    .await;
+    assert_eq!(model.requests()[1].selection, other(None));
     assert!(saved.models.lock().unwrap().is_empty());
 }

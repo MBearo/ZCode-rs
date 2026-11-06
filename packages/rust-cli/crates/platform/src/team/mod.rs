@@ -25,7 +25,7 @@ use rust_cli_kernel_api::model::ModelConnection;
 use rust_cli_net::Egress;
 use tokio::sync::OnceCell;
 
-pub(crate) use check::successful_data;
+pub(crate) use check::{entitlement as team_entitlement, successful_data};
 pub(crate) use list::TeamPlan;
 
 use crate::token::http::Http;

@@ -24,7 +24,7 @@ use crate::store::StoreError;
 use crate::tool::{Tool, ToolOutput, ToolProgress, ToolUseContext};
 
 pub use crate::compaction::{
-    AutoCompactOutcome, CompactRequest, CompactResult, CompactTracking, Compactor,
+    AutoCompactOutcome, CompactProgress, CompactRequest, CompactResult, CompactTracking, Compactor,
 };
 pub use crate::hooks::{Absorbed, AbsorbedNotice};
 pub use crate::hooks::{HookContext, HookEvent, HookEventName, HookOutcome, HookRunner, Steered};
@@ -178,6 +178,10 @@ pub trait RunSink: Interactions + SessionOps {
 
     /// 主循环开始一次压缩（自动或反应式），前端据此显示进度；没有前端的输出端什么都不做。
     async fn compact_started(&self, trigger: CompactTrigger);
+
+    /// 开始了的压缩失败了、回合不因此结束（docs/specs/rust-cli/compact.md §4.1），前端据此收起进度；没有前端的
+    /// 输出端什么都不做。
+    async fn compact_failed(&self, trigger: CompactTrigger, message: String);
 
     /// 工具边界并入的插话（`Delivery::Steer`，带各自 UserPromptSubmit 的消息）与发给这次运行的通知，按到达顺序
     /// （L18，docs/specs/rust-cli/query.md §4、§5）。取走即属于当前回合；本回合已中止时插话不取，继续排队。顶层会话的

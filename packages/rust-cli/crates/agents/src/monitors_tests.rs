@@ -306,7 +306,7 @@ async fn a_live_monitor_parks_the_subagent_until_it_ends() {
     until(|| {
         core.live
             .get(&agent_id)
-            .is_some_and(|entry| matches!(entry.state, crate::live::AgentState::Parked(_)))
+            .is_some_and(|entry| matches!(entry.state, crate::live::AgentState::Parked { .. }))
     })
     .await;
     // 停掉（没有终态通知、没有剩下的行）：最后一个 monitor 结束，子代理结束停放、送出自己的通知。
@@ -405,4 +405,84 @@ async fn an_expired_monitor_stops_with_the_kernel_generation() {
         lock(&env.stops).as_slice(),
         [crate::test_support::GENERATION]
     );
+}
+
+#[tokio::test]
+async fn a_monitor_that_ends_before_a_command_keeps_the_subagent_parked() {
+    let gates = Gates::default();
+    let env = Arc::new(MonitorEnv::default());
+    let harness = held_ticking(&gates, true, env.clone().machine());
+    let mut root = harness.agents.signals().signals(&SessionId::new(ROOT));
+    let (agent, session) = launched(&harness).await;
+    let output = env.command("op_m", "b1");
+    let events = env.watch_command(OperationId::new("op_m"), 0);
+    arm(&harness.agents.core, &agent, armed("b1"), events).unwrap();
+    // 另一条后台命令 b2 一直在跑（agents.md §5.2 第 5 条）。
+    let _b2 = env.command("op_b2", "b2");
+    gates.release(&session);
+    let core = harness.agents.core.clone();
+    let agent_id = agent.clone();
+    until(|| {
+        core.live
+            .get(&agent_id)
+            .is_some_and(|entry| matches!(entry.state, crate::live::AgentState::Parked { .. }))
+    })
+    .await;
+    // monitor 结束：推迟的通知现在送出（keepalive 的 note），b2 还在跑，留在停放。
+    env.stop("b1");
+    output
+        .send(Ok(CommandEvent::Finished {
+            outcome: Outcome::Cancelled,
+            exit_code: Some(137),
+            timed_out: false,
+            cwd_reset: None,
+            output_bytes: 0,
+            output_limit: None,
+        }))
+        .unwrap();
+    let Some(AgentSignal::Notice(own)) = root.next().await else {
+        panic!("expected the agent's own notice");
+    };
+    assert_eq!(own.agent, agent);
+    assert!(
+        own.text
+            .contains("<note>This agent stopped with background work of its own still running."),
+        "{}",
+        own.text
+    );
+    assert!(
+        harness
+            .agents
+            .core
+            .live
+            .get(&agent)
+            .is_some_and(|entry| matches!(
+                entry.state,
+                crate::live::AgentState::Parked { notified: true, .. }
+            ))
+    );
+    // b2 结束：通知让它续跑。
+    env.end(shell_notice(2, "b2"));
+    harness.started(2).await;
+}
+
+// `-p` 不为 monitor 停放（agents.md §5.3 第 3 条）：命令保活在 `-p` 也有（§5.2 第 5 条），但 monitor 在看的命令不算，
+// 否则执行环境列着的 monitor 命令会让 `-p` 的子代理停放。
+#[tokio::test]
+async fn in_print_mode_a_monitor_command_does_not_park_the_subagent() {
+    let gates = Gates::default();
+    let env = Arc::new(MonitorEnv::default());
+    let harness = held_ticking(&gates, false, env.clone().machine());
+    let (agent, session) = launched(&harness).await;
+    let _output = env.command("op_m", "b1");
+    let events = env.watch_command(OperationId::new("op_m"), 0);
+    arm(&harness.agents.core, &agent, armed("b1"), events).unwrap();
+    gates.release(&session);
+    let core = harness.agents.core.clone();
+    until(|| {
+        core.live
+            .get(&agent)
+            .is_some_and(|entry| matches!(entry.state, crate::live::AgentState::Finished(_)))
+    })
+    .await;
 }

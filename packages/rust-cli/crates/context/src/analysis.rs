@@ -17,11 +17,24 @@ pub struct MemoryFile {
     pub content: String,
 }
 
+/// system prompt 的一段与它在 `/context` 明细里的名字（固定的英文，context-usage.md §3.1）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptSection {
+    pub name: &'static str,
+    pub text: String,
+}
+
+impl PromptSection {
+    pub(crate) fn new(name: &'static str, text: String) -> Self {
+        Self { name, text }
+    }
+}
+
 /// 分析的结果。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Analysis {
-    /// system prompt 的段落；git 仓库时最后一段是 gitStatus。
-    pub sections: Vec<String>,
+    /// system prompt 的段落；git 仓库时最后一段是 gitStatus（`Git status`）。
+    pub sections: Vec<PromptSection>,
     /// 没有 `paths` 条件的规则文件（启动时加载的那些，含 AutoMem 的 MEMORY.md）。
     pub memory_files: Vec<MemoryFile>,
     /// skill 清单的行（与 `skill_listing` attachment 相同）。
@@ -64,7 +77,9 @@ impl PromptAssembler {
             && let Some(git) =
                 session_context::git_section(git, &request.workspace, &env_facts, window).await
         {
-            analysis.sections.push(git);
+            analysis
+                .sections
+                .push(PromptSection::new("Git status", git));
         }
         let scope = self.scope(request, &env_facts);
         let mut loaded = scope.startup(&env_facts.platform).await;

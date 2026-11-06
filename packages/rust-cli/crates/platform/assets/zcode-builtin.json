@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 33,
+  "revision": 43,
   "config": {
     "providerConfigRules": {
       "templateRules": [
@@ -44,6 +44,7 @@
             "builtinModelIds": [
               "GLM-5.3",
               "GLM-5.3-Flash",
+              "glm-5.3-flashx",
               "GLM-5V-Turbo",
               "GLM-5.1",
               "GLM-5.1-Highspeed",
@@ -158,12 +159,72 @@
               "baseUrl": "https://api.moonshot.cn/anthropic"
             },
             "builtinModelIds": [
+              "kimi-k3.1-pro",
+              "kimi-k3.1-pro-highspeed",
               "kimi-k3",
               "kimi-k2.7-code",
               "kimi-k2.6",
               "kimi-k2.7-code-highspeed",
               "k3",
               "k3-256k"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "moonshot-kimi"
+            }
+          }
+        },
+        {
+          "templateId": "kimi-code-cn",
+          "templateNameMap": {
+            "zh-CN": "Kimi Code（国内）",
+            "en-US": "Kimi Code (China)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://www.kimi.com/code/console"
+            },
+            "api": {
+              "type": "openai-chat-completions",
+              "baseUrl": "https://api.kimi.com/coding/v1"
+            },
+            "builtinModelIds": [
+              "k3.1-pro",
+              "k3.1-pro-highspeed",
+              "k3",
+              "k3-256k",
+              "kimi-for-coding",
+              "kimi-for-coding-highspeed"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "moonshot-kimi"
+            }
+          }
+        },
+        {
+          "templateId": "kimi-code-intl",
+          "templateNameMap": {
+            "zh-CN": "Kimi Code（国际）",
+            "en-US": "Kimi Code (International)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://www.kimi.com/code/console"
+            },
+            "api": {
+              "type": "openai-chat-completions",
+              "baseUrl": "https://api.kimi.ai/coding/v1"
+            },
+            "builtinModelIds": [
+              "k3.1-pro",
+              "k3.1-pro-highspeed",
+              "k3",
+              "k3-256k",
+              "kimi-for-coding",
+              "kimi-for-coding-highspeed"
             ],
             "logo": {
               "type": "builtin",
@@ -187,15 +248,35 @@
               "baseUrl": "https://api.minimaxi.com/anthropic"
             },
             "builtinModelIds": [
+              "MiniMax-M3.1-Flash",
               "MiniMax-M3",
               "MiniMax-M2.7",
               "MiniMax-M2.7-highspeed",
               "MiniMax-M2.5",
-              "MiniMax-M2.5-highspeed",
-              "MiniMax-M2.1",
-              "MiniMax-M2.1-highspeed",
-              "MiniMax-M2"
+              "MiniMax-M2.5-highspeed"
             ],
+            "logo": {
+              "type": "builtin",
+              "key": "minimax"
+            }
+          }
+        },
+        {
+          "templateId": "minimax-m-plan-cn",
+          "templateNameMap": {
+            "zh-CN": "MiniMax M Plan（中国）",
+            "en-US": "MiniMax M Plan (China)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://platform.minimax.cn/console/plan"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://api.minimax.cn/anthropic"
+            },
+            "builtinModelIds": ["MiniMax-M3.1-Flash", "MiniMax-M3.1-Flash-Preview"],
             "logo": {
               "type": "builtin",
               "key": "minimax"
@@ -298,6 +379,50 @@
           }
         },
         {
+          "templateId": "qwen-coding-plan-cn",
+          "templateNameMap": {
+            "zh-CN": "阿里云百炼 Coding Plan（中国）",
+            "en-US": "Alibaba Coding Plan (China)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://bailian.console.aliyun.com/cn-beijing/?tab=coding-plan"
+            },
+            "api": {
+              "type": "openai-chat-completions",
+              "baseUrl": "https://coding.dashscope.aliyuncs.com/v1"
+            },
+            "builtinModelIds": ["qwen3.7-plus"],
+            "logo": {
+              "type": "builtin",
+              "key": "alibaba-model-studio"
+            }
+          }
+        },
+        {
+          "templateId": "qwen-token-plan-team-cn",
+          "templateNameMap": {
+            "zh-CN": "阿里云百炼 Token Plan 团队版（中国）",
+            "en-US": "Alibaba Token Plan Team (China)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://bailian.console.aliyun.com/"
+            },
+            "api": {
+              "type": "openai-chat-completions",
+              "baseUrl": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+            },
+            "builtinModelIds": ["qwen3.8-max", "qwen3.8-flash"],
+            "logo": {
+              "type": "builtin",
+              "key": "alibaba-model-studio"
+            }
+          }
+        },
+        {
           "templateId": "xiaomi-mimo",
           "templateNameMap": {
             "zh-CN": "Xiaomi MiMo API",
@@ -342,6 +467,165 @@
           }
         },
         {
+          "templateId": "tencent-tokenhub-cn",
+          "templateNameMap": {
+            "zh-CN": "腾讯 TokenHub 广州 API（中国站）",
+            "en-US": "Tencent TokenHub Guangzhou API (China account)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://console.cloud.tencent.com/tokenhub"
+            },
+            "api": {
+              "type": "openai-chat-completions",
+              "baseUrl": "https://tokenhub.tencentmaas.com/v1"
+            },
+            "builtinModelIds": ["hy3", "hy4-preview"],
+            "logo": {
+              "type": "builtin",
+              "key": "tencent-cloud"
+            }
+          }
+        },
+        {
+          "templateId": "tencent-tokenhub-intl",
+          "templateNameMap": {
+            "zh-CN": "腾讯 TokenHub 新加坡 API（中国站）",
+            "en-US": "Tencent TokenHub Singapore API (China account)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://console.cloud.tencent.com/tokenhub"
+            },
+            "api": {
+              "type": "openai-chat-completions",
+              "baseUrl": "https://tokenhub-intl.tencentmaas.com/v1"
+            },
+            "builtinModelIds": ["hy3", "hy4-preview"],
+            "logo": {
+              "type": "builtin",
+              "key": "tencent-cloud"
+            }
+          }
+        },
+        {
+          "templateId": "volcengine-ark",
+          "templateNameMap": {
+            "zh-CN": "火山方舟 API",
+            "en-US": "Volcano Ark API"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://ark.volcengine.com/region:cn-beijing/apikey"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://ark.cn-beijing.volces.com/api/compatible"
+            },
+            "builtinModelIds": [
+              "doubao-seed-evolving",
+              "doubao-seed-2-1-pro-260915",
+              "doubao-seed-2-1-lite-260915",
+              "doubao-seed-2-1-turbo-260628"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "volcengine"
+            }
+          }
+        },
+        {
+          "templateId": "volcengine-coding-plan",
+          "templateNameMap": {
+            "zh-CN": "火山方舟 Coding Plan",
+            "en-US": "Volcano Ark Coding Plan"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://ark.volcengine.com/region:cn-beijing"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://ark.cn-beijing.volces.com/api/coding"
+            },
+            "builtinModelIds": ["doubao-seed-2.1-pro", "doubao-seed-2.1-lite"],
+            "logo": {
+              "type": "builtin",
+              "key": "volcengine"
+            }
+          }
+        },
+        {
+          "templateId": "volcengine-agent-plan",
+          "templateNameMap": {
+            "zh-CN": "火山方舟 Agent Plan",
+            "en-US": "Volcano Ark Agent Plan"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://ark.volcengine.com/region:cn-beijing"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://ark.cn-beijing.volces.com/api/plan"
+            },
+            "builtinModelIds": ["doubao-seed-2.1-pro", "doubao-seed-2.1-lite"],
+            "logo": {
+              "type": "builtin",
+              "key": "volcengine"
+            }
+          }
+        },
+        {
+          "templateId": "stepfun",
+          "templateNameMap": {
+            "zh-CN": "阶跃星辰 API",
+            "en-US": "StepFun API"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://platform.stepfun.com/interface-key"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://api.stepfun.com"
+            },
+            "builtinModelIds": ["step-5-preview", "step-3.7-flash"],
+            "logo": {
+              "type": "builtin",
+              "key": "stepfun"
+            }
+          }
+        },
+        {
+          "templateId": "stepfun-step-plan",
+          "templateNameMap": {
+            "zh-CN": "阶跃星辰 Step Plan",
+            "en-US": "StepFun Step Plan"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://platform.stepfun.com/interface-key"
+            },
+            "api": {
+              "type": "anthropic-messages",
+              "baseUrl": "https://api.stepfun.com/step_plan"
+            },
+            "builtinModelIds": ["step-5-preview", "step-3.7-flash"],
+            "logo": {
+              "type": "builtin",
+              "key": "stepfun"
+            }
+          }
+        },
+        {
           "templateId": "openai",
           "templateNameMap": {
             "zh-CN": "OpenAI",
@@ -358,8 +642,10 @@
             },
             "builtinModelIds": [
               "gpt-6-astra",
-              "gpt-5.6-sol",
               "gpt-5.6-terra",
+              "gpt-6.1-sol",
+              "gpt-6-luna",
+              "gpt-5.6-sol",
               "gpt-5.6-luna",
               "gpt-5.6",
               "gpt-5.4",
@@ -391,6 +677,9 @@
             },
             "builtinModelIds": [
               "claude-fable-5-1",
+              "claude-opus-5-5",
+              "claude-sonnet-5-5",
+              "claude-haiku-5-5",
               "claude-fable-5",
               "claude-opus-5",
               "claude-sonnet-5",
@@ -417,10 +706,36 @@
               "type": "openai-responses",
               "baseUrl": "https://api.x.ai/v1"
             },
-            "builtinModelIds": ["grok-4.6", "grok-build-0.1", "grok-4.3"],
+            "builtinModelIds": ["grok-build-0.1", "grok-4.7", "grok-4.6", "grok-4.3"],
             "logo": {
               "type": "builtin",
               "key": "xai"
+            }
+          }
+        },
+        {
+          "templateId": "siliconflow-cn",
+          "templateNameMap": {
+            "zh-CN": "硅基流动 API（中国）",
+            "en-US": "SiliconFlow API (China)"
+          },
+          "config": {
+            "access": {
+              "type": "api-key",
+              "apiKeyManagementUrl": "https://cloud.siliconflow.cn/account/ak"
+            },
+            "api": {
+              "type": "openai-chat-completions",
+              "baseUrl": "https://api.siliconflow.cn/v1"
+            },
+            "builtinModelIds": [
+              "zai-org/GLM-5.3",
+              "deepseek-ai/DeepSeek-V4-Flash",
+              "moonshotai/Kimi-K2.7-Code"
+            ],
+            "logo": {
+              "type": "builtin",
+              "key": "siliconflow"
             }
           }
         },
@@ -440,15 +755,26 @@
               "baseUrl": "https://openrouter.ai/api"
             },
             "builtinModelIds": [
+              "minimax/minimax-m3.1-flash",
+              "moonshotai/kimi-k3.1-pro",
               "anthropic/claude-fable-5.1",
               "openai/gpt-6-astra",
-              "openai/gpt-5.6-sol",
-              "anthropic/claude-opus-5",
               "deepseek/deepseek-v4-pro",
               "moonshotai/kimi-k3",
               "z-ai/glm-5.3",
               "qwen/qwen3.8-max",
               "minimax/minimax-m3",
+              "openai/gpt-6.1-sol",
+              "openai/gpt-6-luna",
+              "anthropic/claude-opus-5.5",
+              "anthropic/claude-sonnet-5.5",
+              "anthropic/claude-haiku-5.5",
+              "x-ai/grok-4.7",
+              "z-ai/glm-5.3-flashx",
+              "xiaomi/mimo-v2.6-pro",
+              "xiaomi/mimo-v2.6-flash",
+              "openai/gpt-5.6-sol",
+              "anthropic/claude-opus-5",
               "xiaomi/mimo-v2.5-pro",
               "x-ai/grok-4.6",
               "deepseek/deepseek-v4.1-flash",
@@ -507,10 +833,10 @@
           }
         },
         {
-          "templateId": "opencode-go-chat",
+          "templateId": "opencode-go-responses",
           "templateNameMap": {
-            "zh-CN": "OpenCode Go (Chat)",
-            "en-US": "OpenCode Go (Chat)"
+            "zh-CN": "OpenCode Go (Responses)",
+            "en-US": "OpenCode Go (Responses)"
           },
           "config": {
             "access": {
@@ -518,26 +844,10 @@
               "apiKeyManagementUrl": "https://opencode.ai/auth"
             },
             "api": {
-              "type": "openai-chat-completions",
+              "type": "openai-responses",
               "baseUrl": "https://opencode.ai/zen/go/v1"
             },
-            "builtinModelIds": [
-              "glm-5.3-flash",
-              "glm-5.3",
-              "kimi-k3",
-              "kimi-k2.7-code",
-              "deepseek-v4.1-flash",
-              "deepseek-v4-pro",
-              "mimo-v2.5",
-              "mimo-v2.5-pro",
-              "glm-5.2",
-              "glm-5.1",
-              "kimi-k2.6",
-              "deepseek-v4-flash",
-              "deepseek-v4-flash-vision-exp",
-              "hy4-preview",
-              "hy3"
-            ],
+            "builtinModelIds": ["gpt-6-luna", "grok-4.7", "gpt-5.6-luna", "grok-4.6"],
             "logo": {
               "type": "builtin",
               "key": "opencode"
@@ -563,6 +873,7 @@
               "minimax-m3",
               "qwen3.8-max",
               "qwen3.8-flash",
+              "claude-haiku-5-5",
               "minimax-m2.7",
               "minimax-m2.5",
               "qwen3.7-max",
@@ -576,10 +887,10 @@
           }
         },
         {
-          "templateId": "opencode-go-responses",
+          "templateId": "opencode-go-chat",
           "templateNameMap": {
-            "zh-CN": "OpenCode Go (Responses)",
-            "en-US": "OpenCode Go (Responses)"
+            "zh-CN": "OpenCode Go (Chat)",
+            "en-US": "OpenCode Go (Chat)"
           },
           "config": {
             "access": {
@@ -587,10 +898,30 @@
               "apiKeyManagementUrl": "https://opencode.ai/auth"
             },
             "api": {
-              "type": "openai-responses",
+              "type": "openai-chat-completions",
               "baseUrl": "https://opencode.ai/zen/go/v1"
             },
-            "builtinModelIds": ["gpt-5.6-luna", "grok-4.6"],
+            "builtinModelIds": [
+              "minimax-m3.1-flash",
+              "kimi-k3.1-pro",
+              "glm-5.3-flash",
+              "glm-5.3",
+              "kimi-k3",
+              "kimi-k2.7-code",
+              "deepseek-v4.1-flash",
+              "deepseek-v4-pro",
+              "mimo-v2.6-pro",
+              "mimo-v2.6-flash",
+              "mimo-v2.5",
+              "mimo-v2.5-pro",
+              "glm-5.2",
+              "glm-5.1",
+              "kimi-k2.6",
+              "deepseek-v4-flash",
+              "deepseek-v4-flash-vision-exp",
+              "hy4-preview",
+              "hy3"
+            ],
             "logo": {
               "type": "builtin",
               "key": "opencode"
@@ -614,6 +945,9 @@
             },
             "builtinModelIds": [
               "gpt-6-astra",
+              "gpt-6.1-sol",
+              "gpt-6-luna",
+              "grok-4.7",
               "gpt-5.6-sol",
               "gpt-5.6-terra",
               "gpt-5.6-luna",
@@ -651,10 +985,13 @@
             },
             "builtinModelIds": [
               "claude-fable-5-1",
-              "claude-fable-5",
               "qwen3.7-max",
               "qwen3.6-plus",
               "qwen3.5-plus",
+              "claude-opus-5-5",
+              "claude-sonnet-5-5",
+              "claude-haiku-5-5",
+              "claude-fable-5",
               "claude-opus-5",
               "claude-sonnet-5",
               "claude-haiku-4-5",
@@ -698,6 +1035,7 @@
               "ling-3.0-flash-fin-free",
               "nemotron-3-ultra-free",
               "muse-spark-1.2-contributor-free",
+              "mimo-v2.6-flash-free",
               "minimax-m2.7",
               "deepseek-v4-flash",
               "glm-5.1",
@@ -4075,6 +4413,42 @@
           }
         },
         {
+          "modelMatch": "glm-5\\.3",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://api\\.z\\.ai/api/anthropic/?",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsVideo": false
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "glm-5\\.3",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://open\\.bigmodel\\.cn/api/anthropic/?",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsVideo": false
+              }
+            }
+          }
+        },
+        {
+          "modelMatch": "glm-5\\.3",
+          "apiTypeMatch": "anthropic-messages",
+          "baseUrlMatch": "https://zcode\\.z\\.ai/api/v1/highspeed/anthropic/?",
+          "config": {
+            "properties": {
+              "inputFormat": {
+                "supportsVideo": false
+              }
+            }
+          }
+        },
+        {
           "modelMatch": ".*claude-.*",
           "apiTypeMatch": "anthropic-messages",
           "baseUrlMatch": "(?:https://api\\.anthropic\\.com/v1)",
@@ -4353,6 +4727,16 @@
               "supportsJsonSchemaOutput": true
             }
           }
+        },
+        {
+          "modelMatch": ".*",
+          "apiTypeMatch": "openai-chat-completions",
+          "baseUrlMatch": "https://opencode\\.ai/zen/go/v1/?",
+          "config": {
+            "properties": {
+              "supportsJsonSchemaOutput": false
+            }
+          }
         }
       ],
       "templateModelRules": [
@@ -4437,14 +4821,14 @@
           "templateId": "opencode-go-chat",
           "modelId": "mimo-v2.5",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
           "templateId": "opencode-go-chat",
           "modelId": "mimo-v2.5-pro",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
@@ -4521,14 +4905,14 @@
           "templateId": "opencode-go-responses",
           "modelId": "gpt-5.6-luna",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
           "templateId": "opencode-go-responses",
           "modelId": "grok-4.6",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
@@ -4612,14 +4996,14 @@
           "modelId": "MiniMax-M2.7",
           "templateId": "minimax",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
           "modelId": "MiniMax-M2.7-highspeed",
           "templateId": "minimax",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
@@ -4638,27 +5022,6 @@
         },
         {
           "modelId": "MiniMax-M2.5-highspeed",
-          "templateId": "minimax",
-          "config": {
-            "enabled": false
-          }
-        },
-        {
-          "modelId": "MiniMax-M2.1",
-          "templateId": "minimax",
-          "config": {
-            "enabled": false
-          }
-        },
-        {
-          "modelId": "MiniMax-M2.1-highspeed",
-          "templateId": "minimax",
-          "config": {
-            "enabled": false
-          }
-        },
-        {
-          "modelId": "MiniMax-M2",
           "templateId": "minimax",
           "config": {
             "enabled": false
@@ -4815,21 +5178,21 @@
           "modelId": "mimo-v2.5-pro",
           "templateId": "xiaomi-mimo",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
           "modelId": "mimo-v2.5",
           "templateId": "xiaomi-mimo",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
           "modelId": "gpt-5.6-sol",
           "templateId": "openai",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
@@ -4843,7 +5206,7 @@
           "modelId": "gpt-5.6-luna",
           "templateId": "openai",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
@@ -4864,35 +5227,35 @@
           "modelId": "claude-fable-5",
           "templateId": "anthropic",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
           "modelId": "claude-opus-5",
           "templateId": "anthropic",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
           "modelId": "claude-sonnet-5",
           "templateId": "anthropic",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
           "modelId": "claude-haiku-4-5-20251001",
           "templateId": "anthropic",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
           "modelId": "grok-4.6",
           "templateId": "xai",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
@@ -4913,7 +5276,7 @@
           "templateId": "openrouter",
           "modelId": "openai/gpt-5.6-sol",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
@@ -4941,7 +5304,7 @@
           "templateId": "openrouter",
           "modelId": "anthropic/claude-opus-5",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
@@ -5032,7 +5395,7 @@
           "templateId": "openrouter",
           "modelId": "xiaomi/mimo-v2.5-pro",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
@@ -5046,14 +5409,14 @@
           "templateId": "openrouter",
           "modelId": "x-ai/grok-4.6",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
           "templateId": "opencode-zen-responses",
           "modelId": "gpt-5.6-sol",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
@@ -5144,7 +5507,7 @@
           "templateId": "opencode-zen-messages",
           "modelId": "claude-fable-5",
           "config": {
-            "enabled": true
+            "enabled": false
           }
         },
         {
@@ -6090,6 +6453,1803 @@
           "modelId": "qwen/qwen3.8-max-0902",
           "config": {
             "enabled": false
+          }
+        },
+        {
+          "templateId": "openai",
+          "modelId": "gpt-6.1-sol",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1050000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh", "max"],
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_output_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "openai",
+          "modelId": "gpt-6-luna",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1050000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high", "xhigh", "max"],
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_output_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "anthropic",
+          "modelId": "claude-opus-5-5",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "anthropic",
+          "modelId": "claude-sonnet-5-5",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "anthropic",
+          "modelId": "claude-haiku-5-5",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh", "max"],
+                "map": "{\n  \"thinking\": {\n    \"type\": \"adaptive\"\n  },\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "xai",
+          "modelId": "grok-4.7",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 500000,
+              "inputFormat": {
+                "supportsImage": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh"],
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_output_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "zai-standard-api",
+          "modelId": "glm-5.3-flashx",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "inputFormat": {
+                "supportsPdf": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": \"enabled\"\n  },\n  \"reasoning_effort\": reasoningLevel\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "openai/gpt-6.1-sol",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1050000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh", "max"],
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "openai/gpt-6-luna",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1050000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high", "xhigh", "max"],
+                "map": "reasoningLevel == \"none\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"output_config\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "anthropic/claude-opus-5.5",
+          "config": {
+            "enabled": true,
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "anthropic/claude-sonnet-5.5",
+          "config": {
+            "enabled": true,
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "anthropic/claude-haiku-5.5",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh", "max"],
+                "map": "{\n  \"thinking\": {\n    \"type\": \"adaptive\"\n  },\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "x-ai/grok-4.7",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 500000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh"],
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 450000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "z-ai/glm-5.3-flashx",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsPdf": false
+              }
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "xiaomi/mimo-v2.6-pro",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "xiaomi/mimo-v2.6-flash",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-6.1-sol",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1050000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh", "max"],
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_output_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "gpt-6-luna",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1050000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high", "xhigh", "max"],
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_output_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "opencode-zen-responses",
+          "modelId": "grok-4.7",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 500000,
+              "inputFormat": {
+                "supportsImage": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh"],
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_output_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "claude-opus-5-5",
+          "config": {
+            "enabled": true,
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "claude-sonnet-5-5",
+          "config": {
+            "enabled": true,
+            "optionSpecs": {
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "opencode-zen-messages",
+          "modelId": "claude-haiku-5-5",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh", "max"],
+                "map": "{\n  \"thinking\": {\n    \"type\": \"adaptive\"\n  },\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "opencode-zen-chat",
+          "modelId": "mimo-v2.6-flash-free",
+          "config": {
+            "enabled": true,
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "opencode-go-responses",
+          "modelId": "gpt-6-luna",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1050000,
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high", "xhigh", "max"],
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_output_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "opencode-go-responses",
+          "modelId": "grok-4.7",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 500000,
+              "inputFormat": {
+                "supportsImage": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh"],
+                "map": "{\n  \"reasoning\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_output_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "opencode-go-messages",
+          "modelId": "claude-haiku-5-5",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "inputFormat": {
+                "supportsImage": true,
+                "supportsPdf": true
+              },
+              "supportsJsonSchemaOutput": true
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh", "max"],
+                "map": "{\n  \"thinking\": {\n    \"type\": \"adaptive\"\n  },\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "mimo-v2.6-pro",
+          "config": {
+            "enabled": true,
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "mimo-v2.6-flash",
+          "config": {
+            "enabled": true,
+            "optionSpecs": {
+              "reasoningLevel": {
+                "map": "{\n  \"thinking\": {\n    \"type\": reasoningLevel\n  }\n}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "tencent-tokenhub-cn",
+          "modelId": "hy3",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 256000
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "high"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "tencent-tokenhub-cn",
+          "modelId": "hy4-preview",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1024000
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "high"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 64000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "tencent-tokenhub-intl",
+          "modelId": "hy3",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 256000
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "high"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "tencent-tokenhub-intl",
+          "modelId": "hy4-preview",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1024000
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "high"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 64000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "volcengine-ark",
+          "modelId": "doubao-seed-evolving",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1024000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high"],
+                "map": "reasoningLevel == \"none\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"output_config\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              },
+              "maxOutputTokens": {
+                "max": 256000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "volcengine-ark",
+          "modelId": "doubao-seed-2-1-pro-260915",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1024000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high"],
+                "map": "reasoningLevel == \"none\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"output_config\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              },
+              "maxOutputTokens": {
+                "max": 256000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "volcengine-ark",
+          "modelId": "doubao-seed-2-1-lite-260915",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1024000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high"],
+                "map": "reasoningLevel == \"none\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"output_config\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              },
+              "maxOutputTokens": {
+                "max": 256000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "volcengine-ark",
+          "modelId": "doubao-seed-2-1-turbo-260628",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 256000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high"],
+                "map": "reasoningLevel == \"none\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"output_config\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              },
+              "maxOutputTokens": {
+                "max": 256000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "volcengine-coding-plan",
+          "modelId": "doubao-seed-2.1-pro",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1024000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high"],
+                "map": "reasoningLevel == \"none\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"output_config\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              },
+              "maxOutputTokens": {
+                "max": 65536,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "volcengine-coding-plan",
+          "modelId": "doubao-seed-2.1-lite",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1024000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high"],
+                "map": "reasoningLevel == \"none\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"output_config\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              },
+              "maxOutputTokens": {
+                "max": 65536,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "volcengine-agent-plan",
+          "modelId": "doubao-seed-2.1-pro",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1024000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high"],
+                "map": "reasoningLevel == \"none\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"output_config\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              },
+              "maxOutputTokens": {
+                "max": 256000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "volcengine-agent-plan",
+          "modelId": "doubao-seed-2.1-lite",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1024000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["none", "low", "medium", "high"],
+                "map": "reasoningLevel == \"none\"\n  ? {\n      \"thinking\": {\n        \"type\": \"disabled\"\n      }\n    }\n  : {\n      \"output_config\": {\n        \"effort\": reasoningLevel\n      }\n    }"
+              },
+              "maxOutputTokens": {
+                "max": 256000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "stepfun",
+          "modelId": "step-5-preview",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high"],
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 64000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "stepfun",
+          "modelId": "step-3.7-flash",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high"],
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 128000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "stepfun-step-plan",
+          "modelId": "step-5-preview",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high"],
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 64000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "stepfun-step-plan",
+          "modelId": "step-3.7-flash",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high"],
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 128000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "siliconflow-cn",
+          "modelId": "zai-org/GLM-5.3",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["enabled"],
+                "map": "{\"enable_thinking\": true}"
+              },
+              "maxOutputTokens": {
+                "max": 128000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "siliconflow-cn",
+          "modelId": "deepseek-ai/DeepSeek-V4-Flash",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": false,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "high", "max"],
+                "map": "reasoningLevel == \"disabled\" ? {\"enable_thinking\": false} : {\"enable_thinking\": true, \"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 393216,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "siliconflow-cn",
+          "modelId": "moonshotai/Kimi-K2.7-Code",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["enabled"],
+                "map": "{\"enable_thinking\": true}"
+              },
+              "maxOutputTokens": {
+                "max": 98304,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "qwen-coding-plan-cn",
+          "modelId": "qwen3.7-plus",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["disabled", "enabled"],
+                "map": "{\"enable_thinking\": reasoningLevel == \"enabled\"}"
+              },
+              "maxOutputTokens": {
+                "max": 65536,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "qwen-token-plan-team-cn",
+          "modelId": "qwen3.8-max",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "xhigh"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "qwen-token-plan-team-cn",
+          "modelId": "qwen3.8-flash",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "xhigh"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "kimi-code-cn",
+          "modelId": "k3",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "kimi-code-cn",
+          "modelId": "k3-256k",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "kimi-code-cn",
+          "modelId": "kimi-for-coding",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "kimi-code-cn",
+          "modelId": "kimi-for-coding-highspeed",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["enabled"],
+                "map": "{\n  \"thinking\": {\n    \"type\": \"enabled\"\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 98304,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "kimi-code-intl",
+          "modelId": "k3",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "kimi-code-intl",
+          "modelId": "k3-256k",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": false,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "kimi-code-intl",
+          "modelId": "kimi-for-coding",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "kimi-code-intl",
+          "modelId": "kimi-for-coding-highspeed",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 262144,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["enabled"],
+                "map": "{\n  \"thinking\": {\n    \"type\": \"enabled\"\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 98304,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "minimax-m-plan-cn",
+          "modelId": "MiniMax-M3.1-Flash-Preview",
+          "config": {
+            "enabled": false,
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh", "max"],
+                "map": "{\n  \"thinking\": {\n    \"type\": \"adaptive\"\n  },\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 32000,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "moonshot-kimi",
+          "modelId": "kimi-k3.1-pro",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "moonshot-kimi",
+          "modelId": "kimi-k3.1-pro-highspeed",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "kimi-code-cn",
+          "modelId": "k3.1-pro",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "kimi-code-cn",
+          "modelId": "k3.1-pro-highspeed",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "kimi-code-intl",
+          "modelId": "k3.1-pro",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "kimi-code-intl",
+          "modelId": "k3.1-pro-highspeed",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "moonshotai/kimi-k3.1-pro",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "high", "max"],
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 943718,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "kimi-k3.1-pro",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["max"],
+                "map": "{\"reasoning_effort\": reasoningLevel}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "minimax",
+          "modelId": "MiniMax-M3.1-Flash",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh", "max"],
+                "map": "{\n  \"thinking\": {\n    \"type\": \"adaptive\"\n  },\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 524288,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "minimax-m-plan-cn",
+          "modelId": "MiniMax-M3.1-Flash",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh", "max"],
+                "map": "{\n  \"thinking\": {\n    \"type\": \"adaptive\"\n  },\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 524288,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "openrouter",
+          "modelId": "minimax/minimax-m3.1-flash",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1048576,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": true,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["low", "medium", "high", "xhigh", "max"],
+                "map": "{\n  \"output_config\": {\n    \"effort\": reasoningLevel\n  }\n}"
+              },
+              "maxOutputTokens": {
+                "max": 524288,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
+          }
+        },
+        {
+          "templateId": "opencode-go-chat",
+          "modelId": "minimax-m3.1-flash",
+          "config": {
+            "enabled": true,
+            "properties": {
+              "contextWindow": 1000000,
+              "inputFormat": {
+                "supportsText": true,
+                "supportsImage": true,
+                "supportsVideo": true,
+                "supportsAudio": false,
+                "supportsPdf": false
+              },
+              "supportsToolCall": true,
+              "supportsJsonSchemaOutput": false,
+              "supportsNativeWebSearch": false
+            },
+            "optionSpecs": {
+              "reasoningLevel": {
+                "values": ["max"],
+                "map": "{\n  \"reasoning_effort\": reasoningLevel\n}"
+              },
+              "maxOutputTokens": {
+                "max": 131072,
+                "map": "{\"max_tokens\": maxOutputTokens}"
+              }
+            }
           }
         }
       ],

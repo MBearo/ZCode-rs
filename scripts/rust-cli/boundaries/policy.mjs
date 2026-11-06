@@ -6,6 +6,7 @@
 // ZCode App 协议的方法名表（PROTOCOLS.zcode，app-protocol.md §9.2）：由 scripts/rust-cli/app-protocol/inventory.mjs --write
 // 从 App 的协议源码生成，--check 查漂移。
 import ZCODE_METHODS from "./zcode-methods.json" with { type: "json" };
+import { PUFFIN_LITERAL_EXCEPTIONS, PUFFIN_NUMBER_RAISES } from "./policy-puffin.mjs";
 import { TOOL_NAME_EXCEPTIONS, TOOL_NAME_LITERAL } from "./policy-vocabulary.mjs";
 
 /// crate 所在的层（README §3.1 规则 1）。
@@ -47,7 +48,13 @@ export const LAYERS = {
   machines: "adapter",
   peers: "adapter",
   platform: "platform",
+  // 终端界面（docs/specs/rust-cli/tui.md）：唯一的交互界面（2026-10-31 起；Puffin 的 Rust 移植删掉，设计见 docs/puffin-tui.md）。
   tui: "frontend",
+  // 终端界面与 cli 共用的端口类型：只有 trait 与类型。
+  "tui-ports": "ports",
+  // 终端界面的渲染层（docs/specs/rust-cli/tui-kit.md）：格子、样式、渲染器、Element 与布局、按键解析、主题、
+  // Markdown；只依赖 base，没有 unsafe。
+  "tui-kit": "kit",
   headless: "frontend",
   // 协议适配层（docs/specs/rust-cli/app-protocol.md §3.2）：协议框架只被前端与入口依赖；每种协议一个前端 crate。
   "protocol-core": "frontend-shared",
@@ -68,10 +75,14 @@ export const LAYER_RULES = {
   // frontend-shared：协议适配层的共用框架（docs/specs/rust-cli/app-protocol.md §3）。只依赖 base 与 kernel-api，只被前端与入口
   // 依赖；不认识任何一种协议。
   "frontend-shared": { layers: [], crates: ["base", "kernel-api"] },
+  // ports：终端界面与 cli 共用的端口类型。只依赖 base 与 kernel-api，只被前端与入口依赖；没有 IO、没有画面。
+  ports: { layers: [], crates: ["base", "kernel-api"] },
+  // kit：终端界面的渲染层（tui-kit.md）。只依赖 base，只被前端依赖；不认识内核与会话。
+  kit: { layers: [], crates: ["base"] },
   // 前端的产品代码只认 kernel-api 的会话 API：内核由入口组装好交进来，runtime 只在测试里组装 `LocalKernel`（F133，审查
   // U14）；登录、凭据、Provider 与本机配置文件由入口经 platform 实现、注入成服务，前端不依赖 platform（F133，审查 E7）。
   frontend: {
-    layers: ["frontend-shared"],
+    layers: ["frontend-shared", "ports", "kit"],
     crates: ["base", "prompts", "kernel-api"],
     testOnly: ["runtime"],
   },
@@ -143,8 +154,10 @@ export const ALLOWED = {
     "tools",
   ],
   platform: ["base", "fs", "kernel-api", "net", "paths"],
+  "tui-ports": ["base", "kernel-api"],
+  "tui-kit": ["base"],
   // runtime：只在测试里组装内核（LAYER_RULES 的 testOnly）。
-  tui: ["base", "kernel-api", "prompts", "runtime"],
+  tui: ["base", "kernel-api", "prompts", "runtime", "tui-ports", "tui-kit"],
   headless: ["base", "kernel-api", "runtime"],
   // 协议框架：连接、会话桥、投递与 schema 校验只用内核会话 API；任务经 base 的 TaskScope（app-protocol.md §3.3）。
   "protocol-core": ["base", "kernel-api"],
@@ -219,6 +232,19 @@ export const CLI_LOCAL_FILES = {
   "crates/cli/src/commands/update/cache.rs": "本机才有的功能：自动更新的缓存",
   "crates/cli/src/commands/update/handoff.rs": "本机才有的功能：自动更新的交接文件",
   "crates/cli/src/machines/executor_dist/mod.rs": "本机才有的功能：SSH 部署的执行器产物缓存",
+  "crates/cli/src/assemble/models_memory.rs":
+    "本机的界面状态：上次定下的缺省模型（`~/.zcode/rust-cli/default-model.json`，performance.md §12.4）",
+  "crates/cli/src/commands/desktop_app/system.rs":
+    "本机才有的功能：找到并启动本机的桌面端（cli-args.md §16）",
+  "crates/cli/src/frontends/tui.rs":
+    "前端：设置页里记忆文件的大小（只是显示）；同 editor.rs，`/memory` 改经主 env 在 M2（deployment.md §19）",
+  "crates/cli/src/frontends/tui_cockpit.rs":
+    "本机的界面状态：驾驶舱的笔记与登记处（tui-cockpit.md §1）",
+  "crates/cli/src/frontends/tui_inputs.rs": "本机的界面状态：主题、模型、模式与驾驶舱的设置文件",
+  "crates/cli/src/frontends/tui_machines.rs":
+    "本机才有的功能：`/machines` 读用户自己的 ~/.ssh/config 列出主机",
+  "crates/cli/src/frontends/tui_peek.rs":
+    "前端：`@` 面板的文件预览，只读本机工作区（远端的工作区回答 `Missing`，还没有经主 env 读的接缝）",
 };
 
 /// IO 类别（README §4）：clippy.toml 的每条禁令按路径前缀归入一类；`entries` 是可以豁免这一类的 crate。
@@ -290,9 +316,10 @@ export const THIRD_PARTY_OWNERS = {
   // tui：Windows 控制台——stdin 是不是控制台（mintty 的判断）与背景色探测读控制台输入（工作线 F71），同 Unix 的 rustix。
   "windows-sys": ["fs", "proc", "cli", "tui"],
   ring: ["platform"],
-  crossterm: ["tui"],
-  ratatui: ["tui"],
-  rustix: ["tui"],
+  // 终端界面：原始模式、备用屏、尺寸、按键与鼠标。
+  crossterm: ["tui", "tui-kit"],
+  // 终端界面：OSC 10/11 探测的带超时读（kit 的探测在 tui-kit）。
+  rustix: ["tui", "tui-kit"],
   // 全局分配器（带 C 代码）只由组装根设置，且只在 *-linux-musl（docs/specs/rust-cli/linux.md §8.3，F44）。
   mimalloc: ["cli"],
   // 内嵌的搜索工具（第三方源码，非 workspace 成员，docs/specs/rust-cli/embedded-search.md，F53）：整个进程变成
@@ -319,18 +346,15 @@ export const PURE = [
   "httpdate",
   // kernel-api `env_path::nfc`：Unicode NFC（工具路径参数，tools-files.md §3.2，F14）。
   "icu_normalizer",
-  "pulldown-cmark",
   "regex",
   "regress",
   "serde",
   "serde_json",
   "sha2",
-  "syntect",
   "thiserror",
   "tokio",
   "tokio-util",
   "tracing",
-  "two-face",
   // tui：搜索按字素匹配（docs/specs/rust-cli/tui-input.md §2.3.3，F114）。
   "unicode-segmentation",
   "unicode-width",
@@ -349,8 +373,8 @@ export const TOKIO_IO_FEATURES = {
   full: [],
 };
 
-/// 单个 .rs 文件的行数上限（2026-10-18 用户把上限从 400 调到 800）。
-export const MAX_LINES = 800;
+/// 单个 .rs 文件的行数上限（README §3.1；2026-10-18 用户从 400 调到 800，2026-11-06 用户说“行数不需要那么严格”，调到 1000）。
+export const MAX_LINES = 1000;
 
 /// 同一个名字只定义一处（README §4.1，F55）：产品代码（不含测试文件）的字符串字面量里出现 `pattern` 时，文件必须是
 /// `owners` 之一；每个 owner 自己要有这个字面量（死项报错）。注释不算；`packages/rust-cli/prompts/` 下的提示词原文是
@@ -605,6 +629,23 @@ const ENV_NAME_EXCEPTIONS = [
     reason: "服务返回的枚举值（订阅方式 ONE_TIME），不是环境变量",
   },
   {
+    files: ["crates/cli/src/frontends/tui_usage.rs", "crates/platform/src/usage/mcp.rs"],
+    rules: ["env var name"],
+    reason:
+      "服务返回的枚举值（套餐额度的种类 TOKENS_LIMIT、CREDIT_LIMIT、TIME_LIMIT、MCP_USAGE），不是环境变量",
+  },
+  {
+    files: ["crates/tui-kit/src/app/widgets/doorway/mod.rs"],
+    rules: ["env var name"],
+    reason: "系统的网络错误码（EAI_AGAIN，与 ETIMEDOUT 等同表），不是环境变量",
+  },
+  {
+    files: ["crates/cli/src/commands/desktop_app/system.rs"],
+    rules: ["env var name"],
+    reason:
+      "启动桌面端前去掉 ELECTRON_RUN_AS_NODE：base 是 foundation 层，不许知道 Electron 的词（app-protocol.md §9.2），只有这一处用",
+  },
+  {
     files: ["crates/policy/src/shell/compound.rs"],
     rules: ["env var name"],
     reason: "shell 的内置变量表（判定复合命令用），不是本进程读写的变量",
@@ -621,6 +662,7 @@ export const VOLATILE_EXCEPTIONS = [
   ...CORE_EXCEPTIONS,
   ...ENV_NAME_EXCEPTIONS,
   ...TOOL_NAME_EXCEPTIONS,
+  ...PUFFIN_LITERAL_EXCEPTIONS,
 ];
 
 /** 文件名作为路径的一整段（F58）：`name` 里的正则字符转义。 */
@@ -646,6 +688,7 @@ export const PROTOCOL_NEUTRAL_LAYERS = [
   "adapter",
   "platform",
   "frontend-shared",
+  "ports",
 ];
 
 /// 每种协议：属于它的 crate、它的词汇（`re` 在源码文字上匹配）与方法名（字符串字面量与它完全相同才算）。
@@ -959,7 +1002,7 @@ export const NUMBER_ALLOWED = [];
 
 /// 推送前“不许升高”（scripts/pre-push-rust-cli.mjs）：numbers.json 里某个文件的处数比推送基线大时逐项登记。`was` 是推送基线
 /// 里的值（没有为 0），`now` 是新的上限，`reason` 写用户的决定或“从 A 拆出”。
-export const NUMBER_RAISES = [];
+export const NUMBER_RAISES = [...PUFFIN_NUMBER_RAISES];
 
 // 枢纽 DTO 的构造与内置工具名的词表（F126）：表在 policy-vocabulary.mjs。
 export { DTO_CONSTRUCTORS, DTO_CONSTRUCTOR_EXCEPTIONS } from "./policy-vocabulary.mjs";

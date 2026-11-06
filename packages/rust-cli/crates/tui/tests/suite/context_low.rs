@@ -59,14 +59,18 @@ async fn the_footer_warns_only_when_the_context_is_nearly_full() {
         // 回复文字出现的那一帧；事件一起到时提示与文字同帧，文字先画出时这一帧还没有提示，断言空过。
         let screen = ui
             .wait("the turn to end", |s| {
-                s.contains("small reply") && !s.contains("esc to interrupt")
+                s.contains("small reply") && !s.contains("esc stop")
             })
             .await;
         assert!(!screen.contains("auto-compact"), "{screen}");
         ui.submit("second");
         // 150,001 token：离阈值剩 round(16,999 / 167,000 · 100) = 10%。修前按 `context used` 显示 `84% context used`。
-        let screen = ui.wait_for("10% until auto-compact").await;
-        assert!(screen.contains("big reply"), "{screen}");
+        // 回复按 Puffin 的播放头打出，提示可能先到：等两样都在。
+        let screen = ui
+            .wait("the warning and the reply", |s| {
+                s.contains("10% until auto-compact") && s.contains("big reply")
+            })
+            .await;
         assert!(!screen.contains("context used"), "{screen}");
     })
     .await;
@@ -86,10 +90,11 @@ async fn the_warning_goes_away_once_the_conversation_is_compacted() {
     with_ui(model, setup, |mut ui| async move {
         ui.submit("first");
         ui.wait_for("10% until auto-compact").await;
-        ui.wait("the turn to end", |s| !s.contains("esc to interrupt"))
+        ui.wait("the turn to end", |s| !s.contains("esc stop"))
             .await;
         ui.submit("/compact");
-        let screen = ui.wait_for("Conversation compacted").await;
+        // 压缩的行是 Puffin 的 `✓ Compact  150k → 716 tokens`（以前 `Conversation compacted`）。
+        let screen = ui.wait_for("✓ Compact").await;
         let screen = if screen.contains("until auto-compact") {
             ui.wait("the warning to go away", |s| {
                 !s.contains("until auto-compact")

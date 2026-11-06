@@ -11,18 +11,14 @@ fn area(text: &str) -> TextArea {
 
 #[test]
 fn chips_are_the_image_and_paste_placeholders() {
-    let text = "a [Image #1] b [Pasted text #2 +3 lines] c [Pasted text #12]";
+    let text = "a [Image #1] b [Pasted · 6 lines] c [Pasted · 1.2k chars]";
     let found: Vec<&str> = super::chips::chips(text)
         .into_iter()
         .map(|(start, end)| &text[start..end])
         .collect();
     assert_eq!(
         found,
-        [
-            "[Image #1]",
-            "[Pasted text #2 +3 lines]",
-            "[Pasted text #12]"
-        ]
+        ["[Image #1]", "[Pasted · 6 lines]", "[Pasted · 1.2k chars]"]
     );
     // 不是占位文字的方括号照常是文字。
     for text in [
@@ -31,6 +27,8 @@ fn chips_are_the_image_and_paste_placeholders() {
         "[Image #1 +2]",
         "[foo #1]",
         "[Image #1",
+        "[Pasted · lines]",
+        "[Pasted text #2 +3 lines]",
     ] {
         assert!(super::chips::chips(text).is_empty(), "{text}");
     }
@@ -46,7 +44,7 @@ fn backspace_at_the_end_and_delete_at_the_start_remove_the_whole_chip() {
     a.delete();
     assert_eq!((a.text(), a.cursor()), (" here", 0));
     // 折叠的粘贴也是一个整体（所有占位文字都这样）。
-    let mut a = area("x[Pasted text #3 +10 lines]");
+    let mut a = area("x[Pasted · 10 lines]");
     a.backspace();
     assert_eq!(a.text(), "x");
     // 不在边上时照常一个字符。

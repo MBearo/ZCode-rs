@@ -2,6 +2,7 @@
 //! 压缩后附件、hook 接入点。三种触发共用。
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rust_cli_kernel_api::history;
 use rust_cli_kernel_api::message::{
@@ -9,7 +10,7 @@ use rust_cli_kernel_api::message::{
 };
 use rust_cli_kernel_api::model::QuerySource;
 use rust_cli_kernel_api::orchestration::{
-    CompactRequest, CompactResult, ContextRequest, QueryRequest,
+    CompactProgress, CompactRequest, CompactResult, ContextRequest, QueryRequest,
 };
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::tool_search;
@@ -72,17 +73,46 @@ fn preservable(history: &[Message], groups: &[Vec<&Message>]) -> usize {
         .count()
 }
 
+/// 压缩的进度（spec §4.1）：第一次摘要请求之前说开始；说过开始之后失败（不是中止）时说失败。没发摘要请求就放弃的
+/// （分组不够、不许全部摘要）两样都不说。
+struct Announce<'a> {
+    progress: Option<&'a dyn CompactProgress>,
+    trigger: rust_cli_kernel_api::message::CompactTrigger,
+    started: AtomicBool,
+}
+
+impl Announce<'_> {
+    async fn start(&self) {
+        if let Some(progress) = self.progress
+            && !self.started.swap(true, Ordering::Relaxed)
+        {
+            progress.started(self.trigger).await;
+        }
+    }
+
+    async fn fail(&self, failure: &Failure) {
+        if let Some(progress) = self.progress
+            && self.started.load(Ordering::Relaxed)
+            && *failure != Failure::Aborted
+        {
+            progress.failed(self.trigger, failure.to_string()).await;
+        }
+    }
+}
+
 pub(crate) struct Engine<'a> {
     pub ports: &'a CompactPorts,
 }
 
 impl Engine<'_> {
-    /// `fallback`：摘要部分没有 assistant 时许不许“全部摘要”（spec §3.1）。
+    /// `fallback`：摘要部分没有 assistant 时许不许“全部摘要”（spec §3.1）。`progress`：第一次摘要请求之前说开始，
+    /// 之后失败（不是中止）时说失败（spec §4.1）；调用方已经说过开始时为 None。
     pub(crate) async fn run(
         &self,
         request: &CompactRequest,
         fallback: bool,
         cancel: &CancellationToken,
+        progress: Option<&dyn CompactProgress>,
     ) -> Result<CompactResult, Failure> {
         let active = history::active(&request.messages);
         let refs: Vec<&Message> = active.iter().map(AsRef::as_ref).collect();
@@ -105,21 +135,36 @@ impl Engine<'_> {
         if groups.len() < groups::MIN_GROUPS {
             return Err(Failure::NotEnough);
         }
-        let (raw, split) = self
-            .ladder(
-                request,
-                &messages,
-                &groups,
-                instructions.as_deref(),
-                fallback,
-                cancel,
-            )
-            .await?;
-        let mut result = self
-            .finalize(request, pre_tokens, raw, split, cancel)
-            .await?;
-        result.boundary.discovered_tools = discovered;
-        Ok(result)
+        let announce = Announce {
+            progress,
+            trigger: request.trigger,
+            started: AtomicBool::new(false),
+        };
+        let summarized = async {
+            let (raw, split) = self
+                .ladder(
+                    request,
+                    &messages,
+                    &groups,
+                    instructions.as_deref(),
+                    fallback,
+                    cancel,
+                    &announce,
+                )
+                .await?;
+            self.finalize(request, pre_tokens, raw, split, cancel).await
+        }
+        .await;
+        match summarized {
+            Ok(mut result) => {
+                result.boundary.discovered_tools = discovered;
+                Ok(result)
+            }
+            Err(failure) => {
+                announce.fail(&failure).await;
+                Err(failure)
+            }
+        }
     }
 
     async fn attempt(
@@ -172,6 +217,7 @@ impl Engine<'_> {
     }
 
     /// 保留尾段的阶梯（spec §3.1）：返回摘要原文与这次的切分。
+    #[allow(clippy::too_many_arguments)]
     async fn ladder<'m>(
         &self,
         request: &CompactRequest,
@@ -180,6 +226,7 @@ impl Engine<'_> {
         instructions: Option<&str>,
         fallback: bool,
         cancel: &CancellationToken,
+        announce: &Announce<'_>,
     ) -> Result<(String, Split<'m>), Failure> {
         let total = groups.len();
         let preservable = preservable(&request.messages, groups);
@@ -243,6 +290,8 @@ impl Engine<'_> {
                     }
                 }
             };
+            // 缺陷修复（spec §4.1）：以前自动压缩的开始事件由主循环在摘要完成之后才发，摘要请求期间前端只看到 `Working`。
+            announce.start().await;
             attempts += 1;
             match self.attempt(request, &split, instructions, cancel).await {
                 Attempt::Summary { text, .. } => return Ok((text, split)),

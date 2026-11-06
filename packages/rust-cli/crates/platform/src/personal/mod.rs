@@ -14,6 +14,8 @@
 
 mod check;
 
+pub(crate) use check::current as current_subscription;
+
 use rust_cli_base::sync::LockUnpoisoned;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

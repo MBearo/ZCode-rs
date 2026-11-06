@@ -1,220 +1,15 @@
 //! 交互界面的入口与接线（docs/specs/rust-cli/tui.md §2；cli-args.md §14.3）：组装（与 `-p` 共用 [`crate::assemble`]），
-//! 夹在阶段之间的是更新提示与工作区信任；再把启动时捕获的事实整理成 TUI 的参数。TUI 不读进程环境，这里只把它需要的
-//! 终端与语言变量交给它。
+//! 夹在阶段之间的是更新提示与工作区信任（启动前的两屏，[`super::tui_screens`]）；再把启动时捕获的事实整理成 TUI 的参数
+//! （[`super::tui_inputs`]）。TUI 不读进程环境，这里只把它需要的终端与语言变量交给它。
 
-use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::Arc;
 
-use futures_util::FutureExt;
-use futures_util::future::BoxFuture;
-use rust_cli_base::clock::SystemClock;
-use rust_cli_base::names::{DOT_DIR, LOCAL_RULES_FILE, RULES_FILE};
 use rust_cli_base::secret::EnvSnapshot;
-use rust_cli_base::ui_prefs::{UiLocale, UiTheme};
-use rust_cli_headless::SessionTarget;
-use rust_cli_kernel_api::env::WorkspaceRef;
-use rust_cli_kernel_api::model::ModelSelection;
-use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::provider::ModelDirectory;
-use rust_cli_node_store::NodeIds;
-use rust_cli_paths::StoragePaths;
 use rust_cli_platform::local::Recorder;
-use rust_cli_tui::{HistoryRecorder, QuestionTimeout};
-use rust_cli_tui::{LocaleStore, MemoryFile, Options, Preferences, Services, Startup, UiConfig};
+use rust_cli_tui::{Options, QuestionTimeout, Services, UiConfig};
 
-/// TUI 用到的环境变量：色深、语言、终端种类（自动复制与键盘增强）。
-const VARS: &[&str] = &[
-    rust_cli_base::names::env::TERM,
-    rust_cli_base::names::env::COLORTERM,
-    rust_cli_base::names::env::TERM_PROGRAM,
-    rust_cli_base::names::env::TERM_PROGRAM_VERSION,
-    rust_cli_base::names::env::KITTY_WINDOW_ID,
-    rust_cli_base::names::env::WT_SESSION,
-    rust_cli_base::names::env::LANG,
-    rust_cli_base::names::env::LC_ALL,
-    rust_cli_base::names::env::LC_MESSAGES,
-    // 系统语言按 Node `detectLocale` 也看 LANGUAGE（tui.md §7.1）。
-    rust_cli_base::names::env::LANGUAGE,
-    // 终端通知在 tmux / screen 里要包一层（tui-manage.md §5.2）。
-    rust_cli_base::names::env::TMUX,
-    rust_cli_base::names::env::STY,
-    // 复制的提示与 OSC 52（tui-select.md §3）：SSH、复用器、终端名。
-    rust_cli_base::names::env::SSH_CONNECTION,
-    rust_cli_base::names::env::ZELLIJ,
-    rust_cli_base::names::env::LC_TERMINAL,
-    rust_cli_base::names::env::KONSOLE_VERSION,
-    rust_cli_base::names::env::GNOME_TERMINAL_SERVICE,
-    rust_cli_base::names::env::XTERM_VERSION,
-    rust_cli_base::names::env::VTE_VERSION,
-    rust_cli_base::names::env::ALACRITTY_LOG,
-    // 滚轮每格的行数（tui-select.md §4.2）；速度是 `ZCODE_SCROLL_SPEED`。
-    rust_cli_base::names::env::CURSOR_TRACE_ID,
-    rust_cli_base::names::env::VSCODE_GIT_ASKPASS_MAIN,
-    rust_cli_base::names::env::TERMINAL_EMULATOR,
-    rust_cli_base::names::env::ZCODE_SCROLL_SPEED,
-];
-
-/// 环境变量有非空的值。
-fn has(env: &EnvSnapshot, name: &str) -> bool {
-    env.raw(name).is_some()
-}
-
-pub(crate) fn vars(env: &EnvSnapshot) -> BTreeMap<String, String> {
-    env.vars()
-        .iter()
-        .filter(|(key, _)| VARS.contains(&key.as_str()))
-        .cloned()
-        .collect()
-}
-
-/// TUI 的机器服务与 MCP 服务器的机器标记（remote-exec.md §21.2、§22.8）。
-pub(crate) type MachineInputs = (
-    Option<Arc<dyn rust_cli_tui::machines::Machines>>,
-    Vec<(String, String)>,
-);
-
-pub(crate) struct Inputs<'a> {
-    pub workspace: WorkspaceRef,
-    pub cwd: &'a Path,
-    pub home: &'a Path,
-    pub env: &'a EnvSnapshot,
-    /// 入口的临时目录（外部编辑器的私有目录在它下面，F58）。
-    pub temp: &'a Path,
-    pub selection: ModelSelection,
-    pub mode: PermissionMode,
-    pub models: Option<Arc<dyn ModelDirectory>>,
-    pub history: Vec<String>,
-    pub recorder: Recorder,
-    pub startup: Startup,
-    pub fork: bool,
-    /// 配置文件的 `ui.locale`（config.md §2）与存储位置（写回用）。
-    pub locale: Option<UiLocale>,
-    /// 配置文件的 `ui.theme`（tui-manage.md §2.1）。
-    pub theme: Option<UiTheme>,
-    pub paths: StoragePaths,
-    /// 平台层：TUI 的登录与退出（tui.md §7.2）。
-    pub account: Arc<rust_cli_platform::Platform>,
-    /// MCP 服务器的来源文件与写项目级文件的执行环境（tui-manage.md §6.1）。
-    pub mcp: crate::frontends::tui_mcp::McpConfigFiles,
-    /// 退出信号（session-lifecycle.md §3.5）。
-    pub stop: tokio_util::sync::CancellationToken,
-    /// 与内核同一份的时钟与 ID（README §4，F7）。
-    pub clock: Arc<SystemClock>,
-    pub ids: Arc<NodeIds>,
-    /// 应用内切到别的项目时的信任判定（workspace-trust.md §2.8）。
-    pub trust: Arc<dyn rust_cli_tui::services::WorkspaceTrust>,
-    /// npm 上有更新的版本时会话里的提示（update.md §7，F48）。
-    pub update: Option<rust_cli_tui::update::UpdateInfo>,
-    /// 运行的平台（修复线 F65，tui-input.md §9）。
-    pub os: rust_cli_tui::Os,
-    /// 配置的 `askUserQuestionTimeout`（毫秒，tools-more.md §1.1，工作线 F72）。
-    pub question_timeout: Option<u64>,
-    /// 远端机器（remote-exec.md §21.2）：`/machines` 与机器状态行；绑定到远端机器的 MCP 服务器（服务器名，机器名；
-    /// R5，§22.8）。
-    pub machines: MachineInputs,
-}
-
-/// 输入历史的追加（tui.md「输入历史」）：交给 platform `History` 唯一的写者。
-struct HistoryWriter(Recorder);
-
-impl HistoryRecorder for HistoryWriter {
-    fn record(&self, text: &str, at_ms: u64) {
-        self.0.record(text, at_ms);
-    }
-}
-
-/// 界面语言写回用户级配置文件（tui.md §7.1，platform `write_ui_locale`）。
-struct ConfigLocale {
-    paths: StoragePaths,
-}
-
-impl LocaleStore for ConfigLocale {
-    fn save(&self, locale: UiLocale) -> BoxFuture<'static, Result<String, String>> {
-        let paths = self.paths.clone();
-        async move {
-            rust_cli_platform::local::write_ui_locale(&paths, locale)
-                .await
-                .map(|file| file.as_path().display().to_string())
-                .map_err(|error| error.to_string())
-        }
-        .boxed()
-    }
-}
-
-/// 主题与 `/effort` 缺省的写回（tui-manage.md §2）：主题写用户级配置文件的 `ui.theme`，缺省模型写个人
-/// Provider 配置（与 Node 同一个文件与字段）；`/mcp enable/disable` 写定义服务器的配置文件（§6.1）。
-struct ConfigPreferences {
-    paths: StoragePaths,
-    platform: Arc<rust_cli_platform::Platform>,
-    mcp: Arc<crate::frontends::tui_mcp::McpConfigFiles>,
-}
-
-impl Preferences for ConfigPreferences {
-    fn save_theme(&self, theme: UiTheme) -> BoxFuture<'static, Result<String, String>> {
-        let paths = self.paths.clone();
-        async move {
-            rust_cli_platform::local::write_ui_theme(&paths, theme)
-                .await
-                .map(|file| file.as_path().display().to_string())
-                .map_err(|error| error.to_string())
-        }
-        .boxed()
-    }
-
-    fn save_default_model(
-        &self,
-        selection: ModelSelection,
-    ) -> BoxFuture<'static, Result<String, String>> {
-        let platform = self.platform.clone();
-        async move { platform.save_default_model(&selection).await }.boxed()
-    }
-
-    fn save_mcp_enabled(
-        &self,
-        server: String,
-        enabled: bool,
-    ) -> BoxFuture<'static, Result<Option<String>, String>> {
-        let (mcp, paths) = (self.mcp.clone(), self.paths.clone());
-        async move { mcp.save(&paths, &server, enabled).await }.boxed()
-    }
-}
-
-/// `/memory` 的文件（tui-input.md §4.2）：用户级与项目级的规则文件（README §2 的 zcode 体系）。
-pub(crate) fn memory_files(cwd: &Path, home: &Path) -> Vec<MemoryFile> {
-    let file = |label: &str, display: &str, path: std::path::PathBuf| MemoryFile {
-        label: label.to_owned(),
-        display: display.to_owned(),
-        path: path.display().to_string(),
-    };
-    vec![
-        file(
-            "User memory",
-            &format!("~/{DOT_DIR}/{RULES_FILE}"),
-            rust_cli_paths::user_path(home, "").join(RULES_FILE),
-        ),
-        file(
-            "Project memory",
-            &format!("./{RULES_FILE}"),
-            cwd.join(RULES_FILE),
-        ),
-        file(
-            "Project memory (local)",
-            &format!("./{LOCAL_RULES_FILE}"),
-            cwd.join(LOCAL_RULES_FILE),
-        ),
-    ]
-}
-
-/// `-c` / `-r [id]` → TUI 启动时打开的会话。
-pub(crate) fn startup(target: &SessionTarget, pick: bool) -> Startup {
-    match target {
-        _ if pick => Startup::Pick,
-        SessionTarget::New => Startup::New,
-        SessionTarget::Continue => Startup::Latest,
-        SessionTarget::Resume(id) => Startup::Session(id.as_str().to_owned()),
-    }
-}
+use super::tui_inputs::{self, CompactCell, HistoryWriter, Inputs};
+use super::tui_screens::Screens;
 
 /// 提问框的空闲超时（tools-more.md §1.1，工作线 F72）：配置的 `askUserQuestionTimeout` 与两个环境变量
 /// `ZCODE_AFK_TIMEOUT_MS` / `ZCODE_AFK_COUNTDOWN_MS`（JS 的整数读法，读不出整数时没设；环境变量压过配置）。
@@ -239,55 +34,95 @@ fn afk_ms(env: &EnvSnapshot, name: &str) -> Option<f64> {
     crate::assemble::limits::js_int(env.get(name)?)
 }
 
-pub(crate) fn options(inputs: Inputs<'_>, version: &str) -> Options {
+/// TUI 的 `Options`。设置页（tui-kit.md §4.2「设置」）读写 `compact_at`、规则文件、`--add-dir`。
+pub(crate) fn options(
+    inputs: Inputs<'_>,
+    history: Vec<String>,
+    recorder: Recorder,
+    version: &str,
+) -> Options {
+    // `/usage` 的卡与详情页（一分钟的缓存，platform.md §11）。
+    let plan_usage: Arc<dyn rust_cli_tui::services::PlanUsage> = Arc::new(
+        super::tui_usage::UsagePort::new(inputs.account.clone(), inputs.clock.clone()),
+    );
+    let (compact_at, compact_pinned) = inputs.compact_at;
     Options {
-        history: inputs.history,
-        recorder: Some(Arc::new(HistoryWriter(inputs.recorder))),
+        history,
+        recorder: Some(Arc::new(HistoryWriter(recorder))),
         home: Some(inputs.home.to_string_lossy().into_owned()),
         workspace: inputs.workspace,
         selection: inputs.selection,
         mode: inputs.mode,
+        started: inputs.started,
         version: version.to_owned(),
-        vars: vars(inputs.env),
+        vars: tui_inputs::vars(inputs.env),
         models: inputs.models,
         startup: inputs.startup,
         fork: inputs.fork,
         stop: inputs.stop,
         ui: UiConfig {
             locale: inputs.locale,
-            theme: inputs.theme,
-            memory_files: memory_files(inputs.cwd, inputs.home),
+            memory_files: tui_inputs::memory_files(inputs.cwd, inputs.home),
             update: inputs.update,
             question_timeout: question_timeout(inputs.question_timeout, inputs.env),
             mcp_machines: inputs.machines.1,
+            rule_files: inputs.rule_files,
+            add_dirs: inputs.add_dirs,
+            shell_name: Some(tui_inputs::shell_name(inputs.env)),
+            // 有 SSH，或 Linux 上没有图形界面（`tui_inputs::remote_shell`）。
+            remote_shell: tui_inputs::remote_shell(inputs.env),
         },
         services: Services {
-            locale_store: Arc::new(ConfigLocale {
+            locale_store: Arc::new(tui_inputs::ConfigLocale {
                 paths: inputs.paths.clone(),
             }),
-            account: Arc::new(crate::frontends::tui_account::PlatformAccount {
+            account: Arc::new(super::tui_account::PlatformAccount {
                 platform: inputs.account.clone(),
             }),
-            preferences: Arc::new(ConfigPreferences {
+            // 驾驶舱的笔记、监听与 tmux（tui-cockpit.md §1）。
+            cockpit: Some(Arc::new(super::tui_cockpit::LocalCockpit::new(
+                &inputs.paths,
+                inputs.env,
+            ))),
+            // `theme.json`（tui-kit.md §2.3、§3.4）。
+            stores: tui_inputs::stores(&inputs.paths),
+            preferences: Arc::new(tui_inputs::ConfigPreferences {
                 paths: inputs.paths,
                 platform: inputs.account,
                 mcp: Arc::new(inputs.mcp),
             }),
-            editor: Arc::new(crate::frontends::editor::ProcessEditor::from_env(
+            editor: Arc::new(super::editor::ProcessEditor::from_env(
                 inputs.env,
                 inputs.temp,
                 inputs.ids.clone(),
             )),
-            clipboard: Arc::new(crate::frontends::clipboard::SystemClipboard {
-                wayland: has(inputs.env, rust_cli_base::names::env::WAYLAND_DISPLAY),
-                display: has(inputs.env, rust_cli_base::names::env::DISPLAY),
-                ssh: has(inputs.env, rust_cli_base::names::env::SSH_CONNECTION),
-                tmux: has(inputs.env, rust_cli_base::names::env::TMUX),
+            // 读图片直接经 `Clipboard::image`（`clipboard/image.rs`）。
+            clipboard: Arc::new(super::clipboard::SystemClipboard {
+                wayland: tui_inputs::has(inputs.env, rust_cli_base::names::env::WAYLAND_DISPLAY),
+                display: tui_inputs::has(inputs.env, rust_cli_base::names::env::DISPLAY),
+                ssh: tui_inputs::has(inputs.env, rust_cli_base::names::env::SSH_CONNECTION),
+                tmux: tui_inputs::has(inputs.env, rust_cli_base::names::env::TMUX),
                 wsl: cfg!(target_os = "linux")
-                    && has(inputs.env, rust_cli_base::names::env::WSL_DISTRO_NAME),
+                    && tui_inputs::has(inputs.env, rust_cli_base::names::env::WSL_DISTRO_NAME),
             }),
             trust: inputs.trust,
             machines: inputs.machines.0,
+            compact_at: Some((Arc::new(CompactCell(compact_at)), compact_pinned)),
+            plan_usage: Some(plan_usage),
+            // `@` 面板的预览：只读本机工作区里的，远端的没有读文件的接缝，回答 `Missing`（`tui_peek.rs`）。
+            peek_file: Some(Arc::new(
+                |workspace: rust_cli_kernel_api::env::WorkspaceRef, path: String| {
+                    Box::pin(super::tui_peek::peek(workspace, path))
+                },
+            )),
+            file_len: Some(Arc::new(|path: String| {
+                Box::pin(async move {
+                    rust_cli_fs::file_len(std::path::Path::new(&path))
+                        .await
+                        .ok()
+                        .flatten()
+                })
+            })),
         },
         clock: inputs.clock,
         ids: inputs.ids,
@@ -341,9 +176,9 @@ async fn interactive(
     // 自动更新（docs/specs/rust-cli/update.md §3，F48）：在工作区信任之前；没有启动器标记时什么都不做。`updates`
     // 留到返回：它持有后台刷新的任务作用域。选了 Update now 时不建会话，安装后以它的结果退出。
     let env = &facts.process.env;
-    let vars = vars(env);
+    let vars = tui_inputs::vars(env);
     let os = facts.controller.os;
-    let (locale, theme) = (opened.config.locale, opened.config.theme);
+    let locale = opened.config.locale;
     let updates = crate::assemble::setup::updates(
         env,
         &opened.config,
@@ -351,7 +186,14 @@ async fn interactive(
         (&opened.egress, clock),
     )
     .await;
-    let ask = async |info| rust_cli_tui::update::ask(info, &vars, locale, theme, os).await;
+    // 启动前的两屏（tui-kit.md §2.3）。
+    let paths_for_screens = opened.paths.clone();
+    let screens = Screens {
+        vars: &vars,
+        locale,
+        paths: &paths_for_screens,
+    };
+    let ask = async |info| screens.ask_update(info).await;
     if let Some(code) =
         crate::commands::update::offer(updates.as_ref(), ask, &stop.token, env).await?
     {
@@ -374,7 +216,7 @@ async fn interactive(
                     crate::frontends::workspace_trust::grants(source, rules)
                 }),
         };
-        let ask = async |prompt| rust_cli_tui::trust::ask(prompt, &vars, locale, theme, os).await;
+        let ask = async |prompt| screens.ask_trust(prompt).await;
         // 信任对话框期间收到退出信号：放弃对话框（它的终端守卫随之恢复终端），不建会话。
         let outcome = tokio::select! {
             outcome = crate::frontends::workspace_trust::ensure(inputs, ask) => outcome?,
@@ -404,14 +246,12 @@ async fn interactive(
         env,
         temp: &facts.process.temp,
         selection: built.selection.clone(),
+        started: facts.process.started,
         mode: built.mode,
         models: opened.directory.clone(),
-        history: loaded,
-        recorder,
-        startup: startup(&invocation.target, invocation.resume_pick),
+        startup: tui_inputs::startup(&invocation.target, invocation.resume_pick),
         fork: invocation.fork_session,
         locale,
-        theme,
         paths: opened.paths.clone(),
         account: opened.platform.clone(),
         mcp: crate::frontends::tui_mcp::McpConfigFiles {
@@ -434,6 +274,10 @@ async fn interactive(
         }),
         os,
         question_timeout: opened.config.question_timeout,
+        compact_at: (
+            built.compact_at.clone(),
+            opened.config.compact_pinned.clone(),
+        ),
         machines: (
             built
                 .machines
@@ -441,8 +285,10 @@ async fn interactive(
                 .and_then(crate::machines::Machines::service),
             built.mcp_machines.clone(),
         ),
+        rule_files: opened.config.rule_files.clone(),
+        add_dirs: opened.resolved.add_dirs.clone(),
     };
-    let exit = rust_cli_tui::run(kernel, options(inputs, crate::VERSION)).await;
+    let exit = rust_cli_tui::run(kernel, options(inputs, loaded, recorder, crate::VERSION)).await;
     // TUI 退出后入口全部释放：等写者写完剩下的；跨会话的登记与 socket 删掉。
     let _ = writer.await;
     if let Some(peers) = built.peers {
@@ -468,41 +314,6 @@ async fn interactive(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn only_terminal_and_locale_variables_reach_the_interface() {
-        let env = [
-            (
-                rust_cli_base::names::env::LANG.to_owned(),
-                "zh_CN.UTF-8".to_owned(),
-            ),
-            (
-                rust_cli_base::names::env::ZCODE_API_KEY.to_owned(),
-                "sk-test".to_owned(),
-            ),
-            (
-                rust_cli_base::names::env::TERM.to_owned(),
-                "xterm-256color".to_owned(),
-            ),
-            (
-                rust_cli_base::names::env::TMUX.to_owned(),
-                "/tmp/tmux-501/default,1,0".to_owned(),
-            ),
-            // 滚轮的速度。
-            (
-                rust_cli_base::names::env::ZCODE_SCROLL_SPEED.to_owned(),
-                "5".to_owned(),
-            ),
-        ];
-        let vars = vars(&EnvSnapshot::from(env.to_vec()));
-        assert_eq!(vars.len(), 4);
-        assert!(!vars.contains_key(rust_cli_base::names::env::ZCODE_API_KEY));
-        assert_eq!(
-            vars.get(rust_cli_base::names::env::ZCODE_SCROLL_SPEED)
-                .map(String::as_str),
-            Some("5")
-        );
-    }
 
     /// 提问框空闲超时的环境变量（tools-more.md §1.1，工作线 F72）：JS 的整数读法，读不出整数时没设。
     #[test]

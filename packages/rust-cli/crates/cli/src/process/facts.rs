@@ -37,6 +37,8 @@ pub(crate) struct ProcessFacts {
     pub(crate) temp: PathBuf,
     /// 系统时区（time-zone.md §1）：启动时读一次。
     pub(crate) zone: Arc<dyn rust_cli_base::clock::TimeZone>,
+    /// 进程启动的时刻（单调时钟）：启动阶段日志的起点（`startup.ready`、`startup.model`，logging.md §4）。
+    pub(crate) started: std::time::Instant,
 }
 
 impl ProcessFacts {
@@ -45,6 +47,7 @@ impl ProcessFacts {
         reason = "入口 crate 是唯一读取 cwd 的位置（spec §4）"
     )]
     pub(crate) fn capture() -> Result<Self> {
+        let started = std::time::Instant::now();
         // 修复线 F58：以前除了快照，这里又按名字直接读进程环境（约 13 个变量，`std::env::var` 在 Windows 上不分大小写，
         // 快照按原样比较）。现在先捕获快照，所有变量都从它取，名字的比较只有 `EnvSnapshot::get` 一种（Windows 上不分
         // 大小写，照 Node）。值是快照里的 UTF-8 文本（非 UTF-8 的字节换成 U+FFFD，Node 的 `process.env` 相同）。
@@ -60,6 +63,7 @@ impl ProcessFacts {
             cwd,
             env,
             zone,
+            started,
         })
     }
 

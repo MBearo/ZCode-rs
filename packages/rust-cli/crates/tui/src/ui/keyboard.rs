@@ -7,7 +7,7 @@
 //!
 //! 架构整理 U9：以前按平台的判断 `Typing` 由 `App` 持有、经参数传给列表、询问框与各面板，另有 10 处直接读 `CONTROL`，
 //! 两种读法在不经 paste burst 的入口上不一致。现在只在入口判断一次。
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::os::Os;
 
@@ -24,18 +24,6 @@ pub fn normalize(key: KeyEvent, os: Os) -> KeyEvent {
         }
     } else {
         key
-    }
-}
-
-/// 终端事件里的按键归一（启动前的信任与更新选择屏，它们只丢掉松开事件，不认 alt 码）。
-pub fn normalize_event(event: Event, os: Os) -> Event {
-    match event {
-        Event::Key(key) => Event::Key(normalize(key, os)),
-        Event::FocusGained
-        | Event::FocusLost
-        | Event::Mouse(_)
-        | Event::Paste(_)
-        | Event::Resize(..) => event,
     }
 }
 

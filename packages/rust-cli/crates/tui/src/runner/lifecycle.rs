@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use futures_util::FutureExt;
-use ratatui::backend::Backend;
 use rust_cli_kernel_api::ids::{MessageId, SessionId};
+use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::session_api::{
     Command, CommandEnvelope, EndReason, Kernel, KernelError, RewindScope, SessionHandle,
     SessionView, StartSource,
@@ -14,7 +14,6 @@ use rust_cli_kernel_api::store::SessionFilter;
 
 use super::session::{Done, Sent};
 use super::{Loop, idle};
-use crate::ui::rewind::Entry;
 use crate::view::Transcript;
 
 /// 启动时要打开的会话（`--resume` / `-c`，tui.md §6）。
@@ -36,6 +35,8 @@ pub(super) struct Switched {
     pub view: SessionView,
     pub notice: Option<String>,
     pub ended: Vec<String>,
+    /// 恢复的会话（不是 fork 出的）：transcript 的顶上是它的标题行（Puffin `resumed_into`）。
+    pub resumed: bool,
 }
 
 /// 打开会话并取快照；给了 `fork`（`Command::Fork` 的命令）时先在它的末尾 fork，再打开 fork 出的会话
@@ -73,9 +74,62 @@ async fn open(
     Ok((handle, view))
 }
 
-impl<B: Backend> Loop<'_, B> {
+impl Loop<'_> {
+    /// 缺省模型还没定下（入口在后台取模型目录，performance.md §12.3）：定下时回来（[`Done::DefaultModel`]）。草稿与状态栏
+    /// 这期间用暂定值（上次启动的结论，§12.4；没有时是空的）。
+    pub(super) fn await_default_model(&mut self) {
+        if self.options.selection.is_settled() {
+            return;
+        }
+        self.app.model_pending = true;
+        let default = self.options.selection.clone();
+        let guess = default.current();
+        self.pending.push(
+            async move {
+                let settled = default.settled().await;
+                Done::DefaultModel { guess, settled }
+            }
+            .boxed(),
+        );
+    }
+
+    /// 缺省模型定下了：新会话的草稿还是暂定值（这期间没有 `/model`、登录换过，也没有打开会话）就换成定下的值，定为空时
+    /// 打开门道，同启动时没有模型；然后放出这期间留下的消息（[`Self::release_for_model`]）。
+    pub(super) fn on_default_model(&mut self, guess: &ModelSelection, settled: ModelSelection) {
+        self.app.model_pending = false;
+        if self.outbox.session().is_some() {
+            return;
+        }
+        if self.app.view.selection() == guess {
+            let empty = settled.model.is_empty();
+            let execution = self.app.view.execution();
+            self.app.view.set_draft(settled, execution);
+            if empty {
+                self.app.open_door(None);
+                return;
+            }
+        }
+        self.release_for_model();
+    }
+
+    /// 第一帧画完：记 `startup.ready`（从进程启动起，logging.md §4），只记一次。
+    pub(super) fn log_first_frame(&mut self) {
+        if let Some(started) = self.first_frame.take() {
+            tracing::info!(
+                event = "startup.ready",
+                since_start_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                "first frame drawn"
+            );
+        }
+    }
+
     /// 启动时：按参数打开会话或会话选择器。
     pub(super) fn startup(&mut self, startup: Startup, fork: bool) {
+        // 没有模型（入口没选出、也没有缺省）：门道打开，说怎样接入一个（tui-kit.md §4.2「登录」，Puffin 的 `needsModel`）。
+        // 缺省模型还没定下时不开：定下时再看（[`Self::on_default_model`]，performance.md §12.3）。
+        if self.app.view.selection().model.is_empty() && self.options.selection.is_settled() {
+            self.app.open_door(None);
+        }
         let kernel = self.kernel.clone();
         let filter = SessionFilter {
             workspace: self.app.view.workspace().clone(),
@@ -88,6 +142,8 @@ impl<B: Backend> Loop<'_, B> {
             Startup::Latest => None,
         };
         let fork = fork.then(|| self.envelope(Command::Fork { at: None }));
+        let resumed = fork.is_none();
+        self.outbox.start_switch();
         self.pending.push(
             async move {
                 let opened = async {
@@ -110,6 +166,7 @@ impl<B: Backend> Loop<'_, B> {
                     view,
                     notice: None,
                     ended: Vec::new(),
+                    resumed,
                 })))
             }
             .boxed(),
@@ -146,6 +203,7 @@ impl<B: Backend> Loop<'_, B> {
     ) {
         let store = store.then(|| self.envelope(Command::StoreResumeSentinel));
         let closing = self.detach();
+        self.outbox.start_switch();
         let kernel = self.kernel.clone();
         self.pending.push(
             async move {
@@ -159,6 +217,7 @@ impl<B: Backend> Loop<'_, B> {
                     view,
                     notice,
                     ended,
+                    resumed: source == StartSource::Resume,
                 })))
             }
             .boxed(),
@@ -166,20 +225,24 @@ impl<B: Backend> Loop<'_, B> {
     }
 
     pub(super) fn on_switched(&mut self, switched: Result<Switched, KernelError>) {
+        self.outbox.end_switch();
         match switched {
             Ok(Switched {
                 handle,
                 view,
                 notice,
                 ended,
+                resumed,
             }) => {
                 self.app.reset();
                 self.cache.clear();
-                if let Some(info) = self.app.update_carry.take() {
-                    self.app.local.push(crate::ui::app::LocalCell {
-                        anchor: None,
-                        local: crate::ui::app::Local::Update(Box::new(info)),
-                    });
+                if resumed {
+                    let created = view.meta.created_at_ms;
+                    let offset = self.options.clock.utc_offset_minutes(created);
+                    let now_ms = self.now_ms();
+                    self.app.resumed_into(created, offset, now_ms);
+                } else {
+                    self.app.opening = None;
                 }
                 let last = view.last_seq;
                 self.app.view = Transcript::from_view(view, self.now_ms());
@@ -196,10 +259,15 @@ impl<B: Backend> Loop<'_, B> {
                     self.app.info(notice);
                 }
                 self.after_switch(true);
+                // fork 出的会话的第一帧（Puffin `rewound_into`）：挑选结束，草稿作为它的第一条消息发出。
+                if let Some(action) = self.app.rewound_into()
+                    && let Err(error) = self.act(action)
+                {
+                    self.app.error(error.to_string());
+                }
             }
             Err(error) => {
                 // 没有切换：提示还在草稿里。
-                self.app.update_carry = None;
                 self.after_switch(false);
                 self.app.error(error.to_string());
             }
@@ -217,23 +285,35 @@ impl<B: Backend> Loop<'_, B> {
                 let entries = async {
                     let options = session.rewind_options().await?;
                     let view = session.view().await?;
-                    Ok(options
-                        .into_iter()
-                        .map(|option| {
-                            let text = view
-                                .messages
-                                .iter()
-                                .find(|m| m.id() == &option.message)
-                                .and_then(crate::ui::session_rows::user_text)
-                                .unwrap_or_default();
-                            Entry { option, text }
-                        })
-                        .collect())
+                    Ok(crate::ui::rewind::entries_of(options, &view.messages))
                 };
                 Done::Rewinds(entries.await)
             }
             .boxed(),
         );
+    }
+
+    /// 挑选回退的点之后的 ⏎（docs/puffin-tui.md「rewind is a branch」，Puffin host 的 `rewind`）：在这个点上面的回答上 fork
+    /// （内核 `Fork { at }` 带上 `at` 那条，所以是回答、不是点）。上面没有回答时回不去（挑选不会发它）。
+    pub(super) fn rewind_fork(&mut self, message: &MessageId) {
+        let answer = self
+            .app
+            .rewind
+            .iter()
+            .find(|e| &e.option.message == message)
+            .and_then(|e| e.answer.clone());
+        match answer {
+            Some(at) => self.send(Sent::RewindFork, Command::Fork { at: Some(at) }),
+            None => self.app.rewound(Err(
+                "there is nothing to go back to above this message".to_owned()
+            )),
+        }
+    }
+
+    /// fork 的回执：挑选等它的视图，像 `/resume` 一样跟着新会话（来源是 fork）。
+    pub(super) fn rewind_forked(&mut self, forked: &rust_cli_kernel_api::session_api::Forked) {
+        self.app.rewound(Ok(forked.session.as_str().to_owned()));
+        self.switch(forked.session.clone(), StartSource::Fork, None, true);
     }
 
     /// 选择器确认：运行中先中断，回合结束后再发（`deferred`，事件驱动，不等超时）。

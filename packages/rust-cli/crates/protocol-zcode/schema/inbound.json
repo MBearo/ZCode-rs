@@ -97,6 +97,9 @@
           "properties": {
             "sessionDirectorySource": {
               "type": "boolean"
+            },
+            "sessionWorkspaceRouting": {
+              "type": "boolean"
             }
           },
           "additionalProperties": false

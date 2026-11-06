@@ -3,7 +3,7 @@
 
 use rust_cli_kernel_api::permission::syntax::{format_rule, parse_rule};
 use rust_cli_kernel_api::tool_names;
-use rust_cli_tui::trust::Grants;
+use rust_cli_tui_ports::trust::Grants;
 
 /// 排在前两组的工具：Bash、PowerShell、写文件的工具、WebFetch、WebSearch，以及 MCP 工具。
 const SPECIAL: [&str; 8] = [

@@ -114,6 +114,8 @@ pub(crate) const OPTIONS: &[HelpItem] = &[
 /// 本工程的命令（cli-args.md §3.2）：`hooks`、`login`、`logout` 是 Node 版 zcode 的；`update|upgrade` 的名字固定，
 /// 不先检查版本，说明见 update.md §9（工作线 F48）。
 pub(crate) const COMMANDS: &[HelpItem] = &[
+    // 在桌面端打开文件夹（cli-args.md §16）。
+    item("app [folder]", "Open a folder in the ZCode desktop app"),
     item(
         "hooks",
         "Trust project hooks (zcode hooks trust --help for options)",

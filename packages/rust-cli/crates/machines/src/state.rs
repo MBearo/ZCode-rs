@@ -75,6 +75,9 @@ pub enum MachineError {
     /// 连不上（拉起连接失败、重连被目标拒绝）。
     #[error("unreachable: {0}")]
     Unreachable(String),
+    /// 连接中被断开：这次 connect 走完时不留客户端（remote-exec.md §19.10，2026-10-29）。
+    #[error("the connection was stopped")]
+    Stopped,
     /// 执行器拒绝了握手（协议、鉴权、旧连接）。
     #[error("refused: {0}")]
     Refused(String),

@@ -66,6 +66,7 @@ pub mod context_usage;
 pub mod controller_services;
 pub mod cron;
 pub mod cron_store;
+pub mod default_model;
 pub mod env;
 pub mod env_command;
 pub mod env_files;

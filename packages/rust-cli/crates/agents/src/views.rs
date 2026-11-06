@@ -19,7 +19,7 @@ fn status(agent: &LiveAgent) -> SubagentStatus {
     match &agent.state {
         AgentState::Running { .. } => SubagentStatus::Running,
         // 停放的子代理状态是 completed。
-        AgentState::Parked(_) => SubagentStatus::Completed,
+        AgentState::Parked { .. } => SubagentStatus::Completed,
         AgentState::Finished(Ending::Completed) => SubagentStatus::Completed,
         AgentState::Finished(Ending::Failed) => SubagentStatus::Failed,
         AgentState::Finished(Ending::Killed | Ending::KilledParked) => SubagentStatus::Killed,
@@ -49,7 +49,7 @@ fn entry(agent: &LiveAgent, now: u64) -> SubagentEntry {
         version: shown.version,
         owner: agent.owner.clone(),
         activity,
-        parked: matches!(agent.state, AgentState::Parked(_)),
+        parked: matches!(agent.state, AgentState::Parked { .. }),
         // 子代理的缺省机器（远端执行 R4，remote-exec.md §21.6）。
         machine: agent.machine.clone(),
     }
@@ -128,15 +128,7 @@ pub(crate) async fn view(
     // 查看时 footer 的 ctx 与上下文提示（修复线 F112，tui-panels.md §1.7）：同一个压缩器按子会话的模型侧历史与子代理的
     // 模型算，与会话 actor 的 `context_changed` 同一套规则；子循环的自动压缩也按它。
     let compactor = &core.ports.compactor;
-    let context_usage =
-        compactor
-            .context_usage(&loaded.messages, &selection)
-            .map(
-                |(used_tokens, max_tokens)| rust_cli_kernel_api::compaction::ContextOccupancy {
-                    used_tokens,
-                    max_tokens,
-                },
-            );
+    let context_usage = compactor.context_usage(&loaded.messages, &selection);
     let context_notice = compactor
         .context_notice(&loaded.messages, &selection)
         .unwrap_or_default();

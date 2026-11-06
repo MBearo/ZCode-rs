@@ -134,7 +134,7 @@ impl WebSearchTool {
             .view()
             .await
             .and_then(|view| view.selection)
-            .unwrap_or_else(|| self.side.selection.clone());
+            .unwrap_or_else(|| self.side.selection.current());
         // 能力检查（工作线 F90，照 Node）：当前模型的生效配置不支持原生搜索时不发请求，给模型可恢复的错误。主循环已按同一个
         // 能力去掉这个工具；这里挡住模型从历史里看到它、或换模型后仍然调用的情况。答不出能力时不检查（同主循环）。
         let capabilities = self.side.model.capabilities(&selection).await;

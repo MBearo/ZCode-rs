@@ -19,21 +19,23 @@ fn the_turn_line_names_the_running_monitor_in_a_real_terminal() {
     pty.send(b"go\r");
     pty.until("the reply", |text| shows(text, "watching the build"));
     // 终端只重画变了的格子：用 ctrl+l 整屏重画，看重画出的整段文字（同 background_pty.rs）。后台的快照在回合结束后才
-    // 重取，没到时再重画一次。整屏重画时右侧的 `ctx` 在 footer 那一行的最后，读到它时上面已经画完。
+    // 重取，没到时再重画一次。整屏重画时状态行（`Ask before changes …`）在最后，读到它时上面已经画完。
     let wanted = "for 0s · done 12:00 AM · 1 monitor still running";
     let mut redrawn = String::new();
     for _ in 0..100 {
         let mark = pty.mark();
         pty.send(b"\x0c");
-        redrawn = pty.until_from(mark, "a full redraw", |text| shows(text, "ctx 0.0%"));
+        redrawn = pty.until_from(mark, "a full redraw", |text| {
+            shows(text, "Ask before changes")
+        });
         if shows(&redrawn, wanted) {
             break;
         }
     }
     assert!(shows(&redrawn, wanted), "{redrawn:?}");
-    assert!(shows(&redrawn, "· 1 monitor · ↓ to manage"), "{redrawn:?}");
+    assert!(shows(&redrawn, "1 monitor running"), "{redrawn:?}");
     pty.send(b"/exit");
-    pty.until("the command", |text| shows(text, "Exit the CLI"));
+    pty.until("the command", |text| shows(text, "Quit ZCode"));
     pty.send(b"\r");
     let (status, all) = pty.finish();
     assert!(status.success(), "{all:?}");

@@ -138,7 +138,7 @@ impl Sandbox {
             ids,
         };
         let defaults = Defaults {
-            selection: selection.clone(),
+            selection: selection.clone().into(),
             mode: PermissionMode::BypassPermissions,
             max_turns: None,
             search_tools: false,

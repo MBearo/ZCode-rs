@@ -6,9 +6,22 @@ pub fn main_line(lang: Lang) -> &'static str {
     lang.pick("main", "主会话")
 }
 
-/// 用时后面的等待标记。
+/// 等你回答的子代理的状态（Puffin 名单的 `waiting for you`）。
 pub fn waiting(lang: Lang) -> &'static str {
-    lang.pick(" · waiting", " · 等待中")
+    lang.pick("waiting for you", "等你回答")
+}
+
+/// ^T 时会话里没有任务：卡的位置的一行（tui-tasks.md §3.1，同 Puffin `/runs` 没有运行时的那一行）。
+pub fn no_tasks(lang: Lang) -> &'static str {
+    lang.pick(
+        "No tasks in this session. Subagents, background commands and todos show up here.",
+        "这个会话里没有任务。子代理、后台命令与待办会出现在这里。",
+    )
+}
+
+/// 正在看的那一项（Puffin `/resume` 列表的 `current`）。
+pub fn viewed(lang: Lang) -> &'static str {
+    lang.pick("current", "当前")
 }
 
 /// 描述后面的当前活动（L35，stall-visibility.md §4.3）与它是不是错误（error 色）。`left_ms` 是重试或停顿
@@ -59,21 +72,6 @@ pub fn more_above(lang: Lang, n: usize) -> String {
     }
 }
 
-/// 有隐藏的已完成后台代理时 footer 的提示（按键提示模板，tui-panels.md §1.4）。
-pub fn tasks_hint(lang: Lang) -> &'static str {
-    lang.pick("{/tasks} to see subagents", "{/tasks} 查看子代理")
-}
-
-/// 列表获得焦点时 footer 左侧的提示（按键提示模板）；`stop` 为真时选中项能停止。
-pub fn agents_hint(lang: Lang, stop: bool) -> &'static str {
-    match (lang, stop) {
-        (Lang::En, false) => "{↑/↓} to select · {enter} to view · {esc} to close",
-        (Lang::En, true) => "{↑/↓} to select · {enter} to view · {x} to stop · {esc} to close",
-        (Lang::Zh, false) => "{↑/↓} 选择 · {enter} 查看 · {esc} 关闭",
-        (Lang::Zh, true) => "{↑/↓} 选择 · {enter} 查看 · {x} 停止 · {esc} 关闭",
-    }
-}
-
 /// 查看子代理时输入框的占位文字（Host §8.4）。
 /// 查看子代理时输入框的占位文字（tui-panels.md §1.6、D17，修复线 F62）：写 `@<类型>`，并写明只读（查看时不能给
 /// 子代理发消息，所以不写 `Message`）。`kind` 已截到 20 列。
@@ -82,30 +80,4 @@ pub fn viewing_placeholder(lang: Lang, kind: &str) -> String {
         Lang::En => format!("Viewing @{kind} (read-only) · esc to return"),
         Lang::Zh => format!("正在查看 @{kind}（只读）· esc 返回"),
     }
-}
-
-// ← 项目页的文字（F29 起）在 i18n_projects.rs；这里留项目页也用的几项。
-pub fn filter_hint(lang: Lang) -> &'static str {
-    lang.pick(" {tab}/{⇧tab} filter", " {tab}/{⇧tab} 筛选")
-}
-
-pub fn current(lang: Lang) -> &'static str {
-    lang.pick(" (current)", "（当前）")
-}
-
-pub fn untitled(lang: Lang) -> &'static str {
-    lang.pick("(untitled)", "（无标题）")
-}
-
-pub fn no_sessions(lang: Lang) -> &'static str {
-    lang.pick("No sessions", "没有会话")
-}
-
-pub fn last_message(lang: Lang) -> &'static str {
-    lang.pick("Last message", "最近一条回复")
-}
-
-/// 选中 pill 时 footer 的提示（Host §8.10）。
-pub fn pill_hint(lang: Lang) -> &'static str {
-    lang.pick("{Enter} to view tasks", "{enter} 查看任务")
 }

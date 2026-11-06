@@ -146,24 +146,29 @@ async fn crlf_from_the_editor_reaches_the_model_as_plain_newlines() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn memory_opens_the_chosen_file_and_esc_cancels() {
+async fn memory_opens_the_chosen_file_from_the_settings_page() {
     let editor = Arc::new(FakeEditor::default());
     let model = GatedModel::scripted(vec![]);
+    let opened = editor.clone();
     with_ui(model, setup(editor.clone()), |mut ui| async move {
         ui.wait_for("Ask before changes").await;
+        // `/memory` 打开设置的 Memory 段（Puffin）；以前是一个自己的列表。
         ui.submit("/memory");
-        ui.wait_for("User memory").await;
-        ui.key(KeyCode::Esc);
-        ui.wait_for("Cancelled memory editing").await;
-        ui.submit("/memory");
-        ui.wait_for("Project memory").await;
+        let page = ui.wait_for("Settings  ›  Memory").await;
+        assert!(page.contains("User memory"), "{page}");
+        assert!(page.contains("Project memory"), "{page}");
+        // ↓ 到项目的文件，⏎ 在编辑器里打开它；esc 关上页，什么都不写。
         ui.key(KeyCode::Down);
         ui.key(KeyCode::Enter);
-        let screen = ui.wait_for("Opened memory file at ./AGENTS.md").await;
-        assert!(
-            screen.contains("> Using $EDITOR=\"vim\". To change editor, set $EDITOR or $VISUAL"),
-            "{screen}"
-        );
+        for _ in 0..200 {
+            if !opened.opened.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        ui.key(KeyCode::Esc);
+        ui.wait("the page to close", |s| !s.contains("Settings  ›"))
+            .await;
     })
     .await;
     assert_eq!(

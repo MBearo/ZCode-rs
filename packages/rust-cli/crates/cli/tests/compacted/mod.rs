@@ -302,7 +302,7 @@ pub async fn kernel(home: &Path, root: &Path) -> rust_cli_runtime::LocalKernel {
         ids,
     };
     let defaults = rust_cli_runtime::Defaults {
-        selection: ModelSelection::new(String::new(), String::new()),
+        selection: ModelSelection::new(String::new(), String::new()).into(),
         mode: PermissionMode::Default,
         max_turns: None,
         search_tools: false,

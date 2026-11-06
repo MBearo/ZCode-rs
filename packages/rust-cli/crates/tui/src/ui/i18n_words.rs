@@ -16,8 +16,8 @@ pub fn mode_label(lang: Lang, mode: PermissionMode) -> &'static str {
         (PermissionMode::AcceptEdits, Lang::Zh) => "自动编辑",
         (PermissionMode::Plan, Lang::En) => "Plan mode",
         (PermissionMode::Plan, Lang::Zh) => "计划模式",
-        // 修复线 F20：guarded 用 App 的名称（`mode.label.glm.guarded`），auto 改用固定的名称（原来是 Autonomous mode）。
-        (PermissionMode::Guarded, Lang::En) => "Autonomous mode",
+        // guarded 照 Puffin 是 `Autonomous`（kit `modes::label`；修复线 F20 起是 App 的 `Autonomous mode`）。
+        (PermissionMode::Guarded, Lang::En) => "Autonomous",
         (PermissionMode::Guarded, Lang::Zh) => "自主模式",
         (PermissionMode::Auto, Lang::En) => "Auto mode",
         (PermissionMode::Auto, Lang::Zh) => "自动模式",
@@ -28,17 +28,53 @@ pub fn mode_label(lang: Lang, mode: PermissionMode) -> &'static str {
     }
 }
 
-/// `/mode` 选择器里模式的说明（工作线 F76）：App 的 `mode.description.glm.{build,guarded,yolo}` 原文
-/// （`packages/ui/src/i18n/locales/en-US.ts` / `zh-CN.ts`；自主模式那句没有句点，照原文）。只有选择器里的三个模式有。
+/// `/mode` 列表里模式的说明（Puffin，kit `modes::MODE_ROWS`；以前是 App 的 `mode.description.glm.*`）。三个模式与计划模式
+/// （`Plan`）有。
 pub fn mode_description(lang: Lang, mode: PermissionMode) -> &'static str {
     match (mode, lang) {
-        (PermissionMode::Default, Lang::En) => "Ask before file changes.",
-        (PermissionMode::Default, Lang::Zh) => "改文件前先问我。",
-        (PermissionMode::Guarded, Lang::En) => "Ask when there’s risk",
-        (PermissionMode::Guarded, Lang::Zh) => "在有风险时询问",
-        (PermissionMode::BypassPermissions, Lang::En) => "Run with fewer confirmations.",
-        (PermissionMode::BypassPermissions, Lang::Zh) => "减少确认次数。",
+        (PermissionMode::Default, Lang::En) => "Asks before each file change and command",
+        (PermissionMode::Default, Lang::Zh) => "每次改文件、跑命令前都先问",
+        (PermissionMode::Guarded, Lang::En) => "Asks only before commands that can destroy work",
+        (PermissionMode::Guarded, Lang::Zh) => "只在可能毁掉工作的命令前问",
+        (PermissionMode::BypassPermissions, Lang::En) => {
+            "Runs commands and edits files without asking"
+        }
+        (PermissionMode::BypassPermissions, Lang::Zh) => "跑命令、改文件都不问",
+        (PermissionMode::Plan, Lang::En) => "Reads and plans; changes nothing until approved",
+        (PermissionMode::Plan, Lang::Zh) => "只读与计划；批准之前什么都不改",
         _ => "",
+    }
+}
+
+/// 模式变了时输入框上方安静的一句（Puffin `mode_says`，kit `modes::says`）；以前是 `Mode switched to …`。
+pub fn mode_says(lang: Lang, mode: PermissionMode) -> &'static str {
+    match (mode, lang) {
+        (PermissionMode::Guarded, Lang::En) => {
+            "Autonomous: it asks only before commands that can destroy work."
+        }
+        (PermissionMode::Guarded, Lang::Zh) => "自主：只在可能毁掉工作的命令前问。",
+        (PermissionMode::BypassPermissions, Lang::En) => {
+            "Full access: it runs commands and edits files without asking."
+        }
+        (PermissionMode::BypassPermissions, Lang::Zh) => "完全访问：跑命令、改文件都不问。",
+        (PermissionMode::AcceptEdits, Lang::En) => {
+            "Edit automatically: it edits files without asking, and asks before commands."
+        }
+        (PermissionMode::AcceptEdits, Lang::Zh) => "自动编辑：改文件不问，跑命令前问。",
+        (PermissionMode::Plan, Lang::En) => {
+            "Plan mode: it reads and plans, and changes nothing until you approve."
+        }
+        (PermissionMode::Plan, Lang::Zh) => "计划模式：只读与计划，你批准之前什么都不改。",
+        (_, Lang::En) => "Ask before changes: it asks before each file change and each command.",
+        (_, Lang::Zh) => "变更前确认：每次改文件、跑命令前都先问。",
+    }
+}
+
+/// 计划模式关上时的一句（Puffin `PLAN_OFF_SAYS`）。
+pub fn plan_off_says(lang: Lang) -> &'static str {
+    match lang {
+        Lang::En => "Plan mode is off.",
+        Lang::Zh => "计划模式已关闭。",
     }
 }
 
@@ -99,6 +135,14 @@ pub fn not_implemented(lang: Lang, name: &str) -> String {
     match lang {
         Lang::Zh => format!("/{name} 还没有实现。"),
         Lang::En => format!("/{name} is not implemented yet."),
+    }
+}
+
+/// 切换会话期间（旧会话已交出、新会话还没打开）的会话命令（titles.md §4）。
+pub fn session_opening(lang: Lang) -> &'static str {
+    match lang {
+        Lang::Zh => "会话还在打开，请稍后再试。",
+        Lang::En => "The session is still opening. Try again in a moment.",
     }
 }
 
@@ -168,75 +212,5 @@ pub fn rejected(lang: Lang, reason: &str) -> String {
     match lang {
         Lang::Zh => format!("没有执行：{reason}"),
         Lang::En => format!("Not done: {reason}"),
-    }
-}
-
-/// 回到底部控件的文字，从长到短；调用方取第一个放得下的。
-pub fn follow_labels(lang: Lang, unseen: bool) -> [&'static str; 5] {
-    match (lang, unseen) {
-        (Lang::En, false) => [
-            " ↓ Back to bottom · esc ",
-            " ↓ Back to bottom ",
-            " ↓ Bottom · esc ",
-            " ↓ Bottom ",
-            " ↓ ",
-        ],
-        (Lang::En, true) => [
-            " New activity · ↓ Back to bottom · esc ",
-            " New activity · ↓ Bottom ",
-            " New · ↓ Bottom ",
-            " ↓ Bottom ",
-            " ↓ ",
-        ],
-        (Lang::Zh, false) => [
-            " ↓ 回到底部 · esc ",
-            " ↓ 回到底部 ",
-            " ↓ 底部 · esc ",
-            " ↓ 底部 ",
-            " ↓ ",
-        ],
-        (Lang::Zh, true) => [
-            " 有新内容 · ↓ 回到底部 · esc ",
-            " 有新内容 · ↓ 底部 ",
-            " 新 · ↓ 底部 ",
-            " ↓ 底部 ",
-            " ↓ ",
-        ],
-    }
-}
-
-/// 不补零的用时：`11s`、`1m 5s`、`1h 2m 3s`。
-pub fn elapsed_plain(seconds: u64) -> String {
-    let (h, m, s) = crate::ui::quantities::hours_minutes_seconds(seconds);
-    match (h, m) {
-        (0, 0) => format!("{s}s"),
-        (0, _) => format!("{m}m {s}s"),
-        _ => format!("{h}h {m}m {s}s"),
-    }
-}
-
-/// 子代理发起的询问：对话框标题后的来源（docs/specs/rust-cli/agents.md §4.1.1）。名字是 agent 类型；为空时只说是子代理。
-pub fn asked_by(lang: Lang, name: &str) -> String {
-    match (lang, name.trim()) {
-        (Lang::En, "") => "from a subagent".to_owned(),
-        (Lang::Zh, "") => "来自子代理".to_owned(),
-        (Lang::En, name) => format!("from the {name} agent"),
-        (Lang::Zh, name) => format!("来自 {name} 子代理"),
-    }
-}
-
-/// 已关闭的会话里后台子代理的询问（docs/specs/rust-cli/agents.md §4.1.2，工作线 F72）：另标出会话的标题。
-pub fn asked_by_session(lang: Lang, name: &str, session: &str) -> String {
-    let agent = match (lang, name.trim()) {
-        (Lang::En, "") => "a subagent".to_owned(),
-        (Lang::En, name) => format!("the {name} agent"),
-        (Lang::Zh, "") => "子代理".to_owned(),
-        (Lang::Zh, name) => format!("{name} 子代理"),
-    };
-    match (lang, session.trim()) {
-        (Lang::En, "") => format!("from {agent} in an earlier session"),
-        (Lang::En, title) => format!("from {agent} in session \"{title}\""),
-        (Lang::Zh, "") => format!("来自之前的会话的 {agent}"),
-        (Lang::Zh, title) => format!("来自会话「{title}」的 {agent}"),
     }
 }

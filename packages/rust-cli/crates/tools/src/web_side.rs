@@ -39,7 +39,7 @@ pub(crate) async fn apply_prompt(
         .view()
         .await
         .and_then(|view| view.selection)
-        .unwrap_or_else(|| side.selection.clone());
+        .unwrap_or_else(|| side.selection.current());
     let request = ModelRequest::side(
         small_fast_model(&main),
         SideSource::WebFetch,

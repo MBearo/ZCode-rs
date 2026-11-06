@@ -61,9 +61,13 @@ async fn forward(core: &Arc<Core>, agent: &AgentId, root: &SessionId, notice: Sh
         status,
         envelope,
     };
-    let wake = core
-        .live
-        .with(|agents| routing::deliver(agents, &core.hub, Some(agent), root, notice));
+    let wake = core.live.with(|agents| {
+        // 交出与记账在同一把锁里：收尾判断“还有没交给它的命令”时去掉它（ack 之前账本还列着，agents.md §5.2 第 5 条）。
+        if let Some(entry) = agents.get_mut(agent) {
+            entry.delivered.push(notice.from.clone());
+        }
+        routing::deliver(agents, &core.hub, Some(agent), root, notice)
+    });
     routing::wake(core, wake.into_iter().collect()).await;
 }
 
@@ -77,22 +81,28 @@ pub(crate) async fn background_commands(core: &Core, root: &SessionId) -> Vec<Ag
             .collect()
     });
     let mut commands = Vec::new();
-    let machine = core.ports.machines.primary_machine();
     for agent in children {
-        if let Ok(state) = machine
-            .shell()
-            .shell_state(&agent.workspace, &agent.child)
-            .await
-        {
-            commands.extend(
-                state
-                    .background
-                    .into_iter()
-                    .map(|task| AgentId::new(task.as_str())),
-            );
-        }
+        commands.extend(commands_of(core, &agent).await);
     }
     commands
+}
+
+/// 一个子代理的子会话里还在跑、或通知还没 ack 的后台命令（执行环境的 `shell_state`，唯一事实源；问不到时为空）。只问
+/// 本机，同 TaskStop（agents.md §5.2 第 4、5 条）。
+pub(crate) async fn commands_of(core: &Core, agent: &LiveAgent) -> Vec<AgentId> {
+    let machine = core.ports.machines.primary_machine();
+    match machine
+        .shell()
+        .shell_state(&agent.workspace, &agent.child)
+        .await
+    {
+        Ok(state) => state
+            .background
+            .into_iter()
+            .map(|task| AgentId::new(task.as_str()))
+            .collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
 #[cfg(test)]

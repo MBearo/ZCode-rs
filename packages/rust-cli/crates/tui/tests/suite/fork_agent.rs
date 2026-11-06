@@ -60,7 +60,7 @@ impl ModelPort for Router {
 }
 
 fn idle(screen: &str, text: &str) -> bool {
-    screen.contains(text) && !screen.contains("esc to interrupt")
+    screen.contains(text) && !screen.contains("esc stop")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -74,10 +74,16 @@ async fn a_fork_inherits_the_conversation_and_reports_back() {
     with_ui(model.clone(), setup, |mut ui| async move {
         ui.wait_for("Ask before changes").await;
         ui.submit("Fork a worker to read a.txt.");
-        ui.wait("the notification turn", |s| {
-            idle(s, "Noted the fork result.")
-        })
-        .await;
+        let screen = ui
+            .wait("the notification turn", |s| {
+                idle(s, "Noted the fork result.")
+            })
+            .await;
+        // 结果回到主会话：一条 Puffin 的通知，标题是 Agent 调用的描述（kit `notices::entry`）。
+        assert!(
+            screen.contains(" • Subagent  Read the file  finished"),
+            "{screen}"
+        );
     })
     .await;
     let requests = model.requests.lock().unwrap().clone();

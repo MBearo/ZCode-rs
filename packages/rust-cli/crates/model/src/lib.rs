@@ -23,7 +23,7 @@ mod trace;
 mod transport;
 mod wire;
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use futures_util::future::{BoxFuture, FutureExt};
 use futures_util::stream::{self, BoxStream, StreamExt};
@@ -51,6 +51,9 @@ pub use crate::transport::RouteOptions;
 /// 模型端口。每次请求按 `selection` 向端点来源取一次端点与凭据。
 pub struct ProviderModel {
     route: Route,
+    /// 晚到的“没有模型”的原因（performance.md §12.3）：入口在后台选缺省模型，选不出时写进来；写了之后每次请求都像
+    /// [`UnconfiguredModel`] 一样报鉴权错误，能力答不出。
+    late: Arc<OnceLock<String>>,
 }
 
 impl ProviderModel {
@@ -69,7 +72,16 @@ impl ProviderModel {
                 clock,
                 options,
             },
+            late: Arc::default(),
         }
+    }
+
+    /// 接上入口的晚到原因（performance.md §12.3）：入口在建端口之前就开始后台选模型，原因写进同一个格子；
+    /// 写了之后的请求报鉴权错误。
+    #[must_use]
+    pub fn with_late_reason(mut self, late: Arc<OnceLock<String>>) -> Self {
+        self.late = late;
+        self
     }
 }
 
@@ -122,6 +134,12 @@ impl ModelPort for ProviderModel {
         mut request: ModelRequest,
         cancel: CancellationToken,
     ) -> BoxStream<'static, Result<ModelStreamItem, ModelError>> {
+        if let Some(reason) = self.late.get() {
+            return stream::iter([Err(ModelError::Authentication {
+                message: reason.clone(),
+            })])
+            .boxed();
+        }
         if let Some(limit) = self.route.options.max_output_tokens {
             request.max_tokens = request.max_tokens.min(limit);
         }
@@ -133,6 +151,9 @@ impl ModelPort for ProviderModel {
         &self,
         selection: &ModelSelection,
     ) -> BoxFuture<'static, Option<ModelCapabilities>> {
+        if self.late.get().is_some() {
+            return async { None }.boxed();
+        }
         let endpoints = self.route.endpoints.clone();
         let selection = selection.clone();
         async move { endpoints.capabilities(&selection).await }.boxed()

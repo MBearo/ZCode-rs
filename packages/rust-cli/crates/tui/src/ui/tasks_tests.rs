@@ -1,6 +1,4 @@
-//! 任务清单的排版（tui-display.md §2.2）：标题、图标、阻塞、截断的顺序与隐藏的汇总。
-use std::time::{Duration, Instant};
-
+//! 任务清单（tui-display.md §2.2；tui-tasks.md §2.1、§3.2）：清单整理成 kit 的形状、阻塞的说明、中文的字、任务行的数。
 use rust_cli_kernel_api::agents::{TaskRecord, TaskStatus};
 
 use super::*;
@@ -19,92 +17,37 @@ fn task(id: &str, status: TaskStatus, blocked_by: &[&str]) -> TaskRecord {
     }
 }
 
-fn plain(lines: &[Line<'static>]) -> Vec<String> {
-    lines.iter().map(crate::ui::text::plain).collect()
-}
-
+/// 步骤按内核的次序，状态写成 kit 的词；被没完成的任务阻塞的接 ` › blocked by`（已完成的阻塞不算）。
 #[test]
-fn the_display_limit_follows_the_terminal_height() {
-    assert_eq!(max_display(10), 0);
-    assert_eq!(max_display(16), 3);
-    assert_eq!(max_display(18), 4);
-    assert_eq!(max_display(40), 5);
-}
-
-#[test]
-fn the_header_counts_done_in_progress_and_open() {
+fn tasks_become_dock_steps_in_kernel_order() {
     let tasks = [
-        task("1", TaskStatus::Completed, &[]),
-        task("2", TaskStatus::InProgress, &[]),
+        task("2", TaskStatus::Completed, &[]),
+        task("1", TaskStatus::InProgress, &[]),
+        task("4", TaskStatus::Pending, &["3", "1", "2"]),
         task("3", TaskStatus::Pending, &[]),
     ];
-    let line = crate::ui::text::plain(&header(&tasks, Lang::En));
-    assert_eq!(line, "  3 tasks (1 done, 1 in progress, 1 open)");
-    let tasks = [task("1", TaskStatus::Pending, &[])];
-    let line = crate::ui::text::plain(&header(&tasks, Lang::En));
-    assert_eq!(line, "  1 tasks (0 done, 1 open)");
-    let line = crate::ui::text::plain(&header(&tasks, Lang::Zh));
-    assert_eq!(line, "  1 个任务（0 完成，1 待办）");
-}
-
-#[test]
-fn items_show_icons_and_open_blockers() {
-    let open = ["1", "3"];
-    let blocked = task("4", TaskStatus::Pending, &["3", "1", "2"]);
-    let line = crate::ui::text::plain(&item(&blocked, &open, Color::Cyan, 80, Lang::En));
-    assert_eq!(line, "  ◻ Task 4 › blocked by #1, #3");
-    let done = task("2", TaskStatus::Completed, &[]);
-    let line = item(&done, &open, Color::Cyan, 80, Lang::En);
-    assert_eq!(crate::ui::text::plain(&line), "  ✔ Task 2");
-    assert!(
-        line.spans[2]
-            .style
-            .add_modifier
-            .contains(Modifier::CROSSED_OUT)
-    );
-    let running = item(
-        &task("1", TaskStatus::InProgress, &[]),
-        &open,
-        Color::Cyan,
-        80,
-        Lang::En,
-    );
-    assert!(running.spans[2].style.add_modifier.contains(Modifier::BOLD));
-    assert_eq!(running.spans[1].style.fg, Some(Color::Cyan));
-}
-
-#[test]
-fn overflow_puts_recent_and_active_tasks_first() {
-    let now = Instant::now();
-    let tasks = vec![
-        task("1", TaskStatus::Completed, &[]),
-        task("2", TaskStatus::Completed, &[]),
-        task("3", TaskStatus::Pending, &["4"]),
-        task("4", TaskStatus::InProgress, &[]),
-        task("5", TaskStatus::Pending, &[]),
-        task("6", TaskStatus::Pending, &[]),
-    ];
-    let mut panel = TaskPanel::default();
-    // 第一份快照里已完成的不算“刚完成”；之后完成的 2 算。
-    panel.changed(&tasks[..1], now - Duration::from_secs(60));
-    panel.changed(&tasks, now);
-    let open = ["3", "4", "5", "6"];
-    let ids: Vec<&str> = ordered(&tasks, &panel, &open, now)
-        .iter()
-        .map(|t| t.id.as_str())
-        .collect();
-    assert_eq!(ids, ["2", "4", "5", "6", "3", "1"]);
-    // 30 秒之后 2 也算较早完成。
-    let later = now + Duration::from_secs(31);
-    let ids: Vec<&str> = ordered(&tasks, &panel, &open, later)
-        .iter()
-        .map(|t| t.id.as_str())
-        .collect();
-    assert_eq!(ids, ["4", "5", "6", "3", "1", "2"]);
-    let hidden = [&tasks[0], &tasks[2], &tasks[4]];
+    let list = steps(&tasks, Lang::En);
+    let steps: Vec<(&str, &str)> = list.iter().map(|(s, t)| (s.as_str(), t.as_str())).collect();
     assert_eq!(
-        hidden_summary(&hidden, Lang::En),
-        "  … +2 pending, 1 completed"
+        steps,
+        [
+            ("completed", "Task 2"),
+            ("inProgress", "Task 1"),
+            ("pending", "Task 4 › blocked by #1, #3"),
+            ("pending", "Task 3"),
+        ]
     );
-    let _ = plain(&[]);
+    let zh = super::steps(&tasks, Lang::Zh);
+    assert_eq!(zh[2].1, "Task 4 › 被 #1, #3 阻塞");
+}
+
+/// 任务行的待办数（tui-tasks.md §2.1）同以前的坞的规则：没全部完成而清单是这个回合写的时有；全部完成时只在回合还在跑时有。
+#[test]
+fn todo_counts_follow_the_old_dock_rule() {
+    let mut app = crate::ui::task_line::tests::app(Lang::En);
+    assert_eq!(todo_counts(&app), None);
+    crate::ui::task_line::tests::todos(&mut app, 2, 3);
+    assert_eq!(todo_counts(&app), Some((2, 3)));
+    crate::ui::task_line::tests::todos(&mut app, 3, 3);
+    assert_eq!(todo_counts(&app), None);
 }

@@ -1,179 +1,249 @@
-// 复制自 apps/zcode-host/crates/tui/src/ui/logo/mod.rs（2f982570bb）；只改了 spec 的出处（docs/specs/rust-cli/tui.md §7.3）。
-//! 新会话的背景标志（docs/specs/rust-cli/tui.md §7.3；原为 rust-tui.md §8.11）：Z 镂空的立体金属徽章。平时是淡色的背景；点击时按点击的
-//! 位置被“按”进去一下，弹簧回弹，金属的反射灯条随倾斜在表面滑动。
+//! 新会话的背景标志（docs/specs/rust-cli/tui.md §7.3）：品牌 Z 用盲文的点画在 transcript 的空白处，平时很淡；点在 Z 上时变亮，
+//! 像一块弹簧板那样被按下，动着时再点，弹簧相加。它不是 transcript 的行：`draw.rs` 把它盖在排好的空行上，于是选区与悬停都
+//! 碰不到它，开着的层照常盖住它。
+mod model;
+mod press;
 mod render;
 mod shape;
 
-use std::f64::consts::TAU;
 use std::time::Instant;
 
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::Modifier;
+use rust_cli_tui_kit::render::{Color, Span, Style, StyledLine};
+use rust_cli_tui_kit::theme::theme::Theme;
 
-use super::palette::{Palette, Rgb, blend};
-pub use render::{Metal, Pose, REST, frame};
+use super::frame::overlay;
+use model::Model;
+use press::{Press, smooth};
+use render::{Canvas, Cell, Inks, Rgb, mix};
+use shape::{ACROSS, DOWN};
 
-/// 一次点击的时长（秒）：0.1 秒亮起，弹簧在 1.2 秒内停住，`FADE_FROM` 起淡回。
-pub const DURATION: f64 = 2.0;
-const RISE: f64 = 0.1;
-const FADE_FROM: f64 = 1.3;
-/// 平时的不透明度。
-pub const STATIC_OPACITY: f64 = 0.18;
-/// 按在徽章边缘时的最大倾斜（弧度）与按在中间时的最大下沉。
-const MAX_TILT: f64 = 0.42;
-const MAX_PUSH: f64 = 0.12;
-/// 标志最宽 60 列，高:宽 = 21:60，至少 14 行。
-const MAX_COLUMNS: u16 = 60;
-const RATIO_ROWS: u16 = 21;
-const MIN_ROWS: u16 = 14;
-/// 查不到终端背景色时按这个深色背景混合。
-const DARK: Rgb = (0x1e, 0x1e, 0x2e);
-/// smootherstep `t³(t(6t − 15) + 10)` 的三个系数。
-const SMOOTHERSTEP: [f64; 3] = [6.0, 15.0, 10.0];
-/// 按下的弹簧：振幅、衰减的时间常数（秒）、频率（次 / 秒）。
-const SPRING_AMPLITUDE: f64 = 1.6;
-const SPRING_DECAY: f64 = 0.32;
-const SPRING_FREQUENCY: f64 = 1.5;
-/// 标志左右合计留出的列数。
-const SIDE_MARGIN: u16 = 4;
-/// 字符格的中心（相对左上角）。
-const CELL_CENTER: f64 = 0.5;
-/// 盲文点阵字符的起点（U+2800，没有点）。
-const BRAILLE_BLANK: u32 = 0x2800;
-/// 16 色终端不透明度低于它时用 dim。
-const DIM_BELOW: f64 = 0.5;
+// 同事反馈以前（0.8、最多 22 行）太大，压到一半、最多 12 行；6 行高时 Z 还认得出。
+/// 比这矮不画。
+const MIN_ROWS: usize = 6;
+const MAX_ROWS: usize = 12;
+/// Z 占空白处的比例。
+const FILL: f64 = 0.5;
+/// 左右至少共留这么多列。
+const SIDE_MARGIN: usize = 4;
+/// 点中要求的覆盖率（一格 8 个点的平均）。
+const HIT_COVER: f64 = 0.4;
+/// 静止的点从背景向 fg3 走这么多（Faint）。
+const REST: f64 = 0.42;
+/// 点亮后的颜色（Sea）：从背景向前景走 `PEAK_LIGHT`，再向 brand 走 `PEAK_BRAND`。
+const PEAK_LIGHT: f64 = 0.88;
+const PEAK_BRAND: f64 = 0.45;
+/// 显著度：点下后升起、最后一次按压结束后停住、再落回的时长（秒）。
+const RISE: f64 = 0.18;
+const HOLD: f64 = 0.3;
+const FALL: f64 = 0.9;
 
-fn smooth(t: f64) -> f64 {
-    let t = t.clamp(0.0, 1.0);
-    let [a, b, c] = SMOOTHERSTEP;
-    t * t * t * (t * (t * a - b) + c)
-}
-
-/// 按下深度：衰减的弹簧，约 0.14 秒按到最深（≈1），回弹时轻微过冲，1.2 秒内停住。
-pub fn depth(t: f64) -> f64 {
-    if t <= 0.0 {
-        return 0.0;
-    }
-    SPRING_AMPLITUDE * (-t / SPRING_DECAY).exp() * (TAU * SPRING_FREQUENCY * t).sin()
-}
-
-/// 点击 `point`（徽章上的位置，-1..1）后 `t` 秒的姿态：点到的一侧往里，整体下沉，越靠中间沉得越多。
-pub fn pose_at(point: [f64; 2], t: f64) -> Pose {
-    let d = depth(t);
-    let offset = point[0].hypot(point[1]).min(1.0);
-    Pose {
-        yaw: MAX_TILT * point[0] * d,
-        pitch: -MAX_TILT * point[1] * d,
-        // 按在边缘时只沉一半。
-        push: -MAX_PUSH * d * (1.0 - offset / 2.0),
+fn rgb(color: Color) -> Option<Rgb> {
+    match color {
+        Color::TrueColor(r, g, b) => Some([f64::from(r), f64::from(g), f64::from(b)]),
+        _ => None,
     }
 }
 
-/// 点击后 `t` 秒的不透明度。
-pub fn opacity_at(t: f64) -> f64 {
-    if t < RISE {
-        STATIC_OPACITY + (1.0 - STATIC_OPACITY) * smooth(t / RISE)
-    } else if t < FADE_FROM {
-        1.0
-    } else if t >= DURATION {
-        STATIC_OPACITY
-    } else {
-        1.0 + (STATIC_OPACITY - 1.0) * smooth((t - FADE_FROM) / (DURATION - FADE_FROM))
-    }
-}
-
-/// 空白处里标志的位置：居中，放不下时为 None。
-pub fn stage_in(free: Rect) -> Option<Rect> {
-    let width = free
-        .width
-        .saturating_sub(SIDE_MARGIN)
-        .min(MAX_COLUMNS)
-        .min(free.height.saturating_mul(MAX_COLUMNS) / RATIO_ROWS);
-    let height = width * RATIO_ROWS / MAX_COLUMNS;
-    (height >= MIN_ROWS).then(|| {
-        Rect::new(
-            free.x + (free.width - width) / 2,
-            free.y + (free.height - height) / 2,
-            width,
-            height,
-        )
+fn inks(theme: &Theme) -> Option<Inks> {
+    let tone =
+        |c: rust_cli_tui_kit::theme::rgb::Rgb| [f64::from(c.r), f64::from(c.g), f64::from(c.b)];
+    let bg = tone(theme.bg.filter(|_| theme.rich)?);
+    let fg = tone(theme.fg?);
+    let fg3 = rgb(theme.fg3.fg_color())?;
+    let brand = rgb(theme.brand)?;
+    // Sea：亮的时候向启动头里蓝色的 Z 走。
+    Some(Inks {
+        bg,
+        rest: mix(bg, fg3, REST),
+        peak: mix(mix(bg, fg, PEAK_LIGHT), brand, PEAK_BRAND),
     })
 }
 
-/// 屏幕上的字符格 → 徽章上的位置（-1..1）。
-pub fn to_badge(stage: Rect, column: u16, row: u16) -> [f64; 2] {
-    render::badge_point(
-        stage.width.into(),
-        stage.height.into(),
-        f64::from(column.saturating_sub(stage.x)) + CELL_CENTER,
-        f64::from(row.saturating_sub(stage.y)) + CELL_CENTER,
-    )
+/// 这一帧标志画在哪里。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Stage {
+    /// Z 外框左上的格子与 Z 的行数。
+    pub col: usize,
+    pub row: usize,
+    pub rows: usize,
+    /// 屏幕上第几行之前看得见（下面的被开着的层盖住，点了不算）。
+    pub shown: usize,
+    /// 画布：空白处的第一行、行数与屏幕的列数（翘起的一边可以画到 Z 的外框之外）。
+    top: usize,
+    free: usize,
+    cols: usize,
+    inks: Inks,
 }
 
-#[derive(Debug, Default)]
-pub struct Logo {
-    /// 最近一次点击：时间与徽章上的位置。
-    pressed: Option<(Instant, [f64; 2])>,
-    /// 这一帧画在哪里（点击的目标）；没画时为 None。
-    pub stage: Option<Rect>,
+impl Stage {
+    fn canvas(&self) -> Canvas {
+        Canvas {
+            width: self.cols * ACROSS,
+            height: self.free * DOWN,
+            left: (self.col * ACROSS) as isize,
+            top: ((self.row - self.top) * DOWN) as isize,
+        }
+    }
 }
 
-impl Logo {
-    /// 需要定时重绘：正在画，并且点击的效果还没结束。
-    pub fn animating(&self, now: Instant) -> bool {
-        self.stage.is_some()
-            && self
-                .pressed
-                .is_some_and(|(at, _)| now.duration_since(at).as_secs_f64() < DURATION)
+/// 与 Scala / JS 的 round 相同：.5 向上；负数取 0。
+fn round(v: f64) -> usize {
+    render::round(v).max(0.0) as usize
+}
+
+/// Z 宽多少列（不取整）：`rows` 行高时。
+fn columns(rows: usize) -> f64 {
+    shape::width_of(rows * DOWN) / ACROSS as f64
+}
+
+/// `top` 是空白处的第一行（最后一行文字之后空一行），`body` 是正文按没有层的一摞量的高度：最后留一行空行。放不下时 `None`。
+pub fn stage(theme: &Theme, cols: usize, top: usize, body: usize) -> Option<Stage> {
+    let inks = inks(theme)?;
+    let free = body.checked_sub(top + 1)?;
+    // 设计稿只按高度定大小；窄终端上 Z 会被裁掉，所以再按宽度限制。
+    let fits = (cols.saturating_sub(SIDE_MARGIN) as f64 / columns(1)).floor() as usize;
+    let rows = round(free as f64 * FILL).min(MAX_ROWS).min(fits);
+    (rows >= MIN_ROWS).then(|| Stage {
+        col: round((cols as f64 - columns(rows)) / 2.0),
+        row: top + (free - rows) / 2,
+        rows,
+        shown: body,
+        top,
+        free,
+        cols,
+        inks,
+    })
+}
+
+#[derive(Default)]
+pub struct Mark {
+    /// 还在动的按压。
+    presses: Vec<Press>,
+    /// 这一串相连的按压的开始与结束，以及开始时的显著度（还没点过时没有）。
+    chain: Option<(f64, f64, f64)>,
+    epoch: Option<Instant>,
+    /// 模型只按行数变，记下最近的一份。
+    model: Option<Model>,
+}
+
+/// `rows` 行高的模型：`slot` 里的那份行数不对时重建。
+fn cached(slot: &mut Option<Model>, rows: usize) -> &Model {
+    if slot.as_ref().is_some_and(|m| m.dots.rows != rows) {
+        *slot = None;
+    }
+    slot.get_or_insert_with(|| Model::new(rows))
+}
+
+impl Mark {
+    fn secs(&self, now: Instant) -> f64 {
+        self.epoch.map_or(0.0, |epoch| {
+            now.saturating_duration_since(epoch).as_secs_f64()
+        })
     }
 
-    /// 在 `(column, row)` 按下：从这个位置重新开始一次按压（没画时不算）。
-    pub fn press(&mut self, column: u16, row: u16, now: Instant) {
-        if let Some(stage) = self.stage {
-            self.pressed = Some((now, to_badge(stage, column, row)));
+    /// 显著度（0 静止，1 点亮）。
+    fn salience(&self, at: f64) -> f64 {
+        let Some((start, end, from)) = self.chain else {
+            return 0.0;
+        };
+        if at < end {
+            from + (1.0 - from) * smooth((at - start) / RISE)
+        } else {
+            1.0 - smooth((at - end - HOLD) / FALL)
         }
     }
 
-    /// 这一帧不画：正在进行的按压结束。
-    pub fn hide(&mut self) {
-        self.stage = None;
-        self.pressed = None;
+    /// 还在动或显著度还没落回（`App::animating`：只在这时按动画节拍重画）。
+    pub fn moving(&self, now: Instant) -> bool {
+        self.chain
+            .is_some_and(|(_, end, _)| self.secs(now) < end + HOLD + FALL)
     }
 
-    pub fn draw(&mut self, buffer: &mut Buffer, free: Rect, palette: &Palette, now: Instant) {
-        let Some(stage) = stage_in(free.intersection(buffer.area)) else {
-            self.hide();
-            return;
+    /// 左键按在 `(x, y)`：点在 Z 上时按下去（立刻开始，与还在动的按压相加），返回 true。
+    pub fn press(&mut self, stage: &Stage, x: u16, y: u16, now: Instant) -> bool {
+        let (x, y) = (usize::from(x), usize::from(y));
+        if x < stage.col || y < stage.row || y >= stage.shown {
+            return false;
+        }
+        let (bx, by) = (
+            ((x - stage.col) * ACROSS) as isize,
+            ((y - stage.row) * DOWN) as isize,
+        );
+        let dots = &cached(&mut self.model, stage.rows).dots;
+        let cover: f64 = (0..DOWN as isize)
+            .flat_map(|dy| (0..ACROSS as isize).map(move |dx| (dx, dy)))
+            .map(|(dx, dy)| dots.cover(bx + dx, by + dy))
+            .sum();
+        if cover / (ACROSS * DOWN) as f64 <= HIT_COVER {
+            return false;
+        }
+        let epoch = *self.epoch.get_or_insert(now);
+        let at = now.saturating_duration_since(epoch).as_secs_f64();
+        self.presses.retain(|p| p.end() > at);
+        // 没有在动的按压时开始新的一串：显著度从当时的值升起；否则这一串延长到这次按压结束。
+        let (first, from) = match (self.presses.is_empty(), self.chain) {
+            (false, Some((first, _, from))) => (first, from),
+            _ => (at, self.salience(at)),
         };
-        self.stage = Some(stage);
-        let (pose, opacity) = match self.pressed {
-            Some((at, point)) if now.duration_since(at).as_secs_f64() < DURATION => {
-                let t = now.duration_since(at).as_secs_f64();
-                (pose_at(point, t), opacity_at(t))
-            }
-            _ => {
-                self.pressed = None;
-                (REST, STATIC_OPACITY)
-            }
+        let press = Press {
+            start: at,
+            point: [
+                bx as f64 + ACROSS as f64 / 2.0,
+                by as f64 + DOWN as f64 / 2.0,
+            ],
         };
-        let background = palette.background.unwrap_or(DARK);
-        let metal = Metal::new(palette.light);
-        let cells = frame(stage.width.into(), stage.height.into(), pose, &metal);
-        let width = usize::from(stage.width);
-        for (index, cell) in cells.iter().enumerate().filter(|(_, cell)| cell.dots != 0) {
-            let x = stage.x + (index % width) as u16;
-            let y = stage.y + (index / width) as u16;
-            let target = &mut buffer[(x, y)];
-            target.set_char(char::from_u32(BRAILLE_BLANK + u32::from(cell.dots)).unwrap_or(' '));
-            match palette.tint(blend(background, cell.rgb, opacity)) {
-                Some(color) => {
-                    target.set_fg(color);
+        self.presses.push(press);
+        self.chain = Some((first, press.end(), from));
+        true
+    }
+
+    /// 这一刻的格子：`stage` 的画布上，行优先。
+    fn cells(&mut self, stage: &Stage, now: Instant) -> Vec<Option<Cell>> {
+        let at = self.secs(now);
+        let sal = self.salience(at);
+        let canvas = stage.canvas();
+        let model = cached(&mut self.model, stage.rows);
+        let pose = self
+            .chain
+            .and_then(|(first, last, _)| press::pose(model, &self.presses, (first, last), at));
+        let frame = render::dots(model, canvas, pose);
+        render::cells(&frame, canvas, &stage.inks, sal)
+    }
+
+    /// 把 Z 画在 `lines`（屏幕的行，空白处是空的）上：一格一个盲文字符，只设前景色。
+    pub fn paint(&mut self, lines: &mut [StyledLine], stage: &Stage, now: Instant) {
+        let cells = self.cells(stage, now);
+        for (r, row) in cells.chunks(stage.cols).enumerate() {
+            let Some(line) = lines.get_mut(stage.top + r) else {
+                break;
+            };
+            let (Some(first), Some(last)) = (
+                row.iter().position(Option::is_some),
+                row.iter().rposition(Option::is_some),
+            ) else {
+                continue;
+            };
+            let mut spans: Vec<(String, Style)> = Vec::new();
+            for cell in &row[first..=last] {
+                let (glyph, style) = match cell {
+                    Some(Cell {
+                        glyph,
+                        rgb: [r, g, b],
+                    }) => (*glyph, Style::fg(Color::TrueColor(*r, *g, *b))),
+                    None => (' ', Style::DEFAULT),
+                };
+                match spans.last_mut() {
+                    Some((text, last)) if *last == style => text.push(glyph),
+                    _ => spans.push((glyph.to_string(), style)),
                 }
-                // 16 色终端不上色：淡的时候用 dim。
-                None if opacity < DIM_BELOW => target.modifier.insert(Modifier::DIM),
-                None => {}
             }
+            let piece = StyledLine::new(
+                spans
+                    .into_iter()
+                    .map(|(text, style)| Span::new(text, style))
+                    .collect(),
+            );
+            *line = overlay(line, first, piece);
         }
     }
 }

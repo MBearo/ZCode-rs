@@ -1,10 +1,9 @@
-//! `/usage` 的 Stats 标签页（docs/specs/rust-cli/usage.md §5）：内核的活动统计、Overview 与 Models、`r` 换日期
-//! 范围、Usage 标签页，深浅主题与中英文。
+//! `/usage all` 打开的「This computer」页（docs/specs/rust-cli/usage.md §5；tui-kit.md §4.3）：会话的 API 时长、内核的
+//! 本机活动统计（热力图、范围内的合计），←→ 换范围，esc 回到用量卡；深浅主题。以前是旧界面的 Usage 与 Stats 两个标签页。
 use crossterm::event::KeyCode;
-use ratatui::style::Color;
 use rust_cli_base::models::{GLM_4_6, GLM_5_3};
 use rust_cli_kernel_api::metering::{ActivityDay, ActivityRange, ActivityStats, ModelTokens};
-use rust_cli_tui::{ColorLevel, Palette};
+use rust_cli_tui::{ColorLevel, Colors};
 
 use super::support::{GatedModel, Setup, with_ui};
 
@@ -40,11 +39,14 @@ fn all_time() -> ActivityStats {
     }
 }
 
+/// 报告了前景（反色）的终端：rich 的主题（tui-kit.md §3.4）。
 fn setup(lang: &'static str, background: (u8, u8, u8)) -> Setup {
+    let foreground = (255 - background.0, 255 - background.1, 255 - background.2);
     let setup = Setup {
         height: 40,
         lang,
-        palette: Palette::new(ColorLevel::TrueColor, Some(background)),
+        colors: Colors::new(ColorLevel::TrueColor, Some(background))
+            .with_foreground(Some(foreground)),
         ..Setup::default()
     };
     setup.store.set_activity(ActivityRange::All, all_time());
@@ -60,102 +62,116 @@ fn setup(lang: &'static str, background: (u8, u8, u8)) -> Setup {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn stats_shows_the_overview_cycles_dates_and_lists_models() {
+async fn this_computer_shows_the_session_the_heat_map_and_cycles_ranges() {
     let model = GatedModel::scripted(Vec::new());
     with_ui(
         model.clone(),
         setup("en_US.UTF-8", (0, 0, 0)),
         |mut ui| async move {
             ui.wait_for("Ask before changes").await;
-            ui.submit("/stats");
-            let page = ui.wait_for(&format!("Favorite model: {GLM_5_3}")).await;
-            assert!(page.contains("Overview"), "{page}");
-            assert!(page.contains("Total tokens: 1.1k"), "{page}");
-            assert!(page.contains("Sessions: 3"), "{page}");
-            assert!(page.contains("Longest session: 1m 5s"), "{page}");
-            assert!(page.contains("Active days: 1/1"), "{page}");
-            assert!(page.contains("Current streak: 1 day"), "{page}");
-            assert!(page.contains("Most active day: Jan 1"), "{page}");
+            ui.submit("/usage all");
+            let page = ui.wait_for("Usage  ›  This computer").await;
+            assert!(page.contains("This session"), "{page}");
+            assert!(page.contains("API time"), "{page}");
+            // Puffin 的热力图（kit `heat_rows`）：段标题、半块的格子。
+            assert!(page.contains("Messages, last 52 weeks"), "{page}");
+            assert!(page.contains("5 total"), "{page}");
+            assert!(page.contains("\u{2580}"), "{page}");
             assert!(
-                page.contains("Less \u{2591} \u{2592} \u{2593} \u{2588} More"),
+                page.contains("On this computer   All time  7 days  30 days"),
                 "{page}"
             );
-            // r：Last 7 days 由内核查（MemoryStore 的预设），分母是 7。
-            ui.key(KeyCode::Char('r'));
-            let week = ui.wait_for("Sessions: 7").await;
-            assert!(week.contains("Active days: 1/7"), "{week}");
-            // r：Last 30 days 没有预设，内核给出空的统计（不是空库：全时段仍有会话）。
-            ui.key(KeyCode::Char('r'));
-            ui.wait_for("Sessions: 0").await;
-            ui.key(KeyCode::Char('r'));
-            ui.wait_for("Sessions: 3").await;
+            assert!(page.contains("3 sessions"), "{page}");
+            assert!(page.contains(GLM_5_3), "{page}");
+            assert!(page.contains("1m session"), "{page}");
+            // 页的键在槽里（Puffin 的页）。
+            assert!(page.contains("←→ range"), "{page}");
+            // →：Last 7 days 由内核查（MemoryStore 的预设）。
             ui.key(KeyCode::Right);
-            let models = ui.wait_for(&format!("\u{2022} {GLM_5_3} (")).await;
-            assert!(
-                models.contains(&format!("\u{2022} {GLM_4_6} (")),
-                "{models}"
-            );
-            assert!(models.contains("In: 900 \u{b7} Out: 100"), "{models}");
-            ui.key(KeyCode::Tab);
-            let usage = ui.wait_for("Total duration (API):").await;
-            assert!(usage.contains("Session"), "{usage}");
-            assert!(usage.contains("Esc to cancel"), "{usage}");
+            ui.wait_for("7 sessions").await;
+            // →：Last 30 days 没有预设，内核给出空的统计。
+            ui.key(KeyCode::Right);
+            ui.wait("the empty range", |s| {
+                s.contains("No activity yet.") && !s.contains("7 sessions")
+            })
+            .await;
+            ui.key(KeyCode::Right);
+            ui.wait_for("3 sessions").await;
+            // esc 回到用量卡（测试没有用量的来源：卡说读不到），再 esc 关上。
             ui.key(KeyCode::Esc);
-            ui.wait("the page to close", |s| !s.contains("Total duration"))
-                .await;
+            ui.wait_for("Could not read your usage").await;
+            ui.key(KeyCode::Esc);
+            ui.wait("the card to close", |s| {
+                !s.contains("Could not read your usage")
+            })
+            .await;
         },
     )
     .await;
     assert!(
         model.requests().is_empty(),
-        "/stats never reaches the model"
+        "/usage all never reaches the model"
     );
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn chinese_and_light_backgrounds_keep_the_page() {
+async fn light_backgrounds_choose_the_range_in_the_light_brand() {
     let model = GatedModel::scripted(Vec::new());
     let buffer = std::sync::Arc::new(std::sync::Mutex::new(None));
     let seen = buffer.clone();
     with_ui(
         model,
-        setup("zh_CN.UTF-8", (255, 255, 255)),
+        setup("en_US.UTF-8", (255, 255, 255)),
         |mut ui| async move {
-            ui.submit("/usage");
-            // 会话部分的输出格式固定，中英文界面相同（usage.md D10）；标签页与提示按界面语言。
-            let page = ui.wait_for("Total duration (API):").await;
-            assert!(page.contains("会话"), "{page}");
-            assert!(page.contains("Esc 取消"), "{page}");
-            assert!(page.contains("tab 切换标签页"), "{page}");
-            ui.key(KeyCode::Tab);
-            let stats = ui.wait_for(&format!("最常用的模型： {GLM_5_3}")).await;
-            assert!(stats.contains("概览"), "{stats}");
-            assert!(stats.contains("当前连续： 1 天"), "{stats}");
-            *seen.lock().unwrap() = ui.buffer.lock().unwrap().clone();
+            ui.submit("/usage all");
+            ui.wait_for("On this computer").await;
+            *seen.lock().unwrap() = ui.shot.lock().unwrap().clone();
         },
     )
     .await;
-    // 浅色背景：选中的标签页用浅色主题的强调色（深蓝），不是深色主题的浅蓝。
+    // 选中的范围是浅色主题的强调色（`Ink::accent`，`brand`），与深色主题的不同。
+    let ink = |bg: (u8, u8, u8)| {
+        rust_cli_tui::Ink::new(
+            ColorLevel::TrueColor,
+            Some((255 - bg.0, 255 - bg.1, 255 - bg.2)),
+            Some(bg),
+        )
+    };
+    let (light, dark) = (ink((255, 255, 255)).accent(), ink((0, 0, 0)).accent());
+    assert_ne!(light, dark);
     let buffer = buffer.lock().unwrap().clone().unwrap();
     let area = buffer.area;
-    let accent = (area.left()..area.right())
-        .map(|x| buffer[(x, area.top())].clone())
-        .find(|cell| cell.symbol() == "统")
-        .map(|cell| cell.fg);
-    assert_eq!(accent, Some(Color::Rgb(0x1c, 0x64, 0xc8)));
+    let row = (area.top()..area.bottom())
+        .find(|&y| {
+            let text: String = (area.left()..area.right())
+                .map(|x| buffer[(x, y)].symbol().to_owned())
+                .collect();
+            text.contains("On this computer")
+        })
+        .expect("the totals heading");
+    let text: Vec<String> = (area.left()..area.right())
+        .map(|x| buffer[(x, row)].symbol().to_owned())
+        .collect();
+    let at = text
+        .windows(3)
+        .position(|w| w.concat() == "All")
+        .expect("All time");
+    assert_eq!(buffer[(area.left() + at as u16, row)].fg, light);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_empty_library_says_there_are_no_stats_yet() {
+async fn an_empty_library_says_there_is_no_activity_yet() {
     let model = GatedModel::scripted(Vec::new());
     let setup = Setup {
         height: 40,
         ..Setup::default()
     };
     with_ui(model, setup, |mut ui| async move {
-        ui.submit("/stats");
-        ui.wait_for("No stats available yet. Start using ZCode!")
-            .await;
+        ui.submit("/usage all");
+        ui.wait("both empty sections", |s| {
+            s.contains("On this computer") && s.matches("No activity yet.").count() == 2
+        })
+        .await;
     })
     .await;
 }

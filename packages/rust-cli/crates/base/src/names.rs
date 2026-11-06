@@ -155,6 +155,9 @@ pub mod env {
     pub const ZAI_BUSINESS_BASE_URL: &str = "ZAI_BUSINESS_BASE_URL";
     pub const ZAI_PRODUCTION_BUSINESS_BASE_URL: &str = "ZAI_PRODUCTION_BUSINESS_BASE_URL";
     pub const ZAI_TEST_BUSINESS_BASE_URL: &str = "ZAI_TEST_BUSINESS_BASE_URL";
+    // 套餐用量的查询地址（App `resolveQuotaUrlFromEnv`，platform.md §11.3）：前者优先。
+    pub const ZCODE_BIGMODEL_USAGE_QUOTA_URL: &str = "ZCODE_BIGMODEL_USAGE_QUOTA_URL";
+    pub const BIGMODEL_USAGE_QUOTA_URL: &str = "BIGMODEL_USAGE_QUOTA_URL";
 
     // 自动更新与包管理器（update.md）。
     pub const ZCODE_MANAGED_BY_PNPM: &str = "ZCODE_MANAGED_BY_PNPM";
@@ -217,9 +220,11 @@ pub mod env {
     pub const CURSOR_TRACE_ID: &str = "CURSOR_TRACE_ID";
     pub const VSCODE_GIT_ASKPASS_MAIN: &str = "VSCODE_GIT_ASKPASS_MAIN";
     pub const TMUX: &str = "TMUX";
+    pub const TMUX_PANE: &str = "TMUX_PANE";
     pub const STY: &str = "STY";
     pub const ZELLIJ: &str = "ZELLIJ";
     pub const SSH_CONNECTION: &str = "SSH_CONNECTION";
+    pub const SSH_TTY: &str = "SSH_TTY";
     pub const WSL_DISTRO_NAME: &str = "WSL_DISTRO_NAME";
     pub const DISPLAY: &str = "DISPLAY";
     pub const WAYLAND_DISPLAY: &str = "WAYLAND_DISPLAY";

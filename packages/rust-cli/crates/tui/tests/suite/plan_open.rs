@@ -42,8 +42,9 @@ fn env() -> Arc<MemoryEnvironment> {
     }))
 }
 
+/// 回答成了一行（Puffin 的回答没有记号，从第 3 列起，tui-kit.md §4.2）且回合结束。
 fn idle(screen: &str, text: &str) -> bool {
-    screen.contains(text) && !screen.contains("esc to interrupt")
+    screen.lines().any(|line| line.trim() == text) && !screen.contains("esc stop")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -62,10 +63,11 @@ async fn plan_open_switches_to_plan_and_opens_the_plan_file() {
     let session = with_ui(model, setup, |mut ui| async move {
         // 没有会话：只切到 plan。
         ui.submit("/plan open");
-        ui.wait_for("Enabled plan mode").await;
+        // 切到 plan 时输入框上方是模式的一句（照 Puffin `mode_line`；以前是 `Enabled plan mode`）。
+        ui.wait_for("Plan mode: it reads and plans").await;
         ui.wait_for("Plan mode").await;
         ui.submit("hello");
-        ui.wait("the reply", |s| idle(s, "⏺ ok")).await;
+        ui.wait("the reply", |s| idle(s, "ok")).await;
         // 已经在 plan，还没有计划。
         ui.submit("/plan open");
         ui.wait_for("Already in plan mode. No plan written yet.")

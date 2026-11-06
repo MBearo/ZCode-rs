@@ -177,12 +177,16 @@ pub fn config(
     })
 }
 
-pub fn usage(context: Option<(u64, u64)>, total: &Usage) -> Value {
+/// `autoCompactThresholdTokens` 是内核生效的自动压缩阈值（compact.md §2.3）；不会主动压缩时为 null。
+pub fn usage(
+    context: Option<rust_cli_kernel_api::compaction::ContextOccupancy>,
+    total: &Usage,
+) -> Value {
     json!({
-        "contextWindow": context.map(|(used, max)| json!({
-            "usedTokens": used,
-            "maxTokens": max,
-            "autoCompactThresholdTokens": null,
+        "contextWindow": context.map(|context| json!({
+            "usedTokens": context.used_tokens,
+            "maxTokens": context.max_tokens,
+            "autoCompactThresholdTokens": context.compact_at,
         })),
         "cumulative": {
             "inputTokens": total.input_tokens,

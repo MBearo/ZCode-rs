@@ -10,8 +10,9 @@ use super::support::with_ui;
 #[tokio::test(flavor = "multi_thread")]
 async fn a_machine_waiting_to_reconnect_is_retried_at_once() {
     for (lang, hint, retried) in [
-        ("en_US.UTF-8", "r to retry now", "Retrying gpu-1 now."),
-        ("zh_CN.UTF-8", "r 立即重试", "马上重试 gpu-1。"),
+        // 槽照 Puffin `machines_slot`：空格做随状态的操作，重连中的是立即重试（以前是 `r to retry now`）。
+        ("en_US.UTF-8", "space retry now", "Retrying gpu-1 now."),
+        ("zh_CN.UTF-8", "space 立即重试", "马上重试 gpu-1。"),
     ] {
         let fake = FakeMachines::with(vec![waiting("gpu-1", 60_000)]);
         let calls = fake.clone();
@@ -19,7 +20,7 @@ async fn a_machine_waiting_to_reconnect_is_retried_at_once() {
             ready(&mut ui).await;
             ui.submit("/machines");
             ui.wait_for(hint).await;
-            ui.key(KeyCode::Char('r'));
+            ui.key(KeyCode::Char(' '));
             ui.wait_for(retried).await;
             // 替身马上连上：列表与状态行都跟着变，提示行不再有“立即重试”。
             let screen = ui
@@ -43,7 +44,9 @@ async fn connecting_a_reconnecting_machine_retries_it_now() {
             ready(&mut ui).await;
             ui.submit("/machines connect gpu-1");
             ui.wait_for("Retrying gpu-1 now.").await;
-            ui.wait_for("● local  ● gpu-1 12ms").await;
+            // 连上之后它离开坞（tui-kit.md §4.0 第 6 条）。
+            ui.wait("gpu-1 to leave the dock", |s| !s.contains("○ gpu-1"))
+                .await;
         },
     )
     .await;
@@ -62,17 +65,21 @@ async fn the_first_connection_shows_the_upload_and_the_handshake() {
         idle(),
         setup_with(Some(fake), "zh_CN.UTF-8"),
         |mut ui| async move {
-            ui.wait_for("● local  ○ dev-a 连接中 · 下载执行器").await;
+            // 坞里这一步与连了多久（Puffin `machines_row`）。
+            ui.wait_for("○ dev-a  下载执行器 · ").await;
             control.set(
                 "dev-a",
                 MachineStatus::Connecting(ConnectStep::Uploading { bytes: 93_323_264 }),
             );
-            ui.wait_for("● local  ○ dev-a 连接中 · 上传执行器（89 MB）")
-                .await;
+            ui.wait_for("○ dev-a  上传执行器（89 MB） · ").await;
             control.set("dev-a", MachineStatus::Connecting(ConnectStep::Handshaking));
-            ui.wait_for("● local  ○ dev-a 连接中 · 握手").await;
+            ui.wait_for("○ dev-a  握手 · ").await;
             control.set("dev-a", MachineStatus::Ready);
-            ui.wait_for("● local  ● dev-a 12ms").await;
+            // 连上了：离开坞，写进状态栏（Puffin `machine_rows::where_`）。
+            ui.wait("dev-a to leave the dock", |s| {
+                !s.contains("○ dev-a") && s.contains("·  @dev-a")
+            })
+            .await;
         },
     )
     .await;

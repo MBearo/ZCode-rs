@@ -45,6 +45,11 @@ fn usage(total: u64, window: u64, source: WindowSource, auto: bool) -> ContextUs
         memory_files: Vec::new(),
         agents: Vec::new(),
         skills: Vec::new(),
+        prompt_sections: Vec::new(),
+        system_tools: Vec::new(),
+        deferred_tools: Vec::new(),
+        messages: Vec::new(),
+        tool_results: Vec::new(),
     }
 }
 

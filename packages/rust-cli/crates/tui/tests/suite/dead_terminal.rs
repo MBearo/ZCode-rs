@@ -1,12 +1,9 @@
 //! 终端关掉之后的画帧（F14，docs/specs/rust-cli/session-lifecycle.md §3.5）：真实的终端关闭（关窗口、SSH 断开）
 //! 先让写终端失败（EIO），SIGHUP 随后才到；修前 `draw()?` 直接返回错误，回合不中止、SessionEnd 不跑。现在画不出来
-//! 就按收到退出信号收尾。终端是包了一层的 `TestBackend`：打开开关后每次画帧都失败。
+//! 就按收到退出信号收尾。测试的终端（`support::Recorder`）打开开关后写帧失败（EIO）。
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
-use ratatui::backend::{Backend, ClearType, TestBackend, WindowSize};
-use ratatui::buffer::Cell;
-use ratatui::layout::{Position, Size};
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::message::ContentBlock;
 use rust_cli_kernel_api::model::{BlockDelta, ModelEvent};
@@ -14,79 +11,6 @@ use rust_cli_kernel_api::testing::{MemoryStore, NoticeEnvironment, environments}
 use tokio_util::sync::CancellationToken;
 
 use super::support::{GatedModel, Setup, send, with_ui_exit};
-
-/// 打开 `dead` 之后画帧失败的终端（其余操作照常交给 `TestBackend`）。
-pub struct Hangable {
-    pub inner: TestBackend,
-    pub dead: Arc<AtomicBool>,
-    /// 终端光标的显示与位置（每帧画完时更新，测试读它断言光标，tui.md §7.6）。
-    pub cursor: Arc<Mutex<Cursor>>,
-}
-
-/// 终端光标：是否显示、最后一次放到的（列，行）。
-#[derive(Debug, Default)]
-pub struct Cursor {
-    pub visible: bool,
-    pub at: (u16, u16),
-}
-
-fn io<T>(result: Result<T, core::convert::Infallible>) -> std::io::Result<T> {
-    result.map_err(|never| match never {})
-}
-
-impl Backend for Hangable {
-    type Error = std::io::Error;
-
-    fn draw<'a, I>(&mut self, content: I) -> std::io::Result<()>
-    where
-        I: Iterator<Item = (u16, u16, &'a Cell)>,
-    {
-        if self.dead.load(Ordering::SeqCst) {
-            return Err(std::io::Error::from_raw_os_error(5));
-        }
-        io(self.inner.draw(content))
-    }
-
-    fn hide_cursor(&mut self) -> std::io::Result<()> {
-        self.cursor.lock().unwrap().visible = false;
-        io(self.inner.hide_cursor())
-    }
-
-    fn show_cursor(&mut self) -> std::io::Result<()> {
-        self.cursor.lock().unwrap().visible = true;
-        io(self.inner.show_cursor())
-    }
-
-    fn get_cursor_position(&mut self) -> std::io::Result<Position> {
-        io(self.inner.get_cursor_position())
-    }
-
-    fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> std::io::Result<()> {
-        let position = position.into();
-        self.cursor.lock().unwrap().at = (position.x, position.y);
-        io(self.inner.set_cursor_position(position))
-    }
-
-    fn clear(&mut self) -> std::io::Result<()> {
-        io(self.inner.clear())
-    }
-
-    fn clear_region(&mut self, clear_type: ClearType) -> std::io::Result<()> {
-        io(self.inner.clear_region(clear_type))
-    }
-
-    fn size(&self) -> std::io::Result<Size> {
-        io(self.inner.size())
-    }
-
-    fn window_size(&mut self) -> std::io::Result<WindowSize> {
-        io(self.inner.window_size())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        io(self.inner.flush())
-    }
-}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_dead_terminal_ends_the_session_like_an_exit_signal() {
@@ -128,7 +52,7 @@ async fn a_dead_terminal_ends_the_session_like_an_exit_signal() {
                 }),
             ],
         );
-        // 修复线 F35：等模型流出的文字（输入已提交、主循环在跑），不等 `esc to interrupt`（TurnStarted 时就画出，
+        // 修复线 F35：等模型流出的文字（输入已提交、主循环在跑），不等 `esc stop`（TurnStarted 时就画出，
         // 输入要等 UserPromptSubmit 跑完才提交；终端在这段空档里没了时，回合在提交输入之前中止）。
         ui.wait_for("partial reply").await;
         // 终端没了；下一帧（这条增量带来的）画不出来。退出信号没有来（stop 令牌不取消）。

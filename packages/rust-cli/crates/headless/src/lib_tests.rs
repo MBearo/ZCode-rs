@@ -28,7 +28,7 @@ fn kernel(model: ScriptedModel) -> Arc<dyn Kernel> {
             ids: Arc::new(SequentialIds::default()),
         },
         Defaults {
-            selection: selection(),
+            selection: selection().into(),
             mode: PermissionMode::Default,
             max_turns: None,
             search_tools: false,
@@ -110,7 +110,7 @@ async fn max_turns_writes_the_error_line() {
             ids: Arc::new(SequentialIds::default()),
         },
         Defaults {
-            selection: selection(),
+            selection: selection().into(),
             mode: PermissionMode::Default,
             max_turns: Some(1),
             search_tools: false,
@@ -148,7 +148,7 @@ async fn print_mode_waits_for_background_commands_and_their_notices() {
             ids: Arc::new(SequentialIds::default()),
         },
         Defaults {
-            selection: selection(),
+            selection: selection().into(),
             mode: PermissionMode::Default,
             max_turns: None,
             search_tools: false,
@@ -185,7 +185,7 @@ async fn print_mode_answers_permission_asks_as_unavailable() {
             ids: Arc::new(SequentialIds::default()),
         },
         Defaults {
-            selection: selection(),
+            selection: selection().into(),
             mode: PermissionMode::Default,
             max_turns: None,
             search_tools: false,
@@ -479,7 +479,7 @@ async fn a_stop_signal_interrupts_the_turn_and_prints_nothing() {
                 ids: Arc::new(SequentialIds::default()),
             },
             Defaults {
-                selection: selection(),
+                selection: selection().into(),
                 mode: PermissionMode::Default,
                 max_turns: None,
                 search_tools: false,

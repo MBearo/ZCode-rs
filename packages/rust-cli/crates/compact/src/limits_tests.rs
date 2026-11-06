@@ -88,7 +88,9 @@ async fn a_configured_1m_window_holds_at_300k_in_all_four_checks() {
     let (messages, model) = (&request.messages, &request.selection);
     assert!(!compaction.should_auto_compact(messages, model));
     assert_eq!(
-        compaction.context_usage(messages, model),
+        compaction
+            .context_usage(messages, model)
+            .map(|found| (found.used_tokens, found.max_tokens)),
         Some((300_000, 980_000))
     );
     assert_eq!(
@@ -123,7 +125,9 @@ async fn a_configured_small_window_compacts_at_its_own_threshold() {
     request.selection = selection(GLM_4_5);
     assert!(compaction.should_auto_compact(&request.messages, &request.selection));
     assert_eq!(
-        compaction.context_usage(&request.messages, &request.selection),
+        compaction
+            .context_usage(&request.messages, &request.selection)
+            .map(|found| (found.used_tokens, found.max_tokens)),
         Some((100_000, 111_072))
     );
     let outcome = compaction
@@ -150,7 +154,9 @@ fn the_configured_output_limit_sets_the_summary_reserve() {
             ..CompactConfig::default()
         },
     );
-    let usage = compaction.context_usage(&history(10), &selection("small-output"));
+    let usage = compaction
+        .context_usage(&history(10), &selection("small-output"))
+        .map(|found| (found.used_tokens, found.max_tokens));
     assert_eq!(usage, Some((10, 992_000)));
 }
 
@@ -209,6 +215,8 @@ fn the_window_override_still_caps_the_configured_window() {
             ..CompactConfig::default()
         },
     );
-    let usage = compaction.context_usage(&history(10), &selection(GLM_5_3));
+    let usage = compaction
+        .context_usage(&history(10), &selection(GLM_5_3))
+        .map(|found| (found.used_tokens, found.max_tokens));
     assert_eq!(usage, Some((10, 280_000)));
 }

@@ -20,7 +20,8 @@ fn event(text: &str) -> Waiting {
 
 fn receipt(key: &str) -> Waiting {
     Waiting::Peer(PeerItem::Receipt {
-        key: key.to_owned(),
+        status: rust_cli_kernel_api::peers::ReceiptStatus::Held,
+        msg_ids: vec![key.to_owned()],
         text: key.to_owned(),
         passive: true,
     })

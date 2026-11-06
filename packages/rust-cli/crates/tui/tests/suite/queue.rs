@@ -1,6 +1,7 @@
 //! 运行中提交（docs/specs/rust-cli/tui.md §5.1）：enter 插话，在工具边界并入当前回合；
-//! ctrl+x enter 相同（只多一个 `wait`，工具边界照样并入，修复线 F13）；排队的插话下面写立即发送的键
-//! （§5.1.1，修复线 F104）；输入框为空时按这个键投递排着的插话（修复线 F105，替身在 `queue_send_now.rs`）。
+//! ctrl+x enter 相同（只多一个 `wait`，工具边界照样并入，修复线 F13）；⇥ 排到这个回合结束之后、⌫ 取回（Puffin 的两条车道
+//! 与「取回」，tui-kit.md §4.2「排队预览」）；输入框为空时按立即发送的键投递排着的插话（修复线 F105，替身在
+//! `queue_send_now.rs`）。以前插话下面还有一行立即发送的键（F104），照 Puffin 删掉。
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -10,6 +11,9 @@ use serde_json::json;
 
 use super::queue_send_now::MovesEnv;
 use super::support::{GatedModel, Setup, finish, request_text, row_of, send, with_ui};
+
+/// 插进这一回合的消息下面的一句（Puffin 的尾巴）。
+const STEERED: &str = "Queued. The agent reads it at its next step.";
 
 /// 一次 Read 调用：先发开头两个事件（回合在运行），其余由测试在输入之后发出。
 fn read_call() -> (Vec<super::support::Item>, Vec<super::support::Item>) {
@@ -31,16 +35,16 @@ async fn enter_while_running_steers_into_the_current_turn() {
         ui.submit("read my notes");
         let (head, tail) = read_call();
         send(&first, head);
-        ui.wait_for("esc to interrupt").await;
+        ui.wait_for("esc stop").await;
         ui.submit("also check the date");
-        // 排队的输入显示在输入框上方（来自 QueueChanged），输入框的占位文字随之变化。
-        let queued = ui.wait_for("Queued messages will be sent").await;
-        assert!(queued.contains("❯ also check the date"), "{queued}");
+        // 插话画成尾巴里你的回合，下面是 `Queued. …`（来自 QueueChanged，Puffin 的尾巴）。
+        let queued = ui.wait_for(STEERED).await;
+        assert!(queued.contains("› also check the date"), "{queued}");
         finish(first, tail);
         finish(second, text_response(&["all read"]));
         let screen = ui.wait_for("all read").await;
-        assert!(screen.contains("❯ also check the date"), "{screen}");
-        ui.wait("the turn to end", |s| !s.contains("esc to interrupt"))
+        assert!(screen.contains("› also check the date"), "{screen}");
+        ui.wait("the turn to end", |s| !s.contains("esc stop"))
             .await;
     })
     .await;
@@ -60,16 +64,16 @@ async fn ctrl_x_enter_while_running_also_joins_at_the_tool_boundary() {
         ui.submit("read my notes");
         let (head, tail) = read_call();
         send(&first, head);
-        ui.wait_for("esc to interrupt").await;
+        ui.wait_for("esc stop").await;
         ui.type_text("then summarize");
         ui.press(KeyCode::Char('x'), KeyModifiers::CONTROL);
         ui.key(KeyCode::Enter);
-        let queued = ui.wait_for("Queued messages will be sent").await;
-        assert!(queued.contains("❯ then summarize"), "{queued}");
+        let queued = ui.wait_for(STEERED).await;
+        assert!(queued.contains("› then summarize"), "{queued}");
         finish(first, tail);
         finish(second, text_response(&["notes read"]));
         ui.wait_for("notes read").await;
-        ui.wait("the turn to end", |s| !s.contains("esc to interrupt"))
+        ui.wait("the turn to end", |s| !s.contains("esc stop"))
             .await;
     })
     .await;
@@ -116,11 +120,13 @@ async fn input_while_the_session_is_starting_is_held_and_sent_in_order() {
     };
     with_ui(model.clone(), setup, |mut ui| async move {
         ui.submit("first message");
-        ui.wait_for("Starting the session").await;
         ui.submit("second message");
-        // 输入框空了（占位文字回来），这条显示在输入框上方。修复前：enter 被忽略，文字留在输入框里，也不排队。
+        // 输入框空了（占位文字回来），这条在尾巴里，下面说会话就绪就发出（Puffin 的尾巴）。修复前：enter 被忽略，文字留在
+        // 输入框里，也不排队。以前输入框的占位写 `Starting the session…`。
         ui.wait("the input to be held", |s| {
-            s.contains("❯ second message") && s.contains("Starting the session")
+            s.contains("› second message")
+                && s.contains("Queued. It goes out as soon as the agent is ready.")
+                && s.contains("Send a message")
         })
         .await;
         gate.notify_one();
@@ -134,60 +140,57 @@ async fn input_while_the_session_is_starting_is_held_and_sent_in_order() {
     assert!(request_text(&requests[1]).contains("second message"));
 }
 
-/// 修复线 F104（tui.md §5.1.1，用户要求 2026-10-27）：运行中有排队的插话时，队列项下面、输入框上面写一行
-/// 立即发送的键；回合结束、队列清空之后这一行消失。旧代码没有这一行。
+/// ⇥（Puffin 的第二条车道「after this turn」）：回合进行中把草稿排到这个回合结束之后，它在板上的栈里（右沿 `next turn`），
+/// 槽是 `⌫ take back  esc stop`；⌫ 取回它（内核出队），文字回到草稿，槽是两条车道的键。旧界面的 ⇥ 在没有面板时什么都不做。
 #[tokio::test(flavor = "multi_thread")]
-async fn the_send_now_key_is_shown_under_the_queued_input() {
-    let (model, senders) = GatedModel::new(2);
+async fn tab_stacks_the_draft_after_this_turn_and_backspace_takes_it_back() {
+    let (model, senders) = GatedModel::new(3);
     let mut senders = senders.into_iter();
-    let (first, second) = (senders.next().unwrap(), senders.next().unwrap());
-    with_ui(model, Setup::default(), |mut ui| async move {
+    let (first, second, third) = (
+        senders.next().unwrap(),
+        senders.next().unwrap(),
+        senders.next().unwrap(),
+    );
+    with_ui(model.clone(), Setup::default(), |mut ui| async move {
         ui.submit("read my notes");
         let (head, tail) = read_call();
         send(&first, head);
-        ui.wait_for("esc to interrupt").await;
-        ui.submit("also check the date");
-        let screen = ui.wait_for("ctrl+x ctrl+s to send now").await;
-        let item = row_of(&screen, "❯ also check the date").expect("the queued input");
-        let hint = row_of(&screen, "ctrl+x ctrl+s to send now").expect("the hint");
-        let input = row_of(&screen, "Queued messages will be sent").expect("the input box");
-        assert_eq!(
-            hint,
-            item + 1,
-            "the hint is right under the queue: {screen}"
+        ui.wait_for("esc stop").await;
+        ui.type_text("then update the changelog");
+        ui.wait_for("⏎ steer  ⇥ after this turn").await;
+        ui.key(KeyCode::Tab);
+        let screen = ui
+            .wait("the stack", |s| {
+                s.contains("› then update the changelog") && s.contains("⌫ take back  esc stop")
+            })
+            .await;
+        let row = row_of(&screen, "› then update the changelog").expect("the stacked row");
+        assert!(
+            screen
+                .lines()
+                .nth(usize::from(row))
+                .is_some_and(|l| l.trim_end().ends_with("next turn")),
+            "{screen}"
         );
-        assert!(hint < input, "the hint is above the input box: {screen}");
+        assert!(!screen.contains(STEERED), "{screen}");
+        ui.key(KeyCode::Backspace);
+        ui.wait("the draft back", |s| {
+            s.contains("› then update the changelog") && s.contains("⏎ steer  ⇥ after this turn")
+        })
+        .await;
+        // 再 ⇥ 一次：这次留在栈上，回合结束后作为下一个回合发出。
+        ui.key(KeyCode::Tab);
+        ui.wait_for("⌫ take back  esc stop").await;
         finish(first, tail);
-        finish(second, text_response(&["all read"]));
-        // 插话并入回合、队列清空：这一行跟着没了（回合还在跑）。
-        ui.wait("the hint to go", |s| !s.contains("to send now"))
-            .await;
-        ui.wait("the turn to end", |s| !s.contains("esc to interrupt"))
-            .await;
+        finish(second, text_response(&["notes read"]));
+        finish(third, text_response(&["changelog updated"]));
+        ui.wait_for("changelog updated").await;
     })
     .await;
-}
-
-/// 修复线 F104：终端分辨得出 ctrl+enter（进界面时键盘增强的查询为真）时提示写 ctrl+enter（tui-input.md §11.1.1）。
-#[tokio::test(flavor = "multi_thread")]
-async fn an_enhanced_terminal_shows_ctrl_enter_in_the_hint() {
-    let (model, senders) = GatedModel::new(2);
-    let mut senders = senders.into_iter();
-    let (first, _second) = (senders.next().unwrap(), senders.next().unwrap());
-    let setup = Setup {
-        keyboard_enhanced: true,
-        ..Setup::default()
-    };
-    with_ui(model, setup, |mut ui| async move {
-        ui.submit("read my notes");
-        let (head, _tail) = read_call();
-        send(&first, head);
-        ui.wait_for("esc to interrupt").await;
-        ui.submit("also check the date");
-        let screen = ui.wait_for("ctrl+enter to send now").await;
-        assert!(!screen.contains("ctrl+x ctrl+s"), "{screen}");
-    })
-    .await;
+    let requests = model.requests();
+    assert_eq!(requests.len(), 3, "the stacked draft is a turn of its own");
+    assert!(!request_text(&requests[1]).contains("then update the changelog"));
+    assert!(request_text(&requests[2]).contains("then update the changelog"));
 }
 
 /// 修复线 F105（tui.md §5.1.1、tui-input.md §11.1，用户决定 2026-10-27）：输入框为空、队列里有插话时按立即发送的键，
@@ -208,12 +211,12 @@ async fn an_empty_input_delivers_the_queued_input_now() {
         ui.submit("read my notes");
         let (head, tail) = read_call();
         send(&first, head);
-        ui.wait_for("esc to interrupt").await;
+        ui.wait_for("esc stop").await;
         // 队列为空：这一按什么都不做（之后的计数只有一次）。
         ui.press(KeyCode::Char('x'), KeyModifiers::CONTROL);
         ui.press(KeyCode::Char('s'), KeyModifiers::CONTROL);
         ui.submit("also check the date");
-        ui.wait_for("ctrl+x ctrl+s to send now").await;
+        ui.wait_for(STEERED).await;
         ui.press(KeyCode::Char('x'), KeyModifiers::CONTROL);
         ui.press(KeyCode::Char('s'), KeyModifiers::CONTROL);
         probe.wait_moved(1).await;
@@ -221,7 +224,7 @@ async fn an_empty_input_delivers_the_queued_input_now() {
         finish(first, tail);
         finish(second, text_response(&["all read"]));
         ui.wait("the turn to end", |s| {
-            s.contains("all read") && !s.contains("esc to interrupt")
+            s.contains("all read") && !s.contains("esc stop")
         })
         .await;
     })

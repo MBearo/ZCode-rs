@@ -236,7 +236,7 @@ fn kernel(home: PathBuf, scratch: PathBuf, release: oneshot::Receiver<()>) -> Lo
     LocalKernel::new(
         ports,
         Defaults {
-            selection: selection(),
+            selection: selection().into(),
             mode: PermissionMode::BypassPermissions,
             max_turns: None,
             search_tools: false,
@@ -293,6 +293,7 @@ fn compare(
     let mut expected = fresh();
     fold(&mut expected, online);
     let rows = bodies(&expected);
+    assert!(!rows.is_empty(), "the online fold shows the turn");
     let replayed = drain(&mut handle.subscribe(Some(0)), last);
     let mut late = fresh();
     fold(&mut late, &replayed);

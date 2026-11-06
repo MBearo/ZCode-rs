@@ -2,7 +2,7 @@
 //!
 //! 输入是按优先级排好的层（用户级在前，项目级自根向工作区根），都已是 JSON 对象；这里不做 IO。
 
-use rust_cli_base::ui_prefs::{UiLocale, UiTheme};
+use rust_cli_base::ui_prefs::UiLocale;
 use rust_cli_base::units;
 use rust_cli_ext::mcp::{McpScope, McpServer, parse_node_servers};
 use rust_cli_kernel_api::permission::{PermissionMode, RuleSource};
@@ -23,6 +23,9 @@ pub(crate) struct Permission {
     pub(crate) mode: Option<PermissionMode>,
     pub(crate) allowed: Option<(RuleSource, Vec<String>)>,
     pub(crate) disallowed: Option<(RuleSource, Vec<String>)>,
+    /// 最后写 `allowedTools` / `disallowedTools` 的那一层的文件（设置的 Permissions 段打开它，tui-manage.md §1.2）。
+    pub(crate) allowed_file: Option<String>,
+    pub(crate) disallowed_file: Option<String>,
 }
 
 /// Node 的模式值 → 权限模式（config.md §2）。修复线 F20：`guarded` 是 guarded（以前当 bypassPermissions）；
@@ -55,13 +58,24 @@ pub(crate) fn permission(layers: &[Layer<'_>], warnings: &mut Vec<String>) -> Pe
                 None => warnings.push(format!("{}: unknown permission.mode {mode}", layer.path)),
             }
         }
-        for (key, slot) in [
-            ("allowedTools", &mut merged.allowed),
-            ("disallowedTools", &mut merged.disallowed),
+        for (key, slot, file) in [
+            (
+                "allowedTools",
+                &mut merged.allowed,
+                &mut merged.allowed_file,
+            ),
+            (
+                "disallowedTools",
+                &mut merged.disallowed,
+                &mut merged.disallowed_file,
+            ),
         ] {
             if let Some(value) = section.get(key) {
                 match strings(value) {
-                    Some(rules) => *slot = Some((layer.source, rules)),
+                    Some(rules) => {
+                        *slot = Some((layer.source, rules));
+                        *file = Some(layer.path.to_owned());
+                    }
                     None => warnings.push(format!(
                         "{}: permission.{key} must be an array of strings",
                         layer.path
@@ -84,21 +98,6 @@ pub(crate) fn locale(layers: &[Layer<'_>], warnings: &mut Vec<String>) -> Option
         match value.as_str().and_then(UiLocale::parse) {
             Some(locale) => merged = Some(locale),
             None => warnings.push(format!("{}: unknown ui.locale {value}", layer.path)),
-        }
-    }
-    merged
-}
-
-/// `ui.theme` 按键覆盖（tui-manage.md §2.1，Node `ui.theme`）：只认 `auto`、`dark`、`light`，坏值记警告、跳过这一层。
-pub(crate) fn theme(layers: &[Layer<'_>], warnings: &mut Vec<String>) -> Option<UiTheme> {
-    let mut merged = None;
-    for layer in layers {
-        let Some(value) = layer.object.get("ui").and_then(|ui| ui.get("theme")) else {
-            continue;
-        };
-        match value.as_str().and_then(UiTheme::parse) {
-            Some(theme) => merged = Some(theme),
-            None => warnings.push(format!("{}: unknown ui.theme {value}", layer.path)),
         }
     }
     merged
@@ -148,6 +147,37 @@ pub(crate) fn question_timeout(layers: &[Layer<'_>], warnings: &mut Vec<String>)
         }
     }
     merged
+}
+
+/// `compact.autoThresholdTokens` 按键覆盖（自动压缩的位置，docs/specs/rust-cli/compact.md §2.3；Puffin 的 `/autocompact`
+/// 与设置页的 Auto-compact at）：正整数才算，坏值记警告、跳过这一层；没有时 None（用模型的阈值）。另给定了合并后的值的
+/// 文件，当它不是用户级文件时（写回只写用户级文件，改不了这个值）。
+pub(crate) fn compact_at(
+    layers: &[Layer<'_>],
+    warnings: &mut Vec<String>,
+) -> (Option<u64>, Option<String>) {
+    let mut merged = None;
+    let mut pinned = None;
+    for layer in layers {
+        let Some(value) = layer
+            .object
+            .get("compact")
+            .and_then(|compact| compact.get("autoThresholdTokens"))
+        else {
+            continue;
+        };
+        match value.as_u64().filter(|tokens| *tokens > 0) {
+            Some(tokens) => {
+                merged = Some(tokens);
+                pinned = (layer.source != RuleSource::UserSettings).then(|| layer.path.to_owned());
+            }
+            None => warnings.push(format!(
+                "{}: unknown compact.autoThresholdTokens {value}",
+                layer.path
+            )),
+        }
+    }
+    (merged, pinned)
 }
 
 /// `features.mcp` 按键覆盖；最终为 `false` 时关闭 MCP。

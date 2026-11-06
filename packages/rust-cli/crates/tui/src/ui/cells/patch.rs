@@ -1,126 +1,35 @@
 // 改写自 apps/zcode-host/crates/tui/src/ui/cells/patch.rs（feat/rs 79b6691c55）：本工程的工具结果没有
 // `structuredPatch`，diff 从工具输入算（Edit 的 old_string / new_string，Write 的 content），不带行号。
-//! 文件改动的细节：`Added N lines, removed M lines` 或 `Wrote N lines to 路径`，下面是带 `+`/`-` 的
-//! diff。新增与删除行整行着底色，配对的行里改动的词再加深一档。紧凑模式最多显示
-//! [`COMPACT_LIMIT`] 行 diff，详细模式全部显示。
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+//! `/diff` 页的 diff 行（transcript 里改动的行由 kit 的 `tool_row::diff_row` 画，`work.rs`）。
+//!
+//! diff 的行照 Puffin（docs/specs/rust-cli/tui-kit.md §4.2「diff」，`shell/tool_view.rs` 的 `diff_row`）：竖线 `   │ `、
+//! 4 格的行号、一格、符号（`+ ` ok、`− ` err）与 fg2 的文字，改动的行的底色（`add_bg` / `del_bg`）从符号涂到正文宽的
+//! 行尾；上下文行 fg3、没有底色。旧界面的 diff 没有行号，行号的位置留空（§6）；以前配对的行里改动的词再加深一档，Puffin
+//! 不按词标，S1 去掉（§6）。
+use rust_cli_tui_kit::render::width::string_width;
+use rust_cli_tui_kit::render::{Span, Style, StyledLine};
 use serde_json::Value;
 
-use super::words;
-use super::{Ctx, DETAIL, INDENT, bold, dim, more_lines};
-use crate::ui::palette::{ColorLevel, Rgb};
-use crate::ui::text::truncate_line;
-use crate::view::{ToolKind, ToolRow};
+use super::Ctx;
+use super::look::{self, rail};
+use crate::view::ToolKind;
 
-/// 紧凑模式显示的 diff 行数。
-const COMPACT_LIMIT: usize = 20;
 /// 改动前后保留的上下文行数。
 const CONTEXT: usize = 3;
-
-/// 一种底色在各种终端里的取值：真彩色（深色背景、浅色背景）与 256 色（深色、浅色）。
-struct Shade {
-    dark: Rgb,
-    light: Rgb,
-    dark256: u8,
-    light256: u8,
-}
-
-/// diff 的底色：新增行、新增的词、删除行、删除的词。
-const ADDED_LINE: Shade = Shade {
-    dark: (0x21, 0x3a, 0x2b),
-    light: (0xda, 0xfb, 0xe1),
-    dark256: 22,
-    light256: 194,
-};
-const ADDED_WORD: Shade = Shade {
-    dark: (0x2e, 0x60, 0x3f),
-    light: (0xac, 0xee, 0xbb),
-    dark256: 28,
-    light256: 157,
-};
-const REMOVED_LINE: Shade = Shade {
-    dark: (0x4a, 0x22, 0x1d),
-    light: (0xff, 0xeb, 0xe9),
-    dark256: 52,
-    light256: 224,
-};
-const REMOVED_WORD: Shade = Shade {
-    dark: (0x7a, 0x33, 0x2b),
-    light: (0xff, 0xc1, 0xbd),
-    dark256: 88,
-    light256: 217,
-};
-
-/// 新增 / 删除行的样式：整行底色、符号、文字与改动的词。
-struct Kind {
-    line: Style,
-    sign: Style,
-    text: Style,
-    word: Style,
-}
-
-fn styles(ctx: &Ctx<'_>, added: bool) -> Kind {
-    let fg = if added { Color::Green } else { Color::Red };
-    let pick = |shade: &Shade| match ctx.palette.level {
-        ColorLevel::TrueColor => Some({
-            let (r, g, b) = if ctx.palette.light {
-                shade.light
-            } else {
-                shade.dark
-            };
-            Color::Rgb(r, g, b)
-        }),
-        ColorLevel::Ansi256 => Some(Color::Indexed(if ctx.palette.light {
-            shade.light256
-        } else {
-            shade.dark256
-        })),
-        ColorLevel::Ansi16 => None,
-    };
-    let (line_bg, word_bg) = if added {
-        (pick(&ADDED_LINE), pick(&ADDED_WORD))
-    } else {
-        (pick(&REMOVED_LINE), pick(&REMOVED_WORD))
-    };
-    let (Some(bg), Some(word_bg)) = (line_bg, word_bg) else {
-        // 16 色终端不画底色：符号与文字上色，改动的词加粗。
-        let style = Style::default().fg(fg);
-        return Kind {
-            line: Style::default(),
-            sign: style,
-            text: style,
-            word: style.add_modifier(Modifier::BOLD),
-        };
-    };
-    // 浅色背景：文字保持默认前景色，只给符号上色。
-    let text = if ctx.palette.light {
-        Style::default()
-    } else {
-        Style::default().fg(fg)
-    };
-    Kind {
-        line: Style::default().bg(bg),
-        sign: Style::default().fg(fg),
-        text,
-        word: text.bg(word_bg),
-    }
-}
+/// 行号的格数（Puffin `pad_left(n, 4)`）。
+const NUMBER: usize = 4;
 
 /// diff 的一行：符号（`+`、`-`、空格；段之间是 `.`）与文字。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PatchRow {
     sign: char,
     text: String,
-    /// 改动的词（字节范围）；没有配对或改动太多时为空。
-    words: Vec<(usize, usize)>,
 }
 
 fn row(sign: char, text: &str) -> PatchRow {
     PatchRow {
         sign,
         text: text.to_owned(),
-        words: Vec::new(),
     }
 }
 
@@ -184,7 +93,6 @@ pub(crate) fn patch_rows(kind: ToolKind, input: &Value) -> Vec<PatchRow> {
         | ToolKind::Mcp
         | ToolKind::Other => {}
     }
-    pair(&mut out);
     out
 }
 
@@ -205,7 +113,6 @@ pub(crate) fn unified_rows(lines: &[String]) -> Vec<PatchRow> {
             Some(_) => {}
         }
     }
-    pair(&mut out);
     out
 }
 
@@ -221,120 +128,48 @@ pub(crate) fn edits_rows(edits: &[(String, Value)]) -> Vec<PatchRow> {
     out
 }
 
-/// 一段连续的删除行后紧跟一段新增行时，按顺序逐对比较，记下改动的词。
-fn pair(rows: &mut [PatchRow]) {
-    let mut index = 0;
-    while index < rows.len() {
-        let start = index;
-        while index < rows.len() && rows[index].sign == '-' {
-            index += 1;
-        }
-        let middle = index;
-        while index < rows.len() && rows[index].sign == '+' {
-            index += 1;
-        }
-        let count = (middle - start).min(index - middle);
-        for offset in 0..count {
-            let (old, new) = (start + offset, middle + offset);
-            if let Some((old_words, new_words)) =
-                super::diff::changed(&rows[old].text, &rows[new].text)
-            {
-                rows[old].words = old_words;
-                rows[new].words = new_words;
-            }
-        }
-        if index == start {
-            index += 1;
-        }
-    }
-}
-
-/// 文字按改动的词切成片段。
-fn text_spans(row: &PatchRow, kind: &Kind) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    let mut at = 0;
-    for (start, end) in &row.words {
-        if *start > at {
-            spans.push(Span::styled(row.text[at..*start].to_owned(), kind.text));
-        }
-        spans.push(Span::styled(row.text[*start..*end].to_owned(), kind.word));
-        at = *end;
-    }
-    if at < row.text.len() || spans.is_empty() {
-        spans.push(Span::styled(row.text[at..].to_owned(), kind.text));
-    }
-    spans
-}
-
-/// 计数行：（前文，粗体的数字，后文）若干段。
-fn counted(parts: Vec<words::Counted>) -> Line<'static> {
-    let mut spans = vec![Span::styled(DETAIL, dim())];
-    for (before, count, after) in parts {
-        spans.push(Span::raw(before));
-        spans.push(Span::styled(count, bold()));
-        spans.push(Span::raw(after));
-    }
-    Line::from(spans)
-}
-
-pub fn details(tool: &ToolRow, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
-    let rows = patch_rows(tool.kind, &tool.input);
-    let path = ["file_path", "notebook_path", "path"]
-        .iter()
-        .find_map(|key| tool.input[*key].as_str())
-        .map(|path| super::shown_path(path, tool, ctx))
-        .unwrap_or_default();
-    let additions = rows.iter().filter(|row| row.sign == '+').count() as u64;
-    let deletions = rows.iter().filter(|row| row.sign == '-').count() as u64;
-    let created = tool.kind == ToolKind::Write && tool.display["type"] == "create";
-    let summary = if created {
-        vec![words::wrote(ctx.lang, additions, &path)]
-    } else {
-        words::changed(ctx.lang, additions, deletions)
+/// diff 的行（最多 `limit` 行）与没显示的行数，每行照 Puffin 的 `diff_row`（见模块注释）：正文宽 `w = min(宽 − 2, 99)`，
+/// 文字截到 `w − 12` 格（竖线 5、行号 4 与一格、符号 2），改动的行用空格补到这一宽度好让底色涂到行尾。段之间的 `...` 在
+/// 文字的位置，fg3（Puffin 没有，自拟，tui-kit.md §4.3）。
+pub(crate) fn diff(rows: &[PatchRow], ctx: &Ctx<'_>, limit: usize) -> (Vec<StyledLine>, usize) {
+    let theme = &ctx.ink.theme;
+    let width = look::measure(ctx.width);
+    let room = (width as i64 - 5 - 5 - 2).max(1) as usize;
+    let lead = || {
+        let mut head = rail(ctx.ink);
+        head.push(Span::new(" ".repeat(NUMBER), theme.fg3));
+        head.push(Span::plain(" "));
+        head
     };
-    let mut lines = vec![truncate_line(counted(summary), ctx.width)];
-    let limit = if ctx.expanded {
-        usize::MAX
-    } else {
-        COMPACT_LIMIT
-    };
-    let (diff, hidden) = diff_lines(&rows, ctx, limit);
-    lines.extend(diff);
-    if hidden > 0 {
-        lines.push(more_lines(hidden, ctx));
-    }
-    lines
-}
-
-/// diff 的行（最多 `limit` 行）与没显示的行数。
-pub(crate) fn diff_lines(
-    rows: &[PatchRow],
-    ctx: &Ctx<'_>,
-    limit: usize,
-) -> (Vec<Line<'static>>, usize) {
-    let (added, removed) = (styles(ctx, true), styles(ctx, false));
-    // 缩进不着底色（整行底色从符号开始）。
-    let indent = Span::styled(INDENT, Style::default().bg(Color::Reset));
     let mut lines = Vec::new();
     for row in rows.iter().take(limit) {
-        let line = match row.sign {
-            '.' => Line::from(vec![indent.clone(), Span::styled("...", dim())]),
-            '+' | '-' => {
-                let kind = if row.sign == '+' { &added } else { &removed };
-                let mut spans = vec![
-                    indent.clone(),
-                    Span::styled(row.sign.to_string(), kind.sign),
-                    Span::raw(" "),
-                ];
-                spans.extend(text_spans(row, kind));
-                Line::from(spans).style(kind.line)
+        let (sign, sign_ink, bg) = match row.sign {
+            '+' => ("+ ", Style::fg(theme.ok), theme.add_bg),
+            '-' => ("− ", Style::fg(theme.err), theme.del_bg),
+            '.' => {
+                let mut head = lead();
+                head.push(Span::new("  ...", theme.fg3));
+                lines.push(StyledLine::new(head));
+                continue;
             }
-            _ => Line::from(vec![
-                indent.clone(),
-                Span::styled(format!("  {}", row.text), dim()),
-            ]),
+            _ => ("  ", theme.fg3, None),
         };
-        lines.push(truncate_line(line, ctx.width));
+        let text_ink = if row.sign == ' ' {
+            theme.fg3
+        } else {
+            theme.fg2
+        };
+        let on = |style: Style| bg.map_or(style, |bg| style.with_bg(bg));
+        let text = look::clip(&row.text.replace('\t', "    ").replace('\r', ""), room);
+        let pad = if bg.is_some() {
+            " ".repeat(room.saturating_sub(string_width(&text)))
+        } else {
+            String::new()
+        };
+        let mut head = lead();
+        head.push(Span::new(sign, on(sign_ink)));
+        head.push(Span::new(text + &pad, on(text_ink)));
+        lines.push(StyledLine::new(look::cut(&head, width as i64)));
     }
     (lines, rows.len().saturating_sub(limit))
 }

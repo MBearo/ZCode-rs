@@ -126,7 +126,7 @@ fn tool_on(pdf: Option<bool>) -> ReadTool {
     });
     ReadTool::new(files().with_model(SideModel {
         model: Arc::new(ScriptedModel::new(Vec::new()).capabilities(capabilities)),
-        selection: rust_cli_kernel_api::testing::selection(),
+        selection: rust_cli_kernel_api::testing::selection().into(),
     }))
 }
 

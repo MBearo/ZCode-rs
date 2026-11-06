@@ -13,6 +13,7 @@
 
 use std::any::Any;
 use std::convert::Infallible;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::mpsc as std_mpsc;
@@ -31,14 +32,24 @@ pub(crate) type Handler = Box<dyn Fn(notify::Result<notify::Event>) + Send + Syn
 /// 活着的监听：丢掉它监听就停（注销）。
 pub(crate) type Watch = Box<dyn Any + Send>;
 
-/// 这个事件说的是不是任务文件（临时文件、别的文件与出错的事件都不算）。
-fn relevant(event: &notify::Result<notify::Event>) -> bool {
+/// 这个事件有没有说到要的文件（出错的事件不算）。
+fn relevant(event: &notify::Result<notify::Event>, wanted: fn(&OsStr) -> bool) -> bool {
     event.as_ref().is_ok_and(|event| {
         event
             .paths
             .iter()
-            .any(|path| path.file_name().is_some_and(|name| name == TASKS_FILE))
+            .any(|path| path.file_name().is_some_and(wanted))
     })
+}
+
+fn is_tasks_file(name: &OsStr) -> bool {
+    name == TASKS_FILE
+}
+
+/// 不隐藏的 `.json`：原子写的临时文件是隐藏的，socket 不是 `.json`。
+fn is_json(name: &OsStr) -> bool {
+    let name = name.to_string_lossy();
+    name.ends_with(".json") && !name.starts_with('.')
 }
 
 /// 系统的监听服务（notify：macOS 的 FSEvents、Linux 的 inotify、Windows 的 `ReadDirectoryChangesW`）。
@@ -63,7 +74,7 @@ fn hold<S>(
     let watch = match source(dir, handler) {
         Ok(watch) => watch,
         Err(error) => {
-            tracing::warn!(%error, dir = %dir.display(), "cannot watch scheduled tasks");
+            tracing::warn!(%error, dir = %dir.display(), "cannot watch the directory");
             return;
         }
     };
@@ -104,15 +115,27 @@ pub(crate) fn changes(dir: PathBuf) -> BoxStream<'static, ()> {
     changes_with(dir, system)
 }
 
+/// 目录里 `.json` 文件的变化（驾驶舱的登记处与笔记，tui-cockpit.md §1）；其余同 [`changes`]。
+pub fn json_changes(dir: PathBuf) -> BoxStream<'static, ()> {
+    watch(dir, is_json, system)
+}
+
 /// [`changes`]，建监听的函数由调用方给（测试注入事件源）。
 pub(crate) fn changes_with<S>(dir: PathBuf, source: S) -> BoxStream<'static, ()>
+where
+    S: FnOnce(&Path, Handler) -> notify::Result<Watch> + Send + 'static,
+{
+    watch(dir, is_tasks_file, source)
+}
+
+fn watch<S>(dir: PathBuf, wanted: fn(&OsStr) -> bool, source: S) -> BoxStream<'static, ()>
 where
     S: FnOnce(&Path, Handler) -> notify::Result<Watch> + Send + 'static,
 {
     let (sender, events) = mpsc::channel(1);
     let ready = sender.clone();
     let handler: Handler = Box::new(move |event| {
-        if relevant(&event) {
+        if relevant(&event, wanted) {
             // 满了说明还有一次重读没做，丢掉这次即可。
             let _ = sender.try_send(());
         }
@@ -120,7 +143,7 @@ where
     let (stop, stopped) = std_mpsc::channel();
     let start = async move {
         if let Err(error) = rust_cli_fs::create_dir_all(&dir).await {
-            tracing::warn!(%error, dir = %dir.display(), "cannot create the scheduled task directory");
+            tracing::warn!(%error, dir = %dir.display(), "cannot create the watched directory");
             return;
         }
         // 线程持有监听直到流被丢掉；这里等它只为在登记失败时结束流（结果在通道上体现）。

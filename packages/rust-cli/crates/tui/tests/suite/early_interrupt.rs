@@ -137,15 +137,15 @@ async fn esc_while_the_prompt_hook_runs_keeps_the_input_with_the_marker() {
         ui.wait_for("Ask before changes").await;
         ui.submit("first prompt");
         held.started.notified().await;
-        ui.wait_for("esc to interrupt").await;
+        ui.wait_for("esc stop").await;
         ui.type_text("second prompt");
         ui.wait_for("second prompt").await;
         ui.key(KeyCode::Esc);
-        let screen = ui.wait_for("Interrupted").await;
+        let screen = ui.wait_for("Stopped.").await;
         assert!(screen.contains("first prompt"), "{screen}");
         ui.key(KeyCode::Enter);
         ui.wait("the reply", |s| {
-            s.contains("second reply") && !s.contains("esc to interrupt")
+            s.contains("second reply") && !s.contains("esc stop")
         })
         .await;
     })
@@ -183,7 +183,7 @@ async fn a_stop_signal_while_the_prompt_hook_runs_records_nothing() {
         ui.wait_for("Ask before changes").await;
         ui.submit("first prompt");
         held.started.notified().await;
-        ui.wait_for("esc to interrupt").await;
+        ui.wait_for("esc stop").await;
         stop.cancel();
     });
     // 期限只用于让失败的测试结束。

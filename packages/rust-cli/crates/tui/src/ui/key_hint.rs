@@ -1,9 +1,14 @@
-//! 按键提示组件（docs/specs/rust-cli/tui.md §7.4，修复线 F26，用户决定）：提示写成模板，`{键}` 标出按键
-//! （中英文的词序都能放）；按键用 `key` 样式，其余文字（说明、` · ` 分隔）用 `secondary` 样式。所有按键引导
-//! （footer、列表与弹窗底部、页面与面板、对话框、快捷键面板）都经这里画，样式只在 `Palette` 的记号里。
-use ratatui::text::{Line, Span};
+//! 按键提示组件（docs/specs/rust-cli/tui.md §7.4，修复线 F26；画法 tui-kit.md §3.8 的转换示例）：提示写成模板，`{键}` 标出
+//! 按键（中英文的词序都能放）；按键用 `key` 墨色，其余文字（说明、` · ` 分隔）用 `secondary`。所有按键引导（footer、列表
+//! 与弹窗底部、页面与面板、对话框、快捷键面板）都经这里画。
+//!
+//! 墨色照 Puffin 的槽（docs/puffin-tui.md §4.2「按键提示（槽）」，`shell/key_hints.rs` 的 `spans`）：键 `fg2`、标签 `fg3`，
+//! 经 [`Ink`] 取。模板的语法与 ` · ` 分隔是旧界面的，不变（tui-kit.md §1.2）。
+//!
+//! 只产出 kit 的 [`Span`] / [`StyledLine`]（tui-kit.md §3.8）。
+use rust_cli_tui_kit::render::Span;
 
-use super::palette::Palette;
+use super::ink::Ink;
 
 /// 模板的片段：（文字，是不是按键）。没有配对的 `{` 按普通文字处理。
 fn parts(template: &str) -> Vec<(String, bool)> {
@@ -31,30 +36,14 @@ pub fn plain(template: &str) -> String {
 }
 
 /// 模板的片段：按键 `key`，其余 `secondary`。
-pub fn spans(template: &str, palette: &Palette) -> Vec<Span<'static>> {
+pub fn spans(template: &str, ink: &Ink) -> Vec<Span> {
     parts(template)
         .into_iter()
         .map(|(text, key)| {
-            let style = if key {
-                palette.key()
-            } else {
-                palette.secondary()
-            };
-            Span::styled(text, style)
+            let style = if key { ink.key() } else { ink.secondary() };
+            Span::new(text, style)
         })
         .collect()
-}
-
-/// 一行提示：前面缩进 `indent` 个空格。
-pub fn line(indent: usize, template: &str, palette: &Palette) -> Line<'static> {
-    let mut all = vec![Span::raw(" ".repeat(indent))];
-    all.extend(spans(template, palette));
-    Line::from(all)
-}
-
-/// 几条提示之间的分隔（` · `，`secondary`）。
-pub fn separator(palette: &Palette) -> Span<'static> {
-    Span::styled(" · ", palette.secondary())
 }
 
 #[cfg(test)]

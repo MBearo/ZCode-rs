@@ -439,3 +439,16 @@ fn effort_is_a_level_or_a_warning() {
         "error: option '--effort <level>' argument missing"
     );
 }
+
+/// 只有一个交互界面（cli-args.md §15）：`puffin-tui` 与 `v1-tui` 都不是动词（2026-10-31 删掉 Puffin 界面，2026-10-30 删掉
+/// `v1-tui`），是普通的位置参数。
+#[test]
+fn old_interface_verbs_are_plain_prompts() {
+    for verb in ["puffin-tui", "v1-tui"] {
+        let parsed = parse(&args(&[verb])).unwrap();
+        assert_eq!(
+            (parsed.mode, parsed.prompt.as_deref()),
+            (Mode::Tui, Some(verb))
+        );
+    }
+}

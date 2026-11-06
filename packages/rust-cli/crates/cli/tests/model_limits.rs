@@ -312,3 +312,26 @@ async fn a_catalog_web_search_sends_the_node_output_limit() {
         assert_eq!(body["max_tokens"], 128_000);
     }
 }
+
+/// 配置的 `compact.autoThresholdTokens`（compact.md §2.3）：显式覆盖的 glm-5.3（配置 1M）设成 250k 后，300k token 就压缩，
+/// `/context` 的缓冲是 1,000,000 − 250,000。修前内核不读这个键：同样的历史不压缩（上面的 300k 用例）。
+#[tokio::test]
+async fn the_configured_threshold_compacts_earlier() {
+    let sandbox = Sandbox::new();
+    let config = sandbox.home.join(".zcode/cli/config.json");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, r#"{"compact":{"autoThresholdTokens":250000}}"#).unwrap();
+    let fixture = sse::serve(sandbox.script(300_000, &["<summary>S</summary>", "done"]));
+    let vars = explicit(&fixture.url, GLM_5_3);
+    sandbox.run("go", &borrowed(&vars), &[]);
+    let requests = fixture.main_requests();
+    assert!(
+        requests.iter().any(is_summary),
+        "did not compact at 300k: {} requests",
+        requests.len()
+    );
+    let fixture = sse::serve(Vec::new());
+    let vars = explicit(&fixture.url, GLM_5_3);
+    let output = sandbox.run("/context", &borrowed(&vars), &[]);
+    assert_eq!(autocompact_buffer(&output.stdout), "750k");
+}

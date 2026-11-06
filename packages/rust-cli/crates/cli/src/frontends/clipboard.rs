@@ -1,21 +1,14 @@
-//! TUI 的剪贴板（docs/specs/rust-cli/tui-input.md §3.1、tui-select.md §3.2）：读图片与写文字都按平台选命令；
-//! 子进程只经 proc，读文件只经 fs。
-//! 读图片的命令把图片写到标准输出，不落临时文件：macOS `osascript` 打印 `«data PNGf…»`（十六进制），Linux `wl-paste` /
-//! `xclip` 打印字节，Windows PowerShell 打印 base64。写文字的命令从标准输入读。
-use rust_cli_base::proto::mime;
+//! 界面的剪贴板端口（`rust_cli_tui::services::Clipboard`；tui-input.md §3.1、tui-select.md §3.2）：读剪贴板上的图片
+//! （`clipboard/image.rs`）、读图片文件与写文字都按平台选命令；子进程只经 proc，读写文件只经 fs。写文字的命令从标准输入读。
 use std::path::PathBuf;
 use std::process::Stdio;
 
-use base64::Engine;
 use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
-use rust_cli_tui::{Clipboard, CopyRoute, ImageBytes};
+use rust_cli_tui::services::{Clipboard, CopyRoute, ImageBytes};
 use tokio::io::AsyncWriteExt;
 
-use crate::consts;
-
-/// PowerShell：剪贴板里有图片时打印 PNG 的 base64，没有时退出码 1（`Get-Clipboard -Format Image`）。
-const POWERSHELL: &str = "$i = Get-Clipboard -Format Image; if ($i) { $m = New-Object System.IO.MemoryStream; $i.Save($m, [System.Drawing.Imaging.ImageFormat]::Png); [Convert]::ToBase64String($m.ToArray()) } else { exit 1 }";
+mod image;
 
 /// PowerShell 写剪贴板：文字从标准输入读，按 UTF-8。
 const SET_CLIPBOARD: &str = "[Console]::InputEncoding = [Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())";
@@ -23,7 +16,7 @@ const SET_CLIPBOARD: &str = "[Console]::InputEncoding = [Text.Encoding]::UTF8; S
 /// 每个写剪贴板的命令最多等这么久（2000 ms）。
 const WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub(crate) struct SystemClipboard {
     /// `WAYLAND_DISPLAY` 有值：Linux 先试 `wl-paste` / `wl-copy`。
     pub wayland: bool,
@@ -130,85 +123,6 @@ async fn write_tmux(text: &str) -> bool {
     feed("tmux", &["load-buffer", "-"], text).await == Some(true)
 }
 
-/// 一个读剪贴板的命令。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Reader {
-    /// macOS：输出是 `«data PNGf<十六进制>»`。
-    Osascript,
-    /// Linux：输出是 PNG 字节。
-    Bytes(&'static str, &'static [&'static str]),
-    /// Windows：输出是 base64。
-    PowerShell,
-}
-
-/// 本平台按顺序试的命令（macOS `osascript`；Linux `xclip`，Wayland 下另有 `wl-paste`；Windows PowerShell）。
-pub(crate) fn readers(wayland: bool) -> Vec<Reader> {
-    if cfg!(target_os = "macos") {
-        return vec![Reader::Osascript];
-    }
-    if cfg!(windows) {
-        return vec![Reader::PowerShell];
-    }
-    let mut out = Vec::new();
-    if wayland {
-        out.push(Reader::Bytes("wl-paste", &["--type", mime::PNG]));
-    }
-    out.push(Reader::Bytes(
-        "xclip",
-        &["-selection", "clipboard", "-t", mime::PNG, "-o"],
-    ));
-    out
-}
-
-/// 一个字节的十六进制位数。
-const HEX_DIGITS_PER_BYTE: usize = 2;
-
-/// `«data PNGf89504E47…»` → 字节；不是这个形状时为 None。
-pub(crate) fn parse_osascript(output: &[u8]) -> Option<Vec<u8>> {
-    let text = String::from_utf8_lossy(output);
-    let hex = text.trim().strip_prefix("«data PNGf")?.strip_suffix('»')?;
-    if hex.len() % HEX_DIGITS_PER_BYTE != 0 {
-        return None;
-    }
-    (0..hex.len())
-        .step_by(HEX_DIGITS_PER_BYTE)
-        .map(|at| u8::from_str_radix(&hex[at..at + HEX_DIGITS_PER_BYTE], consts::HEX_RADIX).ok())
-        .collect()
-}
-
-/// 跑一个命令，成功时给出标准输出（没装、失败都是 None）。
-async fn run(program: &str, args: &[&str]) -> Option<Vec<u8>> {
-    let output = rust_cli_proc::command(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .await
-        .ok()?;
-    output.status.success().then_some(output.stdout)
-}
-
-async fn read(reader: &Reader) -> Option<Vec<u8>> {
-    match reader {
-        Reader::Osascript => {
-            let out = run("osascript", &["-e", "the clipboard as «class PNGf»"]).await?;
-            parse_osascript(&out)
-        }
-        Reader::Bytes(program, args) => {
-            let out = run(program, args).await?;
-            // 文件头判断（kernel-api `image::media_type`，与 Read、TUI 的粘贴同一个判断，F58）。
-            (rust_cli_kernel_api::image::media_type(&out) == Some(mime::PNG)).then_some(out)
-        }
-        Reader::PowerShell => {
-            let out = run("powershell", &["-NoProfile", "-Command", POWERSHELL]).await?;
-            let text = String::from_utf8_lossy(&out);
-            base64::engine::general_purpose::STANDARD
-                .decode(text.trim())
-                .ok()
-        }
-    }
-}
-
 impl Clipboard for SystemClipboard {
     fn copy_text(&self, text: String) -> BoxFuture<'static, CopyRoute> {
         let clipboard = self.clone();
@@ -224,16 +138,7 @@ impl Clipboard for SystemClipboard {
     }
 
     fn image(&self) -> BoxFuture<'static, Result<Option<ImageBytes>, String>> {
-        let readers = readers(self.wayland);
-        async move {
-            for reader in &readers {
-                if let Some(bytes) = read(reader).await {
-                    return Ok(Some(ImageBytes { bytes }));
-                }
-            }
-            Ok(None)
-        }
-        .boxed()
+        image::read_image(self.wayland).boxed()
     }
 
     fn image_file(&self, path: String) -> BoxFuture<'static, Result<Option<ImageBytes>, String>> {
@@ -305,29 +210,6 @@ mod tests {
             assert_eq!(local, CopyRoute::Native);
         } else {
             assert_eq!(local, CopyRoute::Osc52);
-        }
-    }
-
-    #[test]
-    fn osascript_hex_output_decodes_to_bytes() {
-        assert_eq!(
-            parse_osascript("«data PNGf89504E47»\n".as_bytes()),
-            Some(vec![0x89, 0x50, 0x4e, 0x47])
-        );
-        assert_eq!(parse_osascript(b"text"), None);
-        assert_eq!(parse_osascript("«data PNGf8»".as_bytes()), None);
-    }
-
-    #[test]
-    fn each_platform_has_its_clipboard_reader() {
-        let readers = readers(true);
-        if cfg!(target_os = "macos") {
-            assert_eq!(readers, [Reader::Osascript]);
-        } else if cfg!(windows) {
-            assert_eq!(readers, [Reader::PowerShell]);
-        } else {
-            assert_eq!(readers.len(), 2);
-            assert!(matches!(readers[0], Reader::Bytes("wl-paste", _)));
         }
     }
 }

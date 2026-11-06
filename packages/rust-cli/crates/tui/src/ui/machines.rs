@@ -1,23 +1,17 @@
-//! 远端机器的界面（docs/specs/rust-cli/remote-exec.md §21.3、§21.5、§21.6）：`/machines` 的解析与列表、footer 下面的
-//! 机器状态行、`@机器` 标记。数据是入口的机器服务给的快照（`App::machines`，runner 在变化时重取）；这里只有焦点。
-use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+//! 远端机器的界面（docs/specs/rust-cli/remote-exec.md §21.3、§21.5、§21.6）：`/machines` 的解析、坞里的机器行、`@机器`
+//! 标记。数据是入口的机器服务给的快照（`App::machines`，runner 在变化时重取）。列表（项、键、槽与行）在
+//! `machines_list.rs`，照 Puffin 的 `/machines`（kit `machine_rows`，tui-kit.md §4.2「`/machines`」）。
+//! 画法（docs/specs/rust-cli/tui-kit.md §3.1、§3.8，工作线 TK 的 C1）：只产出 kit 的行与片段，墨色经 `Ink`。
 use rust_cli_kernel_api::mcp_name;
+use rust_cli_tui_kit::app::element::{Element, single_line};
+use rust_cli_tui_kit::render::{Span, Style};
 use serde_json::Value;
-use unicode_width::UnicodeWidthStr;
 
 use super::app::{Action, App, Overlay};
+use super::i18n::Lang;
 use super::i18n_machines as words;
-use super::keyboard;
-use super::layout;
-use super::palette::Palette;
-use super::text::{truncate_line, wrap_text};
+use super::ink::Ink;
 use crate::machines::{MachineRow, MachineStatus};
-
-/// 机器名与状态之间至少空 2 列；放不下时至少显示 2 行。
-const STATUS_GAP: usize = 2;
-const MIN_ROWS: usize = 2;
 
 /// 交给 runner 经机器服务做的事。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,13 +27,25 @@ pub enum MachineRequest {
     Remove(String),
     /// 立即重试（重连中的机器，F98，remote-exec.md §25.4.1）。
     Retry(String),
+    /// 设置的机器页改了 SSH 目标或工作目录（tui-kit.md §4.2「设置」）：清单只有加与删，于是删掉再按新的值加；`reconnect`
+    /// 时再连。
+    Replace {
+        name: String,
+        ssh: String,
+        working_directory: Option<String>,
+        reconnect: bool,
+    },
+    /// 读一次 `~/.ssh/config` 的主机（设置的 Machines 段）。
+    Hosts,
 }
 
-/// `/machines` 列表的界面状态：焦点按名字保持（快照变了也跟着那台机器），找不到时按原下标。
+/// `/machines` 列表的界面状态（machines_list.rs）：焦点按项保持（快照变了也跟着那一项），找不到时按原下标；`hosts` 是读到的
+/// `~/.ssh/config` 主机（没有机器时列出）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MachinesView {
     pub selected: usize,
-    pub name: Option<String>,
+    pub focus: Option<super::machines_list::Entry>,
+    pub hosts: Vec<crate::machines::SshHost>,
 }
 
 /// 工具输入里的额外机器（`machine` 不是主 env 时）。
@@ -69,19 +75,21 @@ pub fn reconnecting(machines: &[MachineRow], name: &str) -> bool {
 }
 
 /// `@机器名`（强调色，§21.6）。
-pub fn tag(palette: &Palette, name: &str) -> Span<'static> {
-    Span::styled(format!("@{name}"), Style::default().fg(palette.accent))
+pub fn tag(ink: &Ink, name: &str) -> Span {
+    Span::new(format!("@{name}"), Style::fg(ink.accent()))
 }
 
-/// 状态的圆点与颜色（§21.5 的表）。
-fn dot(status: &MachineStatus, palette: &Palette) -> Span<'static> {
+/// 状态的记号与颜色（Puffin `kept/machine_view.rs` 的 `mark`，remote-exec.md §21.3）：就绪 `●` ok，在连与重连 `○` 琥珀
+/// （`code`），失败 `✗` err，没连 `○` fg3。
+pub fn mark(status: &MachineStatus, ink: &Ink) -> Span {
+    let theme = &ink.theme;
     match status {
-        MachineStatus::Ready => Span::styled("●", palette.success()),
+        MachineStatus::Ready => Span::new("●", Style::fg(theme.ok)),
         MachineStatus::Connecting(_) | MachineStatus::Reconnecting { .. } => {
-            Span::styled("○", palette.warning())
+            Span::new("○", Style::fg(theme.code))
         }
-        MachineStatus::Failed(_) => Span::styled("○", palette.destructive()),
-        MachineStatus::Disconnected => Span::styled("○", palette.secondary()),
+        MachineStatus::Failed(_) => Span::new("✗", Style::fg(theme.err)),
+        MachineStatus::Disconnected => Span::new("○", theme.fg3),
     }
 }
 
@@ -94,8 +102,9 @@ impl App {
         }
         let args = args.trim();
         if args.is_empty() {
+            // 没有机器时列出 `~/.ssh/config` 的主机：开列表时读一次（Puffin `machines_hosts`）。
             self.overlay = Some(Overlay::Machines(MachinesView::default()));
-            return None;
+            return Some(Action::Machines(MachineRequest::Hosts));
         }
         let (action, rest) = args.split_once(char::is_whitespace).unwrap_or((args, ""));
         let rest = rest.trim();
@@ -134,119 +143,6 @@ impl App {
         }
     }
 
-    fn machines_view_mut(&mut self) -> Option<&mut MachinesView> {
-        match self.overlay.as_mut() {
-            Some(Overlay::Machines(view)) => Some(view),
-            _ => None,
-        }
-    }
-
-    /// 焦点所在的下标（按名字找，找不到时按原下标，限制在范围内）。
-    fn machine_focus(&self) -> usize {
-        let Some(Overlay::Machines(view)) = &self.overlay else {
-            return 0;
-        };
-        view.name
-            .as_ref()
-            .and_then(|name| self.machines.iter().position(|row| &row.name == name))
-            .unwrap_or_else(|| view.selected.min(self.machines.len().saturating_sub(1)))
-    }
-
-    fn focus_machine(&mut self, index: usize) {
-        let name = self.machines.get(index).map(|row| row.name.clone());
-        if let Some(view) = self.machines_view_mut() {
-            view.selected = index;
-            view.name = name;
-        }
-    }
-
-    /// 列表的按键（§21.3）：↑ / ↓ 循环移动，enter 连接或断开，`c` / `d` / `x`，esc / ctrl+c 关闭。
-    pub(super) fn machines_key(&mut self, key: KeyEvent) -> Option<Action> {
-        let ctrl = keyboard::ctrl(&key);
-        let count = self.machines.len();
-        let focus = self.machine_focus();
-        let focused = self.machines.get(focus).cloned();
-        let step = |down: bool| super::pager::cycle(focus, count, down);
-        let request = match key.code {
-            KeyCode::Esc => {
-                self.overlay = None;
-                return None;
-            }
-            KeyCode::Char('c') if ctrl => {
-                self.overlay = None;
-                return None;
-            }
-            KeyCode::Up => {
-                self.focus_machine(step(false));
-                return None;
-            }
-            KeyCode::Char('p') if ctrl => {
-                self.focus_machine(step(false));
-                return None;
-            }
-            KeyCode::Down => {
-                self.focus_machine(step(true));
-                return None;
-            }
-            KeyCode::Char('n') if ctrl => {
-                self.focus_machine(step(true));
-                return None;
-            }
-            KeyCode::Enter => focused.map(|row| {
-                if row.status.is_live() {
-                    MachineRequest::Disconnect(row.name)
-                } else {
-                    MachineRequest::Connect(row.name)
-                }
-            }),
-            KeyCode::Char('c') => focused.map(|row| MachineRequest::Connect(row.name)),
-            KeyCode::Char('d') => focused.map(|row| MachineRequest::Disconnect(row.name)),
-            KeyCode::Char('x') => focused.map(|row| MachineRequest::Remove(row.name)),
-            // 立即重试（F98）：只对重连中的机器。
-            KeyCode::Char('r') => focused
-                .filter(|row| matches!(row.status, MachineStatus::Reconnecting { .. }))
-                .map(|row| MachineRequest::Retry(row.name)),
-            _ => None,
-        };
-        // 先记下焦点的名字：删掉之后按原下标落到相邻的一台。
-        self.focus_machine(focus);
-        request.map(Action::Machines)
-    }
-
-    /// 状态词与重连的进度（F96：重连中的机器接倒计时与第几次）；就绪时写延迟（列表里另写 `connected`）。
-    fn status_note(
-        &self,
-        status: &MachineStatus,
-        latency_ms: Option<u64>,
-        now_ms: u64,
-    ) -> Option<String> {
-        match (status, latency_ms) {
-            (MachineStatus::Ready, Some(ms)) => Some(format!("{ms}ms")),
-            // 第一次连接的哪一步（F98，§25.4.2）。
-            (MachineStatus::Connecting(step), _) => Some(format!(
-                "{}{}",
-                words::short_word(self.lang, status).unwrap_or_default(),
-                words::connect_step(self.lang, *step).unwrap_or_default()
-            )),
-            (
-                MachineStatus::Reconnecting {
-                    attempt,
-                    retry_at_ms,
-                    ..
-                },
-                _,
-            ) => {
-                let word = words::short_word(self.lang, status).unwrap_or_default();
-                let left = retry_at_ms.map(|at| at.saturating_sub(now_ms));
-                Some(format!(
-                    "{word}{}",
-                    words::reconnect_progress(self.lang, *attempt, left)
-                ))
-            }
-            (status, _) => words::short_word(self.lang, status).map(str::to_owned),
-        }
-    }
-
     /// 有机器在等下一次重连（状态行写倒计时）：没有动画时每秒重画一次（只是显示，F96）。
     pub fn machines_counting(&self) -> bool {
         self.machines.iter().any(|row| {
@@ -260,131 +156,6 @@ impl App {
         })
     }
 
-    /// 列表的行（替换底部区域，照 Background 面板的样式，§21.3）。
-    pub fn machines_lines(&self, width: usize, height: usize, now_ms: u64) -> Vec<Line<'static>> {
-        let lang = self.lang;
-        let palette = &self.palette;
-        let accent = Style::default().fg(palette.accent);
-        let connected = self
-            .machines
-            .iter()
-            .filter(|row| row.status == MachineStatus::Ready)
-            .count();
-        let mut lines = vec![
-            crate::ui::style::rule(width, accent),
-            Line::from(Span::styled(
-                format!("  {}", words::title(lang)),
-                accent.add_modifier(Modifier::BOLD),
-            )),
-            truncate_line(
-                Line::from(Span::styled(
-                    format!("  {}", words::summary(lang, self.machines.len(), connected)),
-                    palette.secondary(),
-                )),
-                width,
-            ),
-            Line::default(),
-        ];
-        let focus = self.machine_focus();
-        if self.machines.is_empty() {
-            lines.push(truncate_line(
-                Line::from(Span::styled(
-                    format!("  {}", words::empty_hint(lang)),
-                    palette.secondary(),
-                )),
-                width,
-            ));
-        }
-        let name_width = self
-            .machines
-            .iter()
-            .map(|row| row.name.width())
-            .max()
-            .unwrap_or(0);
-        let mut body: Vec<(Line<'static>, bool)> = Vec::new();
-        for (index, row) in self.machines.iter().enumerate() {
-            let focused = index == focus;
-            let status = match (&row.status, row.latency_ms) {
-                (MachineStatus::Ready, Some(ms)) => {
-                    format!("{} · {ms}ms", words::status_word(lang, &row.status))
-                }
-                (MachineStatus::Reconnecting { .. } | MachineStatus::Connecting(_), _) => self
-                    .status_note(&row.status, None, now_ms)
-                    .unwrap_or_default(),
-                (status, _) => words::status_word(lang, status).to_owned(),
-            };
-            let head = Line::from(vec![
-                super::pick::pointer(focused),
-                dot(&row.status, palette),
-                Span::raw(" "),
-                Span::raw(row.name.clone()),
-                Span::raw(" ".repeat(name_width - row.name.width() + STATUS_GAP)),
-                Span::styled(status, palette.secondary()),
-            ]);
-            body.push((
-                super::pick::paint(truncate_line(head, width), focused, palette, width),
-                focused,
-            ));
-            body.push((
-                truncate_line(
-                    Line::from(Span::styled(
-                        format!("    {}", self.machine_facts(row)),
-                        palette.secondary(),
-                    )),
-                    width,
-                ),
-                focused,
-            ));
-            let note = match &row.status {
-                MachineStatus::Failed(failure) => Some((
-                    words::failure_text(lang, &row.name, failure),
-                    palette.destructive(),
-                )),
-                // 重连中（F96）：最近一次的原因。
-                MachineStatus::Reconnecting { reason, .. } if !reason.is_empty() => {
-                    Some((words::last_error(lang, reason), palette.secondary()))
-                }
-                _ => None,
-            };
-            if let Some((text, style)) = note {
-                for line in wrap_text(
-                    &text,
-                    style,
-                    width,
-                    &[Span::raw("    ")],
-                    &[Span::raw("    ")],
-                ) {
-                    body.push((line, focused));
-                }
-            }
-        }
-        // 放不下时只留焦点附近的（上面固定 4 行，下面空行与提示 2 行）。
-        let room = height
-            .saturating_sub(lines.len() + layout::FOOTER_ROWS)
-            .max(MIN_ROWS);
-        let first = body.iter().position(|(_, focused)| *focused).unwrap_or(0);
-        let start = first
-            .saturating_sub(room.saturating_sub(1))
-            .min(body.len().saturating_sub(room));
-        lines.extend(
-            body.into_iter()
-                .skip(start)
-                .take(room)
-                .map(|(line, _)| line),
-        );
-        lines.push(Line::default());
-        let live = self.machines.get(focus).map(|row| row.status.is_live());
-        let retry = self
-            .machines
-            .get(focus)
-            .is_some_and(|row| row.status.awaits_retry());
-        lines.push(truncate_line(
-            super::key_hint::line(layout::INDENT, &words::hint(lang, live, retry), palette),
-            width,
-        ));
-        lines
-    }
-
     /// 远端机器的工作目录：清单里写的，没写时是握手报告的 home；都不知道时 None（F98，§25.4.3）。
     pub fn remote_root(&self, name: &str) -> Option<String> {
         let row = self.machines.iter().find(|row| row.name == name)?;
@@ -393,49 +164,93 @@ impl App {
             .or_else(|| row.executor.as_ref().and_then(|e| e.home.clone()))
     }
 
-    /// 第二行：ssh 目标、系统与架构、执行器版本、工作目录（工作目录可能很长，放在最后，放不下时截它）。
-    fn machine_facts(&self, row: &MachineRow) -> String {
-        let lang = self.lang;
-        let mut parts = vec![format!("ssh {}", row.ssh)];
-        if let Some(executor) = &row.executor {
-            parts.push(format!(
-                "{} {}",
-                words::os_name(&executor.os),
-                executor.arch
-            ));
-            parts.push(words::executor(lang, &executor.version));
-            if !executor.refreshes_env {
-                parts.push(words::env_not_refreshed(lang).to_owned());
-            }
-        }
-        parts.push(
-            row.working_directory
-                .clone()
-                .unwrap_or_else(|| words::remote_home(lang).to_owned()),
-        );
-        parts.join(" · ")
-    }
-
-    /// footer 下面的机器状态行（§21.5）：清单里有机器时才有。
-    pub fn machine_status_line(&self, width: usize, now_ms: u64) -> Option<Line<'static>> {
-        if self.machines.is_empty() {
-            return None;
-        }
-        let palette = &self.palette;
-        let mut spans = vec![
-            Span::raw("  "),
-            Span::styled("●", palette.success()),
-            Span::raw(" local"),
-        ];
+    /// 坞里的机器行（docs/specs/rust-cli/tui-kit.md §4.0 第 6 条；Puffin `kept/machine_view.rs` 的 `machines_row`）：只写
+    /// 在变的机器：连接中（这一步、上传的大小、连了多久）、重连中（`next try in 4s`、第几次）、连不上（`/machines` 看原因）；
+    /// 就绪与没连的不写，都不在变时没有这一行。以前状态栏下面常驻一行，从 `● local` 起列出每台机器。
+    /// 移植而不调 Puffin：它的函数对着 tui-ports 的类型写，旧界面不能依赖 Puffin（tui-kit.md §4.4）。中文是旧界面的词。
+    pub fn machines_row(&self, now_ms: u64) -> Option<Element> {
+        let ink = &self.ink;
+        let theme = &ink.theme;
+        let zh = self.lang == Lang::Zh;
+        let dot = || Span::new(" · ", theme.line);
+        let mut spans: Vec<Span> = Vec::new();
         for row in &self.machines {
-            spans.push(Span::raw("  "));
-            spans.push(dot(&row.status, palette));
-            spans.push(Span::raw(format!(" {}", row.name)));
-            if let Some(note) = self.status_note(&row.status, row.latency_ms, now_ms) {
-                spans.push(Span::styled(format!(" {note}"), palette.secondary()));
-            }
+            let words_of: Vec<Span> = match &row.status {
+                MachineStatus::Connecting(step) => {
+                    let since = self
+                        .machines_since
+                        .get(&row.name)
+                        .copied()
+                        .unwrap_or(now_ms);
+                    let (word, size) = (
+                        words::step_word(self.lang, *step),
+                        words::step_size(self.lang, *step),
+                    );
+                    let mut w = vec![Span::new(word, theme.fg2)];
+                    if let Some(size) = size {
+                        w.push(Span::new(size, theme.fg3));
+                    }
+                    w.push(dot());
+                    w.push(Span::new(
+                        rust_cli_kernel_api::metering::format_duration(
+                            now_ms.saturating_sub(since) / 1000 * 1000,
+                        ),
+                        theme.fg3,
+                    ));
+                    w
+                }
+                MachineStatus::Reconnecting {
+                    attempt,
+                    retry_at_ms,
+                    ..
+                } => {
+                    let mut w = vec![Span::new(words::reconnecting(self.lang), theme.fg2)];
+                    if let Some(at) = retry_at_ms {
+                        let left = super::retry_status::countdown(at.saturating_sub(now_ms));
+                        w.push(dot());
+                        w.push(Span::new(
+                            if zh {
+                                format!("{left}后重试")
+                            } else {
+                                format!("next try in {left}")
+                            },
+                            theme.fg3,
+                        ));
+                    }
+                    w.push(dot());
+                    w.push(Span::new(
+                        if zh {
+                            format!("第 {attempt} 次")
+                        } else {
+                            format!("attempt {attempt}")
+                        },
+                        theme.fg3,
+                    ));
+                    w
+                }
+                MachineStatus::Failed(_) => vec![
+                    Span::new(
+                        if zh {
+                            "连接失败"
+                        } else {
+                            "couldn't connect"
+                        },
+                        Style::fg(theme.err),
+                    ),
+                    dot(),
+                    Span::new("/machines", theme.fg2),
+                    Span::new(if zh { " 查看原因" } else { " shows why" }, theme.fg3),
+                ],
+                MachineStatus::Ready | MachineStatus::Disconnected => continue,
+            };
+            spans.push(Span::plain(if spans.is_empty() { " " } else { "  " }));
+            spans.push(mark(&row.status, ink));
+            spans.push(Span::plain(" "));
+            spans.push(Span::new(row.name.clone(), theme.fg2));
+            spans.push(Span::plain("  "));
+            spans.extend(words_of);
         }
-        Some(truncate_line(Line::from(spans), width))
+        (!spans.is_empty()).then(|| single_line(spans, false))
     }
 }
 

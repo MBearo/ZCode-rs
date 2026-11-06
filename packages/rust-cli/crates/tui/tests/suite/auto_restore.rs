@@ -2,7 +2,7 @@
 //! 用户中断的回合结束时，这条输入还没得到回答、输入框为空、没有排队的输入，就把对话回退到它
 //! 之前、文字放回输入框；回答过（流出了文字）或输入框有草稿时保留输入与中断标记。运行中的 `/clear` 等回合结束再执行
 //! （排进队列、不中断）。模型的响应由测试控制节奏；“模型已被调用”按模型记下的请求判断（输入已提交、在等回复）。
-//! 按键之前另等画面上的回合（footer 的 `esc to interrupt`）：esc、运行中的 `/clear` 与插话按画面解释，模型收到请求时
+//! 按键之前另等画面上的回合（footer 的 `esc stop`）：esc、运行中的 `/clear` 与插话按画面解释，模型收到请求时
 //! 画面可能还停在空闲（tui.md §4.3、§8，修复线 F45；那个窗口里的 esc 见 `esc_windows.rs`）。
 use std::sync::Arc;
 use std::time::Duration;
@@ -67,7 +67,7 @@ fn start() -> Item {
 
 /// 撤回完成：输入框里是原文、对话里没有这一轮（没有中断的提示）、回合不在跑。
 fn restored(screen: &str, text: &str) -> bool {
-    screen.contains(text) && !screen.contains("Interrupted") && !screen.contains("esc to interrupt")
+    screen.contains(text) && !screen.contains("Stopped.") && !screen.contains("esc stop")
 }
 
 /// 请求已发、还没有第一个字时 esc：输入回到输入框（对话里没有这一轮），回车再发一次，模型只收到这条输入一次、
@@ -88,7 +88,7 @@ async fn esc_before_the_first_word_puts_the_input_back() {
         ui.wait_for("Ask before changes").await;
         ui.submit("first prompt");
         called(&waiting, 1).await;
-        ui.wait_for("esc to interrupt").await;
+        ui.wait_for("esc stop").await;
         send(&first, vec![start()]);
         ui.key(KeyCode::Esc);
         ui.wait("the input back in the box", |s| restored(s, "first prompt"))
@@ -96,7 +96,7 @@ async fn esc_before_the_first_word_puts_the_input_back() {
         finish(second, text_response(&["again"]));
         ui.key(KeyCode::Enter);
         ui.wait("the reply", |s| {
-            s.contains("again") && !s.contains("esc to interrupt")
+            s.contains("again") && !s.contains("esc stop")
         })
         .await;
         drop(first);
@@ -146,12 +146,12 @@ async fn esc_after_some_text_keeps_the_input_with_the_marker() {
         );
         ui.wait_for("partial reply").await;
         ui.key(KeyCode::Esc);
-        let screen = ui.wait_for("Interrupted").await;
+        let screen = ui.wait_for("Stopped.").await;
         assert!(screen.contains("first prompt"), "{screen}");
         finish(second, text_response(&["next reply"]));
         ui.submit("next prompt");
         ui.wait("the reply", |s| {
-            s.contains("next reply") && !s.contains("esc to interrupt")
+            s.contains("next reply") && !s.contains("esc stop")
         })
         .await;
         drop(first);
@@ -184,16 +184,17 @@ async fn esc_with_a_draft_keeps_the_input_with_the_marker() {
         ui.submit("first prompt");
         called(&waiting, 1).await;
         ui.type_text("my draft");
+        // 回合在跑、输入框有字：提示槽是 Puffin 的 `⏎ steer  ⇥ after this turn`（不再写 `esc stop`）。
         ui.wait("the draft on a running turn", |s| {
-            s.contains("my draft") && s.contains("esc to interrupt")
+            s.contains("my draft") && s.contains("⏎ steer")
         })
         .await;
         ui.key(KeyCode::Esc);
-        ui.wait_for("Interrupted").await;
+        ui.wait_for("Stopped.").await;
         finish(second, text_response(&["draft reply"]));
         ui.key(KeyCode::Enter);
         ui.wait("the reply", |s| {
-            s.contains("draft reply") && !s.contains("esc to interrupt")
+            s.contains("draft reply") && !s.contains("esc stop")
         })
         .await;
         drop(first);
@@ -219,13 +220,13 @@ async fn esc_with_a_queued_input_keeps_the_input() {
         ui.wait_for("Ask before changes").await;
         ui.submit("first prompt");
         called(&waiting, 1).await;
-        ui.wait_for("esc to interrupt").await;
+        ui.wait_for("esc stop").await;
         ui.submit("queued prompt");
-        ui.wait_for("❯ queued prompt").await;
+        ui.wait_for("› queued prompt").await;
         finish(second, text_response(&["queued reply"]));
         ui.key(KeyCode::Esc);
         ui.wait("the reply", |s| {
-            s.contains("queued reply") && !s.contains("esc to interrupt")
+            s.contains("queued reply") && !s.contains("esc stop")
         })
         .await;
         drop(first);
@@ -269,7 +270,7 @@ async fn esc_puts_an_image_input_back_with_its_image() {
         ui.wait_for("look at [Image #1]").await;
         ui.submit(" please");
         called(&waiting, 1).await;
-        ui.wait_for("esc to interrupt").await;
+        ui.wait_for("esc stop").await;
         ui.key(KeyCode::Esc);
         ui.wait("the input back in the box", |s| {
             restored(s, "look at [Image #1] please")
@@ -278,7 +279,7 @@ async fn esc_puts_an_image_input_back_with_its_image() {
         finish(second, text_response(&["a tiny png"]));
         ui.key(KeyCode::Enter);
         ui.wait("the reply", |s| {
-            s.contains("a tiny png") && !s.contains("esc to interrupt")
+            s.contains("a tiny png") && !s.contains("esc stop")
         })
         .await;
         drop(first);
@@ -312,10 +313,10 @@ async fn clear_while_running_waits_for_the_turn() {
         ui.submit("first prompt");
         called(&waiting, 1).await;
         // `/clear` 排不排到回合之后看画面上的回合（tui.md §4.3）。
-        ui.wait_for("esc to interrupt").await;
+        ui.wait_for("esc stop").await;
         ui.submit("/clear");
-        let screen = ui.wait_for("❯ /clear").await;
-        assert!(screen.contains("esc to interrupt"), "{screen}");
+        let screen = ui.wait_for("› /clear").await;
+        assert!(screen.contains("esc stop"), "{screen}");
         finish(first, text_response(&["whole reply"]));
         ui.wait_for("Started a new session.").await;
         assert_eq!(sessions(&observed).await.len(), 1);
@@ -346,11 +347,11 @@ async fn clear_after_a_queued_input_waits_for_its_turn() {
         ui.wait_for("Ask before changes").await;
         ui.submit("first prompt");
         called(&waiting, 1).await;
-        ui.wait_for("esc to interrupt").await;
+        ui.wait_for("esc stop").await;
         ui.submit("queued prompt");
-        ui.wait_for("❯ queued prompt").await;
+        ui.wait_for("› queued prompt").await;
         ui.submit("/clear");
-        ui.wait_for("❯ /clear").await;
+        ui.wait_for("› /clear").await;
         finish(first, text_response(&["whole reply"]));
         called(&waiting, 2).await;
         let mut reply = text_response(&["queued reply\n"]);
@@ -358,7 +359,7 @@ async fn clear_after_a_queued_input_waits_for_its_turn() {
         send(&second, reply);
         // 排着的输入在跑自己的回合，`/clear` 还在等。
         let screen = ui.wait_for("queued reply").await;
-        assert!(screen.contains("❯ /clear"), "{screen}");
+        assert!(screen.contains("› /clear"), "{screen}");
         finish(second, rest);
         ui.wait_for("Started a new session.").await;
     })

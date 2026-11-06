@@ -3,16 +3,24 @@ use rust_cli_kernel_api::session_api::Delivery;
 use rust_cli_kernel_api::user_command::UserCommand;
 
 use super::super::app::{Action, App, Local};
+use crate::ui::i18n::Lang;
 use crate::ui::test_support::app;
 
 /// 本地提示行的文字（`App::info`）。
+/// 本地的提示：一行的在输入框上方（`App::said`，tui-kit.md §4.0），多行的进 transcript。
 fn infos(app: &App) -> Vec<String> {
+    let said = [&app.said.failed, &app.said.quiet]
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect::<Vec<_>>();
     app.local
         .iter()
         .filter_map(|cell| match &cell.local {
             Local::Info(text) => Some(text.clone()),
             _ => None,
         })
+        .chain(said)
         .collect()
 }
 
@@ -120,7 +128,7 @@ mod send_now {
     fn an_empty_input_delivers_the_queued_input() {
         let mut app = app();
         feed(&mut app, vec![started(), queued()]);
-        assert!(app.send_now_hint().is_some(), "the hint asks for this key");
+        assert!(app.can_deliver_queued());
         for action in both_keys(&mut app) {
             assert!(matches!(action, Some(Action::DeliverQueued)), "{action:?}");
         }
@@ -156,4 +164,40 @@ mod send_now {
             other => panic!("expected send now: {other:?}"),
         }
     }
+}
+
+/// 切下文字不再提示 ^Y（tui.md §7.4）：以前每次切下 3 个字符以上都显示 5 秒，还顶掉正在显示的提示。
+#[test]
+fn cutting_text_shows_no_hint_and_keeps_the_notice() {
+    use std::time::{Duration, Instant};
+
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let mut app = app();
+    app.composer.area.set_text("alpha beta");
+    app.notify("already showing", Duration::from_secs(5));
+    app.on_key(
+        KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL),
+        Instant::now(),
+    );
+    assert_eq!(app.composer.area.text(), "alpha ");
+    assert_eq!(app.notice_text().as_deref(), Some("already showing"));
+}
+
+/// 提示里的 Ctrl 组合键写成 `^X`（tui.md §7.4）。
+#[test]
+fn notices_spell_control_keys_with_a_caret() {
+    use crate::ui::notice::{Armed, armed_text, search_history};
+
+    assert_eq!(
+        armed_text(Lang::En, Armed::ExitC),
+        "Press {^C} again to exit"
+    );
+    assert_eq!(
+        armed_text(Lang::En, Armed::ExitD),
+        "Press {^D} again to exit"
+    );
+    assert_eq!(armed_text(Lang::Zh, Armed::ExitC), "再按一次 {^C} 退出");
+    assert_eq!(search_history(Lang::En), "{^R} to search history");
+    assert_eq!(search_history(Lang::Zh), "{^R} 搜索历史");
 }

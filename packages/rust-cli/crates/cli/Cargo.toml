@@ -31,7 +31,7 @@ base64.workspace = true
 # 执行器的 npm 平台包：解 gzip、核对 sha512 / sha256（F100，remote-exec.md §26.4）。
 flate2.workspace = true
 sha2.workspace = true
-# TUI 的服务端口（界面语言的写回、登录）返回 BoxFuture（docs/specs/rust-cli/tui.md §7.1）；执行器下载的单飞（Shared）。
+# 界面的服务端口（界面语言的写回、登录）返回 BoxFuture（docs/specs/rust-cli/tui-kit.md §2.2）；执行器下载与 `/usage` 的单飞（Shared）。
 futures-util.workspace = true
 rust-cli-base.workspace = true
 rust-cli-env-local.workspace = true
@@ -70,7 +70,12 @@ rust-cli-proc.workspace = true
 rust-cli-prompts.workspace = true
 rust-cli-runtime.workspace = true
 rust-cli-ssh-connect.workspace = true
+# 终端界面（docs/specs/rust-cli/tui.md）：交互模式与启动前的两屏（tui-kit.md §2.3）。
 rust-cli-tui.workspace = true
+# 界面与 cli 共用的端口类型（tui-kit.md §2.2）：cli 的账号、编辑器、偏好、信任、机器、更新的实现。
+rust-cli-tui-ports.workspace = true
+# `/usage` 端口与 `@` 预览答的数据类型（kit 的 `widgets::usage`、`at_panel::data`），启动前两屏的 panic 记录。
+rust-cli-tui-kit.workspace = true
 # 内嵌的 ripgrep：zcode 以 `rg` 的名字启动时直接跑它（docs/specs/rust-cli/embedded-search.md §3、§5，F53）。
 rust-cli-vendor-rg = { path = "../../vendor/rg" }
 # 内嵌的 ugrep：zcode 以 `ugrep` 的名字启动时直接跑它（embedded-search.md §3、§7，F53）。
@@ -99,7 +104,8 @@ mimalloc.workspace = true
 
 # 系统时区：Windows 的 GetDynamicTimeZoneInformation / SystemTimeToTzSpecificLocalTimeEx。
 [target.'cfg(windows)'.dependencies]
-windows-sys.workspace = true
+# `zcode app` 读安装器登记的位置（docs/specs/rust-cli/cli-args.md §16）。
+windows-sys = { workspace = true, features = ["Win32_System_Registry"] }
 
 [dev-dependencies]
 futures-util.workspace = true

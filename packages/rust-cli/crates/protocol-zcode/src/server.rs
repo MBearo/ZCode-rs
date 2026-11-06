@@ -155,6 +155,8 @@ impl Server {
                 "historyFirst": false,
                 "sessionDirectorySource": false,
                 "genUiContext": false,
+                "sessionWorkspaceRouting": false,
+                "residentRowsRange": false,
             })),
             // platform 自己读同一批文件；回执版本（app-protocol.md §5.1）。
             "provider/updateAccountConfig" => reply(json!({

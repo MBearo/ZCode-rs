@@ -43,8 +43,18 @@ const FOREGROUND: &str = "\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\";
 const BACKGROUND: &str = "\x1b]11;rgb:ffff/ffff/ffff\x07";
 
 #[test]
-fn the_query_asks_for_both_colors_without_a_sentinel() {
-    assert_eq!(QUERY, b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\");
+fn the_query_asks_for_program_status_and_both_colors_without_a_sentinel() {
+    assert_eq!(query(), "\x1b]7501;?\x1b\\\x1b]10;?\x1b\\\x1b]11;?\x1b\\");
+}
+
+/// 程序状态的回答在颜色之前到（tui-manage.md §5.4）：两段颜色完整时它已经在回复里。
+#[test]
+fn a_program_status_reply_marks_support() {
+    let mut input = Fake::new(vec![typed(&format!(
+        "\x1b]7501;?:states=idle,working,done,blocked,error\x1b\\{FOREGROUND}{BACKGROUND}"
+    ))]);
+    let reply = collect(&mut input, Duration::from_secs(60));
+    assert!(parse(&reply).program_status);
 }
 
 /// 两段回复都完整就结束，不等期限；回复可以拆在几批里，中间夹着松开、焦点之类的记录。
@@ -60,6 +70,7 @@ fn both_replies_end_the_probe_before_the_deadline() {
         Probed {
             foreground: Some((205, 214, 244)),
             background: Some((255, 255, 255)),
+            program_status: false,
         }
     );
     // 第四批（之后的输入）没有读。
@@ -85,6 +96,7 @@ fn only_complete_replies_count() {
         Probed {
             foreground: None,
             background: Some((255, 255, 255)),
+            program_status: false,
         }
     );
 }
@@ -105,6 +117,7 @@ fn typed_keys_around_the_replies_are_dropped() {
         Probed {
             foreground: Some((205, 214, 244)),
             background: Some((255, 255, 255)),
+            program_status: false,
         }
     );
 }

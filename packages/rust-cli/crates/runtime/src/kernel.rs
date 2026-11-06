@@ -37,6 +37,9 @@ impl Kernel for LocalKernel {
         request: CreateSession,
         start: StartSource,
     ) -> Result<SessionId, KernelError> {
+        // 工作线 F140（performance.md §12.3）：先等新会话的缺省模型定下。TUI 不等目录就画第一帧，缺省模型在后台选；
+        // 这里是唯一的等待点，所以回合都在它定下之后（任务工具的开关、旁路模型的兜底读的都是定下的值）。
+        self.defaults.selection.settled().await;
         let id = request.id.unwrap_or_else(|| self.ports.ids.session());
         let meta = SessionMeta {
             id: id.clone(),
@@ -75,6 +78,8 @@ impl Kernel for LocalKernel {
         session: &SessionId,
         start: StartSource,
     ) -> Result<Arc<dyn SessionHandle>, KernelError> {
+        // 同 `create_session_as`：开会话也先等缺省模型定下。
+        self.defaults.selection.settled().await;
         // 修复（F33，session-lifecycle.md §3.3.1）：以前表里有这个会话就直接给出句柄，它正在关闭时（actor 已退出、
         // 还没移出表）打开拿到的是死句柄，`view()` 报 `the session is closed`；两个并发的打开还会各自冷加载。现在
         // 关闭中、加载中的等它换掉；没有条目时登记 Loading，由这个调用冷加载（失败或被丢下时守卫移出 Loading）。
@@ -98,8 +103,12 @@ impl Kernel for LocalKernel {
                 self.machine().files().as_ref(),
             )
             .await;
-        let state =
-            SessionState::from_loaded(loaded, &self.defaults.selection, self.defaults.mode, start);
+        let state = SessionState::from_loaded(
+            loaded,
+            &self.defaults.selection.current(),
+            self.defaults.mode,
+            start,
+        );
         Ok(self.start(state, Opened::Loaded))
     }
 
@@ -156,6 +165,14 @@ impl Kernel for LocalKernel {
         query: rust_cli_kernel_api::catalog::CatalogQuery,
     ) -> Result<rust_cli_kernel_api::catalog::SessionCatalog, KernelError> {
         Ok(catalog::catalog(&self.usage, &query).await)
+    }
+
+    /// 工作区的 agent 类型（agents.md §8 的 PT 增量）：不要会话。
+    async fn agent_definitions(
+        &self,
+        workspace: &rust_cli_kernel_api::env::WorkspaceRef,
+    ) -> Vec<rust_cli_kernel_api::catalog::AgentInfo> {
+        catalog::agents(&self.usage, workspace).await
     }
 
     /// `/mcp`、`/status`：ext 的连接管理给出的状态（tui-display.md §3.4）。
@@ -233,6 +250,27 @@ impl Kernel for LocalKernel {
         query: rust_cli_kernel_api::store::SessionQuery,
     ) -> Result<rust_cli_kernel_api::panels::ProjectSessions, KernelError> {
         self.projects(query).await
+    }
+
+    async fn set_presence(
+        &self,
+        session: &SessionId,
+        presence: rust_cli_kernel_api::peers::PeerPresence,
+    ) {
+        self.peers.port.set_presence(session, presence).await;
+    }
+
+    async fn stop_peer(
+        &self,
+        address: &rust_cli_kernel_api::peers::PeerAddress,
+    ) -> Result<(), KernelError> {
+        self.peers
+            .port
+            .stop(address)
+            .await
+            .map_err(|error| KernelError::Failed {
+                message: error.to_string(),
+            })
     }
 
     async fn rename_session(&self, session: &SessionId, title: String) -> Result<(), KernelError> {

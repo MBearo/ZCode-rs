@@ -9,25 +9,30 @@ fn typed(text: &str) -> Composer {
 }
 
 #[test]
-fn long_or_multi_line_pastes_fold_and_pasting_again_expands() {
+fn pastes_taller_than_five_rows_fold_into_a_cap_and_pasting_again_expands() {
     let mut c = Composer::default();
-    let long = "x".repeat(PASTE_FOLD_CHARS + 1);
+    // 一行、在 80 格宽的文字区里折出十二行：折成帽，大小写字数。
+    let long = "x".repeat(900);
     c.area.insert_str("see ");
-    assert_eq!(c.paste_text(&long), Pasted::Folded);
-    assert_eq!(c.area.text(), "see [Pasted text #1]");
-    // 超过 2 行也折叠；tab 换成 4 个空格。
-    assert_eq!(c.paste_text("a\r\nb\n\tc"), Pasted::Folded);
+    assert_eq!(c.paste_text(&long, 80), Pasted::Folded);
+    assert_eq!(c.area.text(), "see [Pasted · 900 chars]");
+    // 五个换行也折叠；tab 换成 4 个空格。
+    let tall = "a\r\nb\nc\nd\ne\n\tf";
+    assert_eq!(c.paste_text(tall, 80), Pasted::Folded);
+    assert_eq!(c.area.text(), "see [Pasted · 900 chars][Pasted · 6 lines]");
+    // 同样的内容再粘贴一次：在原处展开。
+    assert_eq!(c.paste_text("a\nb\nc\nd\ne\n\tf", 80), Pasted::Expanded);
     assert_eq!(
         c.area.text(),
-        "see [Pasted text #1][Pasted text #2 +3 lines]"
+        "see [Pasted · 900 chars]a\nb\nc\nd\ne\n    f"
     );
-    // 同样的内容再粘贴一次：在原处展开。
-    assert_eq!(c.paste_text("a\nb\n\tc"), Pasted::Expanded);
-    assert_eq!(c.area.text(), "see [Pasted text #1]a\nb\n    c");
-    // 短的直接插入。
-    assert_eq!(c.paste_text(" ok\nfine"), Pasted::Inserted);
+    // 不比五行高的直接插入（以前两行以上就折叠）。
+    assert_eq!(c.paste_text(" ok\nfine\nthree", 80), Pasted::Inserted);
     let sent = c.submit();
-    assert_eq!(sent, format!("see {long}a\nb\n    c ok\nfine"));
+    assert_eq!(
+        sent,
+        format!("see {long}a\nb\nc\nd\ne\n    f ok\nfine\nthree")
+    );
     assert!(c.is_empty());
 }
 
@@ -58,7 +63,7 @@ fn history_and_reverse_search() {
 }
 
 #[test]
-fn an_empty_slash_lists_the_most_used_commands_first() {
+fn an_empty_slash_lists_puffins_order_not_the_most_used() {
     let mut c = Composer::default();
     c.load_history(vec![
         "/status".into(),
@@ -73,12 +78,13 @@ fn an_empty_slash_lists_the_most_used_commands_first() {
         .iter()
         .map(crate::ui::commands::Entry::name)
         .collect();
-    assert_eq!(&names[..3], ["status", "copy", "help"]);
-    assert_eq!(names.iter().filter(|n| **n == "status").count(), 1);
-    // 有输入时按匹配排，不看用量。
-    let mut c = typed("/s");
-    c.load_history(vec!["/status".into()]);
-    assert_eq!(c.slash_matches()[0].name(), "status");
+    // Puffin 的次序（目标、压缩、计划……），不按用量排（以前最常用的排在前面）。
+    assert_eq!(&names[..3], ["goal", "compact", "plan"]);
+    // 别名不单列（`/status` 是 `/stats` 的别名）。
+    assert!(!names.contains(&"status"), "{names:?}");
+    // 有输入时按匹配排：名字以它开头的在前。
+    let c = typed("/st");
+    assert_eq!(c.slash_matches()[0].name(), "stats");
 }
 
 #[test]
@@ -98,7 +104,37 @@ fn accepting_a_typed_alias_keeps_the_alias() {
     // `/stats` 与 `/usage` 是同一个命令，但打开不同的标签页（usage.md §5.1）。
     let mut c = typed("/stats");
     assert_eq!(c.accept_slash().as_deref(), Some("stats"));
-    assert_eq!(c.area.text(), "/stats ");
-    // 只输入了前缀：照旧补成命令名。
-    assert_eq!(typed("/sta").accept_slash().as_deref(), Some("status"));
+    // 不带参数的命令补全后不加空格（Puffin `words`）。
+    assert_eq!(c.area.text(), "/stats");
+    // 只输入了前缀：补成命令名（别名不单列，Puffin `shelf::matches`）。
+    assert_eq!(typed("/sta").accept_slash().as_deref(), Some("stats"));
+}
+
+#[test]
+fn a_chosen_conversation_is_one_block_in_the_draft_and_goes_out_as_its_link() {
+    use rust_cli_tui_kit::app::widgets::at_panel::AtItem;
+    use rust_cli_tui_kit::app::widgets::at_panel::data::ConversationRef;
+    let mut c = typed("read @fix");
+    let item = AtItem::Conversation(ConversationRef {
+        session_id: "sess_ab".into(),
+        title: "Fix [it]".into(),
+        updated_at: 1,
+    });
+    c.insert_at(&item);
+    assert_eq!(c.area.text(), "read @Fix [it] ");
+    assert_eq!(c.area.cursor(), c.area.text().len());
+    assert!(c.popup.is_none());
+    assert_eq!(c.area.marks()[0].kind, "conversation");
+    assert_eq!(c.submit(), r"read [#Fix \[it\]](#sess_ab)");
+    // 历史里是打出的样子。
+    assert_eq!(c.history.last().map(String::as_str), Some("read @Fix [it]"));
+    // 没有标题的会话只发 id。
+    let mut c = typed("@");
+    c.insert_at(&AtItem::Conversation(ConversationRef {
+        session_id: "sess_cd".into(),
+        title: String::new(),
+        updated_at: 1,
+    }));
+    assert_eq!(c.area.text(), "@Untitled ");
+    assert_eq!(c.submit(), "#sess_cd");
 }

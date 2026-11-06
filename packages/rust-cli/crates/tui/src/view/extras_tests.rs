@@ -53,7 +53,6 @@ fn tasks_are_replaced_by_each_snapshot() {
         },
     );
     assert_eq!(view.tasks().len(), 2);
-    assert_eq!(task_counts(view.tasks()), (0, 1, 1));
     feed(
         &mut view,
         2,
@@ -62,7 +61,6 @@ fn tasks_are_replaced_by_each_snapshot() {
         },
     );
     assert_eq!(view.tasks().len(), 1);
-    assert_eq!(task_counts(view.tasks()), (1, 0, 0));
     // 认不出的快照不清掉上一份。
     feed(&mut view, 3, KernelEvent::TasksChanged { tasks: json!(7) });
     assert_eq!(view.tasks().len(), 1);

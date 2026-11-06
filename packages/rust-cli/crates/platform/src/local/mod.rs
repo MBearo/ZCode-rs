@@ -13,8 +13,8 @@ pub mod plugin_inventory;
 mod settings;
 
 pub use cli_config::{
-    ConfigFile, ConfigWriteError, mcp_enabled_text, read_cli_config, write_mcp_enabled,
-    write_ui_locale, write_ui_theme,
+    ConfigFile, ConfigWriteError, compact_at_text, mcp_enabled_text, read_cli_config,
+    write_compact_at, write_mcp_enabled, write_ui_locale, write_ui_theme,
 };
 pub use device::{DeviceMid, NewUuid};
 pub use history::{History, Recorder};

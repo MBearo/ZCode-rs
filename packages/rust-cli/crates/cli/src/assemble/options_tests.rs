@@ -65,6 +65,16 @@ fn compaction_takes_the_output_limit_read_once_by_the_entry() {
     assert_eq!(unset.thresholds.max_output_tokens, None);
 }
 
+/// 配置的 `compact.autoThresholdTokens` 放进内核读的那一份（compact.md §2.3）：判定现读它，复制出去的句柄是同一份。
+#[test]
+fn compaction_reads_the_configured_threshold_when_it_decides() {
+    let config = compact(&env(&[]), None, none());
+    assert_eq!(config.thresholds().at, None);
+    let handle = config.at.clone();
+    handle.set(Some(400_000));
+    assert_eq!(config.thresholds().at, Some(400_000));
+}
+
 #[test]
 fn stream_idle_follows_the_zcode_variables() {
     use std::time::Duration;

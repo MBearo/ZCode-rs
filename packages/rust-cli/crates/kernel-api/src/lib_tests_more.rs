@@ -217,6 +217,18 @@ fn l13_facts_commands_and_rules_round_trip() {
     round_trip(&crate::session_api::Command::Rename {
         title: "Mine".to_owned(),
     });
+    round_trip(&crate::session_api::Command::RenameRecorded {
+        title: "Mine".to_owned(),
+        record: crate::user_command::LocalCommandRecord {
+            name: "rename".to_owned(),
+            args: "Mine".to_owned(),
+            output: crate::user_command::LocalCommandOutput::Stdout(
+                "Session renamed to: Mine".to_owned(),
+            ),
+            caveat: false,
+            meta: vec!["The user named this session \"Mine\".".to_owned()],
+        },
+    });
     let rules = ProjectRules {
         allow: vec![PermissionRule {
             tool: "Read".to_owned(),

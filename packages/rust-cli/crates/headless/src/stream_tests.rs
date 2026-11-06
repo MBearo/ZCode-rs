@@ -28,7 +28,7 @@ fn kernel(model: ScriptedModel, max_turns: Option<u32>) -> Arc<dyn Kernel> {
             ids: Arc::new(SequentialIds::default()),
         },
         Defaults {
-            selection: selection(),
+            selection: selection().into(),
             mode: PermissionMode::Default,
             max_turns,
             search_tools: false,

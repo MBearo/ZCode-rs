@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use rust_cli_agents::{AgentCatalog, Agents, AgentsConfig, AgentsPorts};
+use rust_cli_agents::{AgentCatalog, Agents, AgentsConfig, AgentsPorts, TaskTools};
 use rust_cli_base::Spawner;
 use rust_cli_compact::{CompactConfig, CompactPorts, Compaction, DenyTools, Disabled};
 use rust_cli_context::{ContextConfig, ContextPorts, PromptAssembler};
@@ -298,9 +298,11 @@ pub(crate) fn agents(
         },
         parts.tools.clone(),
         AgentsConfig {
-            task_tools: defaults.task_tools.unwrap_or_else(|| {
-                rust_cli_agents::task_tools_enabled(&defaults.selection.model, false)
-            }),
+            task_tools: match defaults.task_tools {
+                Some(true) => TaskTools::On,
+                Some(false) => TaskTools::Off,
+                None => TaskTools::ByDefaultModel(defaults.selection.clone()),
+            },
             keep_alive: traits.interactive,
             // 修复线 F67：交互界面里后台子代理也能询问（agents.md §4.1.1）。
             background_prompts: traits.interactive,

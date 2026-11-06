@@ -76,42 +76,30 @@ fn connection_failures_use_the_plain_reason() {
 }
 
 #[test]
-fn the_mcp_reason_for_a_missing_machine_is_translated() {
-    assert_eq!(
-        mcp_reason(Lang::Zh, "Machine \"dev-a\" is not connected."),
-        "机器 dev-a 没有连上。"
-    );
-    assert_eq!(
-        mcp_reason(Lang::En, "Machine \"dev-a\" is not connected."),
-        "Machine \"dev-a\" is not connected."
-    );
-    assert_eq!(mcp_reason(Lang::Zh, "spawn failed"), "spawn failed");
-}
-
-#[test]
 fn upload_sizes_round_to_whole_megabytes() {
     assert_eq!(
-        connect_step(Lang::En, ConnectStep::Uploading { bytes: 93_323_264 }).as_deref(),
-        Some(" · uploading the executor (89 MB)")
+        step_size(Lang::En, ConnectStep::Uploading { bytes: 93_323_264 }).as_deref(),
+        Some(" (89 MB)")
     );
     assert_eq!(
-        connect_step(Lang::Zh, ConnectStep::Uploading { bytes: 10 }).as_deref(),
-        Some(" · 上传执行器（1 MB）")
+        step_size(Lang::Zh, ConnectStep::Uploading { bytes: 10 }).as_deref(),
+        Some("（1 MB）")
     );
-    assert_eq!(connect_step(Lang::Zh, ConnectStep::Checking), None);
+    assert_eq!(step_size(Lang::Zh, ConnectStep::Checking), None);
+    assert_eq!(
+        step_done(Lang::Zh, ConnectStep::Uploading { bytes: 93_323_264 }, true),
+        "已上传 89 MB"
+    );
 }
 
 /// F100（remote-exec.md §26.6）：第一次连接的“下载执行器”一步与三种新的失败。
 #[test]
 fn downloads_musl_and_old_glibc_are_said_plainly() {
     assert_eq!(
-        connect_step(Lang::En, ConnectStep::Downloading).as_deref(),
-        Some(" · downloading the executor")
+        step_word(Lang::En, ConnectStep::Downloading),
+        "downloading the executor"
     );
-    assert_eq!(
-        connect_step(Lang::Zh, ConnectStep::Downloading).as_deref(),
-        Some(" · 下载执行器")
-    );
+    assert_eq!(step_word(Lang::Zh, ConnectStep::Downloading), "下载执行器");
     let download = MachineFailure::DownloadFailed {
         version: "0.1.61".to_owned(),
         target: "aarch64-unknown-linux-gnu".to_owned(),

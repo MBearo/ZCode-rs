@@ -4,12 +4,9 @@ use rust_cli_kernel_api::peers::HoldCause;
 
 use super::i18n::Lang;
 
-/// 批准框的标题。
+/// 批准的板头（照 Puffin 请求的问句，`Run this command?`）。以前是 `Held message from another session`。
 pub fn title(lang: Lang) -> &'static str {
-    lang.pick(
-        "Held message from another session",
-        "来自其他会话的消息已扣住",
-    )
+    lang.pick("Deliver this message?", "投递这条消息？")
 }
 
 /// 第一行：发送方的地址与它自称的名字。
@@ -40,58 +37,19 @@ pub fn cause(lang: Lang, cause: HoldCause) -> &'static str {
     }
 }
 
-/// 正文预览的标题。
-pub fn body(lang: Lang) -> &'static str {
-    lang.pick(
-        "Message body (this is what will be delivered):",
-        "消息正文（批准后投递的就是这些）：",
-    )
-}
-
-/// 两个选项：拒绝（缺省焦点）与投递。
-pub fn options(lang: Lang) -> [&'static str; 2] {
+/// 两个回答（照 Puffin 回答的名字与说明两列，肯定的在前）：投递与拒绝，各是（名字，说明）。以前是一句话的选项，拒绝在前。
+pub fn options(lang: Lang) -> [(&'static str, &'static str); 2] {
     [
-        lang.pick(
-            "Deny — drop it and tell the sender it was declined",
-            "拒绝——丢弃，并告诉发送方被拒绝",
+        (
+            lang.pick("Deliver", "投递"),
+            lang.pick(
+                "the agent reads it as a message",
+                "agent 把它当作一条消息读",
+            ),
         ),
-        lang.pick("Deliver this message to ZCode", "把这条消息交给 ZCode"),
+        (
+            lang.pick("Deny", "拒绝"),
+            lang.pick("drop it and tell the sender", "丢弃，并告诉发送方"),
+        ),
     ]
-}
-
-/// 还有几条扣着（多于一条时显示）。
-pub fn more(lang: Lang, held: usize) -> String {
-    match lang {
-        Lang::En => format!("{held} held"),
-        Lang::Zh => format!("共扣住 {held} 条"),
-    }
-}
-
-/// 批准框下面的按键提示。
-pub fn hint(lang: Lang) -> &'static str {
-    lang.pick(
-        "{↑↓} to choose · {enter} to confirm · {esc} to deny",
-        "{↑↓} 选择 · {enter} 确认 · {esc} 拒绝",
-    )
-}
-
-/// 发送方收到回执后的一行（回执说明的第一句）。
-pub fn receipt(lang: Lang, status: &str) -> &'static str {
-    match status {
-        "held" => lang.pick("Cross-session message held by the receiving session. ZCode in that session hasn't seen it.",
-            "跨会话消息被对方会话扣住，对方的 ZCode 还没有看到。",
-        ),
-        "denied" => lang.pick("Cross-session message denied. The recipient's user declined it; it was not delivered.",
-            "跨会话消息被拒绝：对方用户没有同意，消息没有送达。",
-        ),
-        "expired" => lang.pick("Cross-session message expired without approval. It was never approved, so it wasn't delivered and nothing is waiting in that session.",
-            "跨会话消息过期未批准：没有送达，对方会话里也没有留下。",
-        ),
-        "delivered" => lang.pick("Cross-session message released after approval. It was approved and released to that session.",
-            "跨会话消息已批准，放行到对方会话。",
-        ),
-        _ => lang.pick("Cross-session message refused. That session is not accepting cross-session messages; it was not delivered.",
-            "跨会话消息被拒收：对方会话不接收跨会话消息，消息没有送达。",
-        ),
-    }
 }

@@ -1,16 +1,19 @@
 //! `/diff` 的排版与文字（docs/specs/rust-cli/tui-manage.md §4.2）：英文照原文，中文另配；diff 行用界面
 //! 同一套排版（`cells::patch`）。
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+//!
+//! 画法（tui-kit.md §3.8，工作线 TK 的 C1）：[`lines`] 产出 kit 的 [`StyledLine`]，墨色经 `app.ink`
+//! （dim → `fg3`，+N → `ok`，−N → `err`）。
+use rust_cli_tui_kit::app::element::Element;
+use rust_cli_tui_kit::render::{Span, StyledLine};
 
 use super::app::App;
 use super::cells::Ctx;
-use super::cells::patch::{diff_lines, edits_rows, unified_rows};
+use super::cells::patch::{diff, edits_rows, unified_rows};
 use super::diff_view::{Current, DiffFile, DiffView};
 use super::i18n::Lang;
+use super::ink::Ink;
 use super::layout;
-use super::text::truncate_line;
-use crate::ui::style::dim;
+use super::pick;
 
 fn files_word(lang: Lang, n: usize) -> String {
     match lang {
@@ -44,34 +47,65 @@ fn shown(lang: Lang, file: &DiffFile) -> Shown {
     }
 }
 
-fn counts(added: u64, removed: u64) -> Vec<Span<'static>> {
+fn counts(added: u64, removed: u64, ink: &Ink) -> Vec<Span> {
     let mut spans = Vec::new();
     if added > 0 {
-        spans.push(Span::styled(
-            format!(" +{added}"),
-            Style::default().fg(Color::Green),
-        ));
+        spans.push(Span::new(format!(" +{added}"), ink.success()));
     }
     if removed > 0 {
-        spans.push(Span::styled(
-            format!(" -{removed}"),
-            Style::default().fg(Color::Red),
-        ));
+        spans.push(Span::new(format!(" -{removed}"), ink.destructive()));
     }
     spans
 }
 
+/// 来源的一排（当前改动与各回合）：选中的是 [`pick::chosen`]，其余 fg3，之间 line 色的 ` · `，两头能换时 fg3 的
+/// `◀` / `▶`。
+fn sources(view: &DiffView, turns: usize, zh: bool, ink: &Ink) -> Element {
+    let quiet = ink.theme.fg3;
+    let mut spans = Vec::new();
+    if view.source > 0 {
+        spans.push(Span::new("◀ ", quiet));
+    }
+    for index in 0..=turns {
+        let label = if index == 0 {
+            if zh { "当前" } else { "Current" }.to_owned()
+        } else {
+            format!("T{index}")
+        };
+        if index > 0 {
+            spans.push(Span::new(" · ", ink.theme.line));
+        }
+        let style = if index == view.source {
+            pick::chosen(ink)
+        } else {
+            quiet
+        };
+        spans.push(Span::new(label, style));
+    }
+    if view.source < turns {
+        spans.push(Span::new(" ▶", quiet));
+    }
+    pick::row(spans)
+}
+
 /// 页面的行（替换输入区）；`height` 是可用高度。
+///
+/// 第二级的样子（tui-kit.md §4.3「`/diff` 视图」，自拟，工作线 TK 的 S3）：整页是输入框的板上的一层（[`pick::layer`]：
+/// rich 是 panel 底与半块上下边，plain 是 line 色的上下线），板下面一行是按键提示（第 3 列起，Puffin 状态栏的位置）。
+/// 板里：头一行（[`pick::head`]：fg2 粗体的标题，三格后 fg3 的说明）、来源的一排、fg3 的统计；文件列表照 Puffin 的
+/// 选择器（没有指针与底色条，选中的路径 brand、其余 fg2，说明 fg3，窗口外的是 fg3 的 `↑ n more` / `↓ n more`）；
+/// 文件详情是 `cells::patch` 的 diff 行（新增、删除的行在 `add_bg` / `del_bg` 上）。
 pub fn lines(
     app: &App,
     view: &DiffView,
     width: usize,
     height: usize,
     now_ms: u64,
-) -> Vec<Line<'static>> {
+) -> (Vec<StyledLine>, Vec<Span>) {
     let lang = app.lang;
     let zh = lang == Lang::Zh;
-    let accent = app.palette.accent;
+    let ink = &app.ink;
+    let dim = ink.dim();
     let turns = app.view.turn_changes();
     let turn = view
         .source
@@ -99,41 +133,9 @@ pub fn lines(
             Some("(git diff HEAD)".to_owned()),
         ),
     };
-    let mut header = vec![Span::styled(
-        format!("  {title}"),
-        Style::default().add_modifier(Modifier::BOLD),
-    )];
-    if let Some(subtitle) = subtitle {
-        header.push(Span::styled(format!(" {subtitle}"), dim()));
-    }
-    let mut lines = vec![
-        crate::ui::style::rule(width, Style::default().fg(accent)),
-        truncate_line(Line::from(header), width),
-    ];
+    let mut rows = vec![pick::head(&title, subtitle.as_deref(), ink)];
     if !turns.is_empty() {
-        let mut spans = vec![Span::raw("  ")];
-        if view.source > 0 {
-            spans.push(Span::styled("◀ ", dim()));
-        }
-        for index in 0..=turns.len() {
-            let label = if index == 0 {
-                if zh { "当前" } else { "Current" }.to_owned()
-            } else {
-                format!("T{index}")
-            };
-            if index > 0 {
-                spans.push(Span::styled(" · ", dim()));
-            }
-            spans.push(if index == view.source {
-                Span::styled(label, Style::default().add_modifier(Modifier::BOLD))
-            } else {
-                Span::styled(label, dim())
-            });
-        }
-        if view.source < turns.len() {
-            spans.push(Span::styled(" ▶", dim()));
-        }
-        lines.push(truncate_line(Line::from(spans), width));
+        rows.push(sources(view, turns.len(), zh, ink));
     }
     // 文件与统计。
     let Listing {
@@ -142,38 +144,36 @@ pub fn lines(
         empty,
     } = listing(lang, turn, &view.current);
     if let Some((count, added, removed)) = stats.filter(|(count, _, _)| *count > 0) {
-        let mut spans = vec![Span::styled(
+        let mut spans = vec![Span::new(
             if zh {
-                format!("  {} 有改动", files_word(lang, count))
+                format!("{} 有改动", files_word(lang, count))
             } else {
-                format!("  {} changed", files_word(lang, count))
+                format!("{} changed", files_word(lang, count))
             },
-            dim(),
+            dim,
         )];
-        spans.extend(counts(added, removed));
-        lines.push(truncate_line(Line::from(spans), width));
+        spans.extend(counts(added, removed, ink));
+        rows.push(pick::row(spans));
     }
-    lines.push(Line::default());
-    let footer = |text: &str| Line::from(Span::styled(format!("  {text}"), dim()));
-    // 按键提示（`{键}` 模板，按键提示组件画，tui.md §7.4）。
-    let keys = |text: &str| super::key_hint::line(layout::INDENT, text, &app.palette);
+    // 按键提示（`{键}` 模板，按键提示组件画，tui.md §7.4）在草稿行的槽里（tui-kit.md §4.0「板」）；以前在板下面一行。
+    let keys = |text: &str| super::key_hint::spans(text, ink);
+    let done = |rows: Vec<Element>, hint: Vec<Span>| (pick::layer(rows, ink, width), hint);
     if let Some(empty) = empty {
-        lines.push(footer(&empty));
-        lines.push(Line::default());
-        lines.push(keys(if zh { "{esc} 关闭" } else { "{Esc} to close" }));
-        return lines;
+        rows.push(pick::quiet_row(empty, ink));
+        return done(rows, keys(if zh { "{esc} 关闭" } else { "{esc} to close" }));
     }
+    // 板的上下边、草稿行各占一行。
     let room = height
-        .saturating_sub(lines.len() + layout::FOOTER_ROWS)
+        .saturating_sub(rows.len() + 3)
         .max(layout::MIN_LIST_ROWS);
     if let Some(scroll) = view.detail {
         let Some(file) = files.get(view.selected) else {
-            return lines;
+            return done(rows, Vec::new());
         };
-        let mut head = vec![Span::raw(format!("  {}", file.path))];
-        head.extend(counts(file.added, file.removed));
-        lines.push(truncate_line(Line::from(head), width));
-        let body: Vec<Line<'static>> = match (turn, &view.current) {
+        let mut head = vec![Span::new(file.path.clone(), ink.theme.fg2)];
+        head.extend(counts(file.added, file.removed, ink));
+        rows.push(pick::row(head));
+        let body: Vec<StyledLine> = match (turn, &view.current) {
             (None, Current::Loaded { files: all, .. }) => {
                 let found = &all[view.selected];
                 if found.untracked {
@@ -185,7 +185,10 @@ pub fn lines(
                             "Stage it with git add to see line counts.",
                         ]
                     };
-                    vec![footer(first), footer(second)]
+                    pick::lay(
+                        &[pick::quiet_row(first, ink), pick::quiet_row(second, ink)],
+                        width,
+                    )
                 } else {
                     rendered(app, &unified_rows(&found.body), width, now_ms)
                 }
@@ -196,33 +199,43 @@ pub fn lines(
             }
         };
         let start = scroll.min(body.len().saturating_sub(1));
-        lines.extend(body.into_iter().skip(start).take(room.saturating_sub(1)));
-        lines.push(Line::default());
-        lines.push(keys(if zh {
-            "{↑/↓} 滚动 · {esc} 返回"
-        } else {
-            "{↑/↓} to scroll · {Esc} to back"
-        }));
-        return lines;
-    }
-    let start = view.selected.saturating_sub(room.saturating_sub(1));
-    for (index, file) in files.iter().enumerate().skip(start).take(room) {
-        let focused = index == view.selected;
-        // 选择列表组件（`› ` 加底色条，tui.md §7.4，修复线 F26）。
-        let mut spans = vec![Span::raw("  "), super::pick::pointer(focused)];
-        spans.push(Span::raw(file.path.clone()));
-        match file.note {
-            Some(note) => spans.push(Span::styled(format!(" {note}"), dim())),
-            None => spans.extend(counts(file.added, file.removed)),
-        }
-        lines.push(super::pick::paint(
-            truncate_line(Line::from(spans), width),
-            focused,
-            &app.palette,
-            width,
+        rows.push(Element::Raw(
+            body.into_iter()
+                .skip(start)
+                .take(room.saturating_sub(1))
+                .collect(),
         ));
+        return done(
+            rows,
+            keys(if zh {
+                "{↑↓} 滚动 · {esc} 返回"
+            } else {
+                "{↑↓} to scroll · {esc} to go back"
+            }),
+        );
     }
-    lines.push(Line::default());
+    let selected = view.selected.min(files.len().saturating_sub(1));
+    let (from, shown) = pick::window(selected, files.len(), room);
+    if from > 0 {
+        rows.push(pick::more_above(from, 0, ink));
+    }
+    for (index, file) in files.iter().enumerate().skip(from).take(shown) {
+        let focused = index == selected;
+        // Puffin 选择器的行（tui-kit.md §4.2）：没有指针与底色条，选中的路径 brand。
+        let mut spans = vec![Span::new(file.path.clone(), pick::name_style(ink, focused))];
+        match file.note {
+            Some(note) => spans.push(Span::new(
+                format!(" {note}"),
+                pick::desc_style(ink, focused),
+            )),
+            None => spans.extend(counts(file.added, file.removed, ink)),
+        }
+        rows.push(pick::row(spans));
+    }
+    let below = files.len().saturating_sub(from + shown);
+    if below > 0 {
+        rows.push(pick::more_below(below, 0, ink));
+    }
     let switch = if turns.is_empty() {
         ""
     } else if zh {
@@ -230,12 +243,14 @@ pub fn lines(
     } else {
         "{←/→} to switch · "
     };
-    lines.push(keys(&if zh {
-        format!("{switch}{{↑/↓}} 选择 · {{enter}} 查看 · {{esc}} 关闭")
-    } else {
-        format!("{switch}{{↑/↓}} to select · {{Enter}} to view · {{Esc}} to close")
-    }));
-    lines
+    done(
+        rows,
+        keys(&if zh {
+            format!("{switch}{{↑↓}} 选择 · {{⏎}} 查看 · {{esc}} 关闭")
+        } else {
+            format!("{switch}{{↑↓}} to select · {{⏎}} to view · {{esc}} to close")
+        }),
+    )
 }
 
 /// 这个来源的文件、统计与空状态的说明。
@@ -310,10 +325,10 @@ fn rendered(
     rows: &[super::cells::patch::PatchRow],
     width: usize,
     now_ms: u64,
-) -> Vec<Line<'static>> {
+) -> Vec<StyledLine> {
     let label = crate::ui::app::label(app.view.workspace().root.as_str(), app.home.as_deref());
     let ctx = Ctx {
-        palette: &app.palette,
+        ink: &app.ink,
         lang: app.lang,
         width,
         expanded: true,
@@ -324,7 +339,8 @@ fn rendered(
         version: &app.version,
         mcp_machines: &app.mcp_machines,
         machines: &app.machines,
+        skills: app.composer.mentions.catalog.as_deref().unwrap_or(&[]),
         markdown: None,
     };
-    diff_lines(rows, &ctx, usize::MAX).0
+    diff(rows, &ctx, usize::MAX).0
 }

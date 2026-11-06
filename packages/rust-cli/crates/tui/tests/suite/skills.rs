@@ -42,11 +42,11 @@ async fn a_skill_command_is_completed_expanded_and_shown_as_typed() {
         ui.wait_for("/greet <name>").await;
         ui.submit("Ada");
         ui.wait("the reply", |s| {
-            s.contains("hello Ada") && !s.contains("esc to interrupt")
+            s.contains("hello Ada") && !s.contains("esc stop")
         })
         .await;
         let screen = ui.screen();
-        assert!(screen.contains("❯ /greet Ada"), "{screen}");
+        assert!(screen.contains("› /greet Ada"), "{screen}");
         assert!(!screen.contains("command-message"), "{screen}");
     })
     .await;
@@ -74,7 +74,7 @@ async fn the_builtin_loop_is_expanded_too() {
         );
         ui.submit("/loop 5m check the deploy");
         ui.wait("the reply", |s| {
-            s.contains("looping") && !s.contains("esc to interrupt")
+            s.contains("looping") && !s.contains("esc stop")
         })
         .await;
     })
@@ -137,7 +137,7 @@ async fn esc_while_idle_cancels_the_pending_loop_wakeup() {
         ui.wait_for("Ask before changes").await;
         ui.submit("start the loop");
         ui.wait("the first turn", |s| {
-            s.contains("waiting") && !s.contains("esc to interrupt")
+            s.contains("waiting") && !s.contains("esc stop")
         })
         .await;
         ui.key(crossterm::event::KeyCode::Esc);
@@ -145,7 +145,7 @@ async fn esc_while_idle_cancels_the_pending_loop_wakeup() {
         ui.settle().await;
         ui.submit("stop it");
         ui.wait("the second turn", |s| {
-            s.contains("stopped") && !s.contains("esc to interrupt")
+            s.contains("stopped") && !s.contains("esc stop")
         })
         .await;
     })

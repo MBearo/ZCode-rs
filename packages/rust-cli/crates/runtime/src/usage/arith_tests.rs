@@ -1,8 +1,20 @@
 //! 类别与算术（context-usage.md §4）：用一次真实运行的数字（fixture 回的计数）核对。
 use rust_cli_base::models::GLM_5_3;
-use rust_cli_kernel_api::context_usage::CategoryKind;
+use rust_cli_kernel_api::context_usage::{CategoryKind, MessageUsage};
 
 use super::*;
+use crate::usage::detail::Kind;
+
+fn tools(tokens: &[u64]) -> Vec<ToolUsage> {
+    tokens
+        .iter()
+        .enumerate()
+        .map(|(index, tokens)| ToolUsage {
+            name: format!("T{index}"),
+            tokens: *tokens,
+        })
+        .collect()
+}
 
 fn c1() -> Measured {
     Measured {
@@ -11,11 +23,26 @@ fn c1() -> Measured {
         source: WindowSource::ModelDefault,
         auto: true,
         buffer: Some(("Autocompact buffer", 33_000)),
-        sections: vec![325, 44, 110, 150, 61, 577, 166, 91, 90, 33],
+        sections: [325, 44, 110, 150, 61, 577, 166, 91, 90, 33]
+            .into_iter()
+            .enumerate()
+            .map(|(index, tokens)| PromptSectionUsage {
+                name: format!("S{index}"),
+                tokens,
+            })
+            .collect(),
         memory_files: Vec::new(),
         listed_tools: 6689,
+        // 列出的工具各自减去 500 之后（明细的权重）；最后一个是 Skill（含 skill 清单）。
+        listed: [("Bash", 1200), ("Read", 600), ("Edit", 600), (SKILL, 2300)]
+            .into_iter()
+            .map(|(name, tokens)| ToolUsage {
+                name: name.into(),
+                tokens,
+            })
+            .collect(),
         // 10 个延迟工具，各自减去 500 之后。
-        deferred_tools: vec![528, 0, 0, 524, 147, 0, 940, 0, 0, 0],
+        deferred_tools: tools(&[528, 0, 0, 524, 147, 0, 940, 0, 0, 0]),
         mcp_total: 21,
         mcp_tools: Vec::new(),
         tool_search: true,
@@ -31,6 +58,18 @@ fn c1() -> Measured {
             })
             .collect(),
         messages: Messages::Counted(21),
+        pieces: vec![
+            Piece {
+                kind: Kind::Yours,
+                tool: None,
+                weight: 7,
+            },
+            Piece {
+                kind: Kind::Replies,
+                tool: None,
+                weight: 14,
+            },
+        ],
     }
 }
 
@@ -162,4 +201,90 @@ fn without_tool_search_all_mcp_tools_count_and_compact_buffer_shows_when_auto_is
     assert_eq!(found("MCP tools"), Some(400));
     assert_eq!(found("MCP tools (deferred)"), None);
     assert_eq!(found("Compact buffer"), Some(3000));
+}
+
+/// 明细（context-usage.md §3.1）：每个列表的和等于它的类别，0 的项不列。
+#[test]
+fn every_detail_list_adds_up_to_its_category() {
+    let usage = usage(c1());
+    let category = |name: &str| {
+        usage
+            .categories
+            .iter()
+            .find(|category| category.name == name)
+            .map_or(0, |category| category.tokens)
+    };
+    let sections: u64 = usage
+        .prompt_sections
+        .iter()
+        .map(|section| section.tokens)
+        .sum();
+    assert_eq!(sections, category("System prompt"));
+    assert_eq!(usage.prompt_sections[0].name, "S0");
+    let listed: u64 = usage.system_tools.iter().map(|tool| tool.tokens).sum();
+    assert_eq!(listed, category("System tools"));
+    let deferred: u64 = usage.deferred_tools.iter().map(|tool| tool.tokens).sum();
+    assert_eq!(deferred, category("System tools (deferred)"));
+    assert_eq!(
+        usage
+            .deferred_tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>(),
+        ["T0", "T3", "T4", "T6"]
+    );
+    assert_eq!(
+        usage.messages,
+        [
+            MessageUsage {
+                kind: "Your messages".into(),
+                tokens: 7
+            },
+            MessageUsage {
+                kind: "Replies".into(),
+                tokens: 14
+            },
+        ]
+    );
+}
+
+/// Skill 的权重减去 skill 估算之和（1960），不重复算；其余按各自的估算分摊 `System tools`（4729）。
+#[test]
+fn the_skill_tool_weighs_without_the_skill_listing() {
+    let usage = usage(c1());
+    let tokens: Vec<(&str, u64)> = usage
+        .system_tools
+        .iter()
+        .map(|tool| (tool.name.as_str(), tool.tokens))
+        .collect();
+    // 权重 1200、600、600、340（2300 − 1960），和 2740；4729 按比例：2071.09、1035.55、1035.55、586.81。
+    // 整数部分和 4727，剩下的 2 给余数最大的 Skill 与 Read（Read 与 Edit 余数相同，按原来的顺序）。
+    assert_eq!(
+        tokens,
+        [("Bash", 2071), ("Read", 1036), ("Edit", 1035), (SKILL, 587)]
+    );
+
+    // skill 比 Skill 工具还大时权重是 0，不列。
+    let mut measured = c1();
+    measured.listed[3].tokens = 100;
+    let usage = super::usage(measured);
+    assert!(usage.system_tools.iter().all(|tool| tool.name != SKILL));
+}
+
+/// 有锚点时 `Messages` 是测得的数，种类按估算的比例分它。
+#[test]
+fn an_anchor_scales_the_message_kinds_to_the_measured_total() {
+    let mut measured = c1();
+    measured.messages = Messages::Measured {
+        input: 20_000,
+        tail: 300,
+    };
+    let usage = usage(measured);
+    // 20000 − 8336 + 300 = 11964，按 7 : 14 分：3988、7976。
+    let kinds: Vec<(&str, u64)> = usage
+        .messages
+        .iter()
+        .map(|kind| (kind.kind.as_str(), kind.tokens))
+        .collect();
+    assert_eq!(kinds, [("Your messages", 3988), ("Replies", 7976)]);
 }

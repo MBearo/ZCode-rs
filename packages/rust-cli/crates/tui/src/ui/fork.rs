@@ -1,18 +1,38 @@
-//! `/fork` 的选择器（docs/specs/rust-cli/session-lifecycle.md §6.5.3，工作线 F75）：列出会话里可选的用户输入
-//! （与 `/rewind` 同一份，内核给出），每条一行、带序号，旧的在上、焦点在最新的一条；选中即分叉，没有第二步。
-//! 选择器与分叉后的提示都随界面语言（工作线 F78）。
+//! `/fork` 的点列表（docs/specs/rust-cli/session-lifecycle.md §6.5.3，工作线 F75；tui-kit.md §4.3「`/fork`」）：Puffin 没有
+//! `/fork`，照它的 `/rewind` 列表那一层画（`rewind.rs`，kit 的 `rewind_rows::list_rows_said`）：板上输入框上方，跟着草稿
+//! `/fork <词>`，最新的在上，每行是年龄与消息的第一行，选中的点下面一行说分叉做什么。↑↓ 选、⏎ 在那条输入之后分叉（没有
+//! 第二步）、esc 关上（草稿留着）。可选的输入与 `/rewind` 同一份（内核给出）。
+//!
+//! 2026-10-31 以前是旧界面的列表：标题 `Fork`、一句副标题、旧的在上、数字键直选。
+use crossterm::event::{KeyCode, KeyEvent};
 use rust_cli_kernel_api::ids::MessageId;
 use rust_cli_kernel_api::session_api::Forked;
+use rust_cli_tui_kit::app::element::Element;
+use rust_cli_tui_kit::app::widgets::rewind_rows::{self, List, Point, PointFrom};
+use rust_cli_tui_kit::render::Span;
 
-use super::app::{App, Overlay};
+use super::app::{Action, App, Overlay};
 use super::i18n::Lang;
-use super::list::{Choice, Item, ListView, Shape};
+use super::keyboard;
+use super::pager::cycle;
+use crate::view::Body;
+
+/// 列表跟着的草稿。
+pub const DRAFT: &str = "/fork ";
 
 /// 一条可选的输入：消息 ID 与它的文字。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entry {
     pub message: MessageId,
     pub text: String,
+}
+
+/// 点列表：可选的输入（会话里的顺序，旧的在前）、过滤词与选中的行（同 `rewind::PointsList`）。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ForkList {
+    pub entries: Vec<Entry>,
+    pub query: String,
+    pub choice: usize,
 }
 
 /// 分叉完成后的提示（§6.5.3）：英文是内核的回执（Node 原文）加 Node 的 `Switched to forked session <ID>.`；
@@ -36,34 +56,153 @@ pub fn forked_notice(lang: Lang, forked: &Forked) -> String {
     }
 }
 
+/// 草稿里 `/fork ` 之后的词（同 `rewind` 的 `query_of`）。
+fn query_of(text: &str) -> String {
+    text.chars()
+        .skip(DRAFT.len())
+        .collect::<String>()
+        .trim()
+        .to_owned()
+}
+
 impl App {
-    /// 打开选择器（条目按会话里的顺序，旧的在前）。
-    pub fn open_fork(&mut self, entries: Vec<Entry>) {
-        let items: Vec<Item> = entries
-            .into_iter()
-            .map(|entry| Item {
-                label: entry.text.split_whitespace().collect::<Vec<_>>().join(" "),
-                value: Choice::Fork(entry.message),
-                ..Item::default()
+    fn fork_list(&self) -> Option<&ForkList> {
+        match &self.overlay {
+            Some(Overlay::Forks(list)) => Some(list),
+            _ => None,
+        }
+    }
+
+    /// 点在 kit 里的样子：都能分叉（不变暗），没有文件的统计；`at` 是你的那块在视图里出现的时刻（同 `rewind_pick::kit_points`）。
+    fn fork_points(&self, list: &ForkList) -> Vec<Point> {
+        let mut users = self
+            .view
+            .rows()
+            .iter()
+            .filter(|row| matches!(row.body, Body::User { .. }));
+        (0..list.entries.len())
+            .map(|_| Point {
+                at: users.next().map_or(0, |row| row.created_ms),
+                from: PointFrom::Answer,
+                added: 0,
+                removed: 0,
             })
-            .collect();
-        let (title, subtitle, empty) = match self.lang {
-            Lang::En => (
-                "Fork",
-                "Fork the conversation after one of your messages. Files are not changed; use /rewind to restore them.",
-                "Nothing to fork from yet.",
-            ),
-            Lang::Zh => (
-                "分叉",
-                "从某条输入之后分出新会话。文件不动；要回退文件用 /rewind。",
-                "还没有可以分叉的输入。",
-            ),
+            .collect()
+    }
+
+    /// 列表为现在的词显示的点（最新的在前）。
+    fn fork_matches(&self, list: &ForkList) -> Vec<usize> {
+        let points = self.fork_points(list);
+        rewind_rows::matches(&points, &|k| list.entries[k].text.clone(), &list.query)
+    }
+
+    /// 输入到了（`/fork`）：没有可以分叉的时输入框上方说一句、不开（Puffin `rewind_blocked` 的 `Nothing to rewind yet.`）；
+    /// 否则草稿空着时写成 `/fork `，打开列表。
+    pub fn open_fork(&mut self, entries: Vec<Entry>) {
+        if entries.is_empty() {
+            let text = self
+                .lang
+                .pick("Nothing to fork from yet.", "还没有可以分叉的输入。");
+            self.info(text);
+            return;
+        }
+        if self.composer.is_empty() {
+            self.composer.set_text(DRAFT);
+        }
+        let query = query_of(self.composer.area.text());
+        self.overlay = Some(Overlay::Forks(ForkList {
+            entries,
+            query,
+            choice: 0,
+        }));
+    }
+
+    /// 列表拿的键（`draft_layer.rs` 先问它）：`None` 让键去编辑草稿。
+    pub(super) fn forks_key(&mut self, key: KeyEvent) -> Option<Option<Action>> {
+        let ctrl = keyboard::ctrl(&key);
+        let list = self.fork_list()?.clone();
+        let ms = self.fork_matches(&list);
+        let n = ms.len();
+        let mut choice = list.choice;
+        match key.code {
+            KeyCode::Esc => {
+                self.overlay = None;
+                return Some(None);
+            }
+            KeyCode::Up if n > 0 => choice = cycle(choice.min(n - 1), n, false),
+            KeyCode::Char('p') if ctrl && n > 0 => choice = cycle(choice.min(n - 1), n, false),
+            KeyCode::Down if n > 0 => choice = cycle(choice.min(n - 1), n, true),
+            KeyCode::Char('n') if ctrl && n > 0 => choice = cycle(choice.min(n - 1), n, true),
+            KeyCode::Up | KeyCode::Down | KeyCode::Tab => {}
+            KeyCode::Char('p' | 'n') if ctrl => {}
+            KeyCode::Enter if n == 0 => {}
+            KeyCode::Enter => {
+                let input = list.entries[ms[choice.min(n - 1)]].message.clone();
+                self.overlay = None;
+                self.composer.clear();
+                return Some(Some(Action::Fork { input }));
+            }
+            _ => return None,
+        }
+        if let Some(Overlay::Forks(list)) = self.overlay.as_mut() {
+            list.choice = choice;
+        }
+        Some(None)
+    }
+
+    /// 一个键或粘贴之后：草稿不再以 `/fork ` 开头时关上；词变了时选第一行。
+    pub(super) fn settle_forks(&mut self, text: &str) {
+        let starts = text
+            .get(..DRAFT.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(DRAFT));
+        if !starts {
+            self.overlay = None;
+            return;
+        }
+        let q = query_of(text);
+        if let Some(Overlay::Forks(list)) = self.overlay.as_mut()
+            && list.query != q
+        {
+            list.query = q;
+            list.choice = 0;
+        }
+    }
+
+    /// 列表的行（kit `list_rows_said`）。`now_ms` 是墙钟。
+    pub fn forks_rows(&self, now_ms: u64) -> Vec<Element> {
+        let Some(list) = self.fork_list() else {
+            return Vec::new();
         };
-        let mut list = ListView::new(Shape::OneLine, title.to_owned(), items, empty.to_owned())
-            .with_subtitle(subtitle.to_owned());
-        // 焦点在最新的一条（最后一项）。
-        list.selected = list.items.len().saturating_sub(1);
-        self.overlay = Some(Overlay::List(list));
+        let theme = &self.ink.theme;
+        let lang = self.lang;
+        let points = self.fork_points(list);
+        let none = match lang {
+            Lang::En => format!("No message matches “{}”.", list.query),
+            Lang::Zh => format!("没有相符的消息“{}”。", list.query),
+        };
+        let ui = List {
+            query: &list.query,
+            choice: list.choice,
+        };
+        let detail = |_k: usize| {
+            vec![
+                Span::new(
+                    lang.pick("a new session after this turn", "在这一回合之后分出新会话"),
+                    theme.fg3,
+                ),
+                Span::new("  ·  ", theme.line),
+                Span::new(lang.pick("files are not changed", "文件不动"), theme.fg3),
+            ]
+        };
+        rewind_rows::list_rows_said(
+            theme,
+            &points,
+            &|k| list.entries[k].text.clone(),
+            &ui,
+            (now_ms as f64, &*self.zone),
+            &none,
+            &detail,
+        )
     }
 }
 

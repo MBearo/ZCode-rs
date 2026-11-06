@@ -81,7 +81,8 @@ async fn print(invocation: Invocation, run: &ControllerRun) -> Result<u8> {
         prompt,
         session_id,
         workspace: built.opened.workspace.clone(),
-        selection: built.selection.clone(),
+        // `-p` 组装时已等缺省模型定下（`Controller::print` 的 `wait_model`）。
+        selection: built.selection.current(),
         mode: built.mode,
         target,
         fork: fork_session,

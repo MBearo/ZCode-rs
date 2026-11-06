@@ -293,6 +293,8 @@ pub fn parse_envelope(text: &str) -> Option<Envelope> {
 pub enum PeerStatus {
     Busy,
     Idle,
+    /// 有待处理的交互：等用户回答（tui-cockpit.md §4）。
+    Waiting,
 }
 
 impl PeerStatus {
@@ -300,6 +302,7 @@ impl PeerStatus {
         match self {
             Self::Busy => "busy",
             Self::Idle => "idle",
+            Self::Waiting => "waiting",
         }
     }
 }
@@ -322,6 +325,79 @@ pub struct PeerRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<PeerStatus>,
     pub started_at_ms: u64,
+    /// 这个进程现在的主会话（登记的 `sessionId`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<SessionId>,
+    /// 进现在的 `status` 的时刻。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_since_ms: Option<u64>,
+    /// 会话的现场（tui-cockpit.md §4）：只有 TUI 写。
+    #[serde(default)]
+    pub presence: PeerPresence,
+    /// 进程在哪个 tmux 窗格里（入口给出）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tmux: Option<TmuxPlace>,
+}
+
+/// 一个 tmux 窗格：`$TMUX` 的 socket 与 `$TMUX_PANE`。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TmuxPlace {
+    pub socket: String,
+    pub pane: String,
+}
+
+/// 会话的现场（驾驶舱读，tui-cockpit.md §4）。没有的字段不写。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerPresence {
+    /// 正在做的一行（`Bash  pnpm test`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub now: Option<String>,
+    /// 这个工具在哪台远端机器上；本机为 None。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+    /// 在等用户回答的请求。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask: Option<PeerAsk>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agents: Vec<PeerAgent>,
+    /// 待办：（完成的，全部）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub todos: Option<(u32, u32)>,
+    /// 上下文用了百分之几。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<u32>,
+}
+
+/// 请求的问题与回答（只给人看，别的进程不能经它回答）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerAsk {
+    pub question: String,
+    /// Bash 的命令等要照原样写的一行。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub answers: Vec<PeerAnswer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerAnswer {
+    pub label: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub note: String,
+}
+
+/// 现场里的一个子代理。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerAgent {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub doing: String,
+    pub running: bool,
+    /// 到 `at_ms` 为止的用时（在跑的显示时加上之后过去的）。
+    pub elapsed_ms: u64,
+    pub at_ms: u64,
 }
 
 /// 发出的一条消息。
@@ -399,6 +475,10 @@ pub struct PeerReceipt {
 pub enum PeerSignal {
     Message(InboundPeerMessage),
     Receipt(PeerReceipt),
+    /// 别的进程的驾驶舱按了停止（tui-cockpit.md §1.3）：中止在跑的回合。
+    Stop {
+        seq: u64,
+    },
 }
 
 impl PeerSignal {
@@ -406,6 +486,7 @@ impl PeerSignal {
         match self {
             Self::Message(message) => message.seq,
             Self::Receipt(receipt) => receipt.seq,
+            Self::Stop { seq } => *seq,
         }
     }
 }
@@ -453,6 +534,19 @@ pub trait PeerMessaging: Send + Sync {
 
     /// 发回执（适配器自己的任务里发，不等；失败只记日志）。
     async fn receipt(&self, to: PeerAddress, msg_id: String, status: ReceiptStatus);
+
+    /// 自己的登记（同 [`Self::peers`] 的形状）；跨会话关闭时为 None。
+    async fn own(&self) -> Option<PeerRecord> {
+        None
+    }
+
+    /// 写这个会话的现场（只有绑定的会话写得进去）。
+    async fn set_presence(&self, _session: &SessionId, _presence: PeerPresence) {}
+
+    /// 让那个进程中止在跑的回合（tui-cockpit.md §1.3）。
+    async fn stop(&self, _to: &PeerAddress) -> Result<(), PeerSendError> {
+        Err(PeerSendError::Gone)
+    }
 
     /// 顶层会话打开：成为本进程的主会话（登记的 `sessionId` 跟着改），之后的入站交给它。
     async fn bind(&self, session: &SessionId);

@@ -18,23 +18,22 @@ anyhow.workspace = true
 base64.workspace = true
 crossterm.workspace = true
 futures-util.workspace = true
-pulldown-cmark.workspace = true
-ratatui.workspace = true
 rust-cli-base.workspace = true
 rust-cli-kernel-api.workspace = true
 rust-cli-prompts.workspace = true
+# 渲染层：样式、行、主题、宽度、启动前两屏的运行时（docs/specs/rust-cli/tui-kit.md §3，工作线 TK 的 C0）。
+rust-cli-tui-kit.workspace = true
+# 与 cli 共用的端口类型（tui-kit.md §2.2）。
+rust-cli-tui-ports.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-syntect.workspace = true
 # panic hook 记日志（修复线 F109，tui.md §7.9）。
 tracing.workspace = true
 tokio = { workspace = true, features = ["macros", "sync", "time"] }
 # 登录的取消令牌（取消是一条消息，tui.md §7.2）。
 tokio-util.workspace = true
-two-face.workspace = true
 # 搜索按字素匹配（修复线 F114，docs/specs/rust-cli/tui-input.md §2.3.3）。
 unicode-segmentation.workspace = true
-unicode-width.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true
@@ -47,6 +46,8 @@ windows-sys = { workspace = true, features = ["Win32_System_Console"] }
 [dev-dependencies]
 async-trait.workspace = true
 rust-cli-kernel-api = { workspace = true, features = ["testing"] }
+# 测试读 kit 的假终端与 VT 解码器（tui-kit.md §3.7）。
+rust-cli-tui-kit = { workspace = true, features = ["testing"] }
 # 只在测试里组装 `LocalKernel`（同 headless）；产品代码只认 kernel-api 的会话 API（F133，审查 U14）。
 rust-cli-runtime.workspace = true
 # test-util：终端通知的计时用暂停的时钟推进（tui-manage.md §5.3）。

@@ -359,11 +359,17 @@ fn the_revision_comes_from_the_events_only() {
             KernelEvent::ContextUsage {
                 used_tokens: 5,
                 max_tokens: 10,
+                compact_at: Some(8),
             },
         ),
         0,
     );
     assert!(deltas[0]["patch"].get("revision").is_none());
+    // 内核生效的自动压缩阈值进 V4 的 `autoCompactThresholdTokens`（compact.md §2.3；以前恒为 null）。
+    assert_eq!(
+        deltas[0]["patch"]["usage"]["contextWindow"]["autoCompactThresholdTokens"],
+        8
+    );
     assert_eq!(projection.revision(), 4);
     let changed = projection.set_followup(Followup::Guide);
     assert_eq!(changed["patch"]["config"]["followupMode"], "guide");

@@ -44,28 +44,64 @@ fn the_default_name_uses_the_local_time() {
     );
 }
 
+fn app() -> App {
+    use rust_cli_kernel_api::permission::PermissionMode;
+    App::new(
+        crate::ui::probe::Colors::new(crate::ui::probe::ColorLevel::TrueColor, Some((0, 0, 0))),
+        Lang::En,
+        crate::view::Transcript::new(
+            rust_cli_kernel_api::testing::selection(),
+            PermissionMode::Default,
+            crate::view::test_workspace(),
+        ),
+        Some("/Users/dev".into()),
+        "0.1.0".into(),
+    )
+}
+
+/// `/export`（tui-kit.md §4.2）：跟着草稿的列表，草稿是 `/export `，两行是 Puffin 的名字与说明；选「存到文件」时草稿变成
+/// `/export <缺省文件名>`、列表关上。以前是自己的对话框，文件名在门道里填。
 #[test]
-fn the_dialog_shows_the_two_methods_and_the_filename_input() {
-    let palette = crate::ui::palette::Palette::new(
-        crate::ui::palette::ColorLevel::TrueColor,
-        Some((0, 0, 0)),
-    );
-    let text = |view: &ExportView| {
-        lines(view, Lang::En, &palette, 100)
-            .iter()
-            .map(plain)
-            .collect::<Vec<_>>()
-            .join("\n")
+fn export_opens_puffins_list_in_the_draft_and_the_file_name_goes_into_the_draft() {
+    let mut app = app();
+    assert!(app.export_command("").is_none());
+    assert_eq!(app.composer.area.text(), EXPORT_DRAFT);
+    let Some(crate::ui::app::Overlay::List(list)) = &app.overlay else {
+        panic!("no list: {:?}", app.overlay.is_some());
     };
-    let choose = text(&ExportView::Choose { selected: 1 });
-    assert!(choose.contains("Export conversation"), "{choose}");
-    assert!(choose.contains("Select export method"));
-    assert!(
-        choose.contains("1. Copy to clipboard   Copy the conversation to your system clipboard")
+    assert_eq!(list.purpose, Purpose::Export);
+    let names: Vec<(&str, &str)> = list
+        .items
+        .iter()
+        .map(|item| (item.label.as_str(), item.description.as_str()))
+        .collect();
+    assert_eq!(
+        names,
+        rust_cli_tui_kit::app::widgets::export_list::EXPORT_ROWS
     );
-    assert!(choose.contains("› 2. Save to file"), "{choose}");
-    let name = text(&ExportView::Name("chat.txt".to_owned()));
-    assert!(name.contains("Enter filename:"));
-    assert!(name.contains("> chat.txt█"), "{name}");
-    assert!(name.contains("Enter to save · Esc to go back"));
+    app.open_export_name(AT, 0);
+    assert_eq!(
+        app.composer.area.text(),
+        "/export conversation-2026-10-18-090507.txt"
+    );
+    // 带文件名时直接写。
+    assert!(matches!(
+        app.export_command(" chat.txt "),
+        Some(Action::Manage(Manage::Export(name))) if name == "chat.txt"
+    ));
+}
+
+/// 结果的句子（Puffin）：家目录写成 `~`。
+#[test]
+fn the_result_names_the_path_from_home() {
+    let app = app();
+    assert_eq!(
+        exported(Lang::En, &app.tilde("/Users/dev/project/chat.txt")),
+        "Exported to ~/project/chat.txt."
+    );
+    assert_eq!(app.tilde("/Users/devx/a"), "/Users/devx/a");
+    assert_eq!(
+        export_failed(Lang::En, "denied"),
+        "Could not export: denied"
+    );
 }

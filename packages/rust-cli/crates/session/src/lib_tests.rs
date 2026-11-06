@@ -349,6 +349,9 @@ async fn a_tool_question_is_answered_and_resumes_the_tool() {
 #[path = "steer_tests.rs"]
 mod steer;
 
+#[path = "dequeue_tests.rs"]
+mod dequeue;
+
 #[path = "notice_tests.rs"]
 mod notice;
 

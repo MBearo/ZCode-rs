@@ -1,5 +1,5 @@
-//! AskUserQuestion 的提问框（docs/specs/rust-cli/tools-more.md §1.1，工作线 F72）：带预览的题写备注、空闲到期按已选的
-//! 答案自动提交，工具结果回到模型。
+//! AskUserQuestion 的提问（docs/specs/rust-cli/tools-more.md §1.1，工作线 F72；样子与按键照 Puffin，tui.md §5.2）：带预览
+//! 的题选了回答之后输入框里的字是备注、空闲到期按已选的答案自动提交，工具结果回到模型。
 use std::sync::Arc;
 
 use crossterm::event::KeyCode;
@@ -45,36 +45,38 @@ fn roomy() -> Setup {
     }
 }
 
-/// 带预览的题：左边选项、右边焦点所在选项的预览；移到第二个选项写备注、enter，结果带预览与备注。
+/// 带预览的题：数字选中并翻页；←回到这一页、打字、⏎，字是这个回答的备注（Puffin 的单选页选了回答时，输入框的字是备注），
+/// 结果带预览与备注。
 #[tokio::test(flavor = "multi_thread")]
 async fn notes_on_a_previewed_option_reach_the_model() {
-    let model = asking(vec![layout()]);
+    let model = asking(vec![layout(), color()]);
     with_ui(model.clone(), roomy(), |mut ui| async move {
         ui.submit("pick a layout");
-        let shown = ui.wait_for("Which layout should the page use?").await;
-        assert!(shown.contains("❯ 1. Sidebar"), "{shown}");
-        assert!(shown.contains("│ nav | body"), "{shown}");
-        assert!(shown.contains("Notes: press n to add notes"), "{shown}");
-        assert!(shown.contains("n to add notes · Esc to cancel"), "{shown}");
+        let shown = ui.wait_for("1  Sidebar").await;
+        // 两页：板头是页名，槽有翻页的键。
+        assert!(shown.contains("Layout  ·  Color"), "{shown}");
+        assert!(shown.contains("1–2 pick  ←→ page"), "{shown}");
         ui.settle().await;
-        ui.key(KeyCode::Down);
-        ui.wait_for("❯ 2. Top bar").await;
-        ui.key(KeyCode::Char('n'));
-        ui.wait_for("Add notes on this design").await;
+        ui.key(KeyCode::Char('2'));
+        ui.wait_for("1  Red").await;
+        ui.key(KeyCode::Left);
+        ui.wait_for("1  Sidebar").await;
         ui.type_text("wider");
-        ui.wait_for("Notes: wider").await;
+        ui.wait_for("› wider").await;
         ui.key(KeyCode::Enter);
+        ui.wait_for("1  Red").await;
+        ui.key(KeyCode::Char('1'));
         ui.wait_for("noted").await;
     })
     .await;
     let second = request_text(&model.requests()[1]);
     assert!(
-        second.contains(r#"The user answered: \"Which layout should the page use?\"=\"Top bar\" selected preview:\n## Top bar\n\n- one\n- two notes: wider. Read the answers carefully"#),
+        second.contains(r#"\"Which layout should the page use?\"=\"Top bar\" selected preview:\n## Top bar\n\n- one\n- two notes: wider, \"Which color?\"=\"Red\"."#),
         "{second}"
     );
 }
 
-/// 配了空闲超时：弹出就显示倒计时（门槛不超过超时）；按键重新计时，到期按当时已选的答案提交。
+/// 配了空闲超时：弹出就在槽里显示倒计时（门槛不超过超时）；按键重新计时，到期按当时已选的答案提交。
 #[tokio::test(flavor = "multi_thread")]
 async fn an_idle_question_continues_with_what_was_selected() {
     let model = asking(vec![color(), layout()]);
@@ -88,10 +90,10 @@ async fn an_idle_question_continues_with_what_was_selected() {
     with_ui(model.clone(), setup, |mut ui| async move {
         ui.submit("pick a color");
         let shown = ui.wait_for("auto-continue in 2s · any key to stay").await;
-        assert!(shown.contains("Which color?"), "{shown}");
+        assert!(shown.contains("1  Red"), "{shown}");
         ui.settle().await;
         ui.key(KeyCode::Enter);
-        ui.wait_for("Which layout should the page use?").await;
+        ui.wait_for("1  Sidebar").await;
         ui.wait_for("noted").await;
     })
     .await;

@@ -1,26 +1,31 @@
 // 改写自 apps/zcode-host/crates/tui/tests/suite/host_flow.rs（feat/rs 79b6691c55）：经 TUI 的事件循环走
 // 建会话 → 流式回复 → 中断（docs/specs/rust-cli/tui.md §4）。
+use std::sync::Arc;
+
 use crossterm::event::{KeyCode, KeyModifiers};
 use rust_cli_kernel_api::message::ContentBlock;
 use rust_cli_kernel_api::model::{BlockDelta, ModelEvent};
-use rust_cli_kernel_api::testing::text_response;
+use rust_cli_kernel_api::testing::{FixedClock, text_response};
 
-use super::support::{GatedModel, Setup, send, with_ui};
+use super::support::{GatedModel, Item, Setup, row_of, send, with_ui};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_first_message_creates_the_session_and_streams_the_reply() {
     let model = GatedModel::scripted(vec![text_response(&["hel", "lo\n", "world"])]);
     let session = with_ui(model.clone(), Setup::default(), |mut ui| async move {
         let start = ui.wait_for("Ask before changes").await;
-        assert!(start.contains("ZCode v0.1.0"), "{start}");
-        assert!(start.contains("scripted · ~/project"), "{start}");
-        assert!(start.contains("Try \""), "{start}");
+        // 启动头是 Colophon：版本与目录（模型在 footer 里），输入框已经说了要做什么（tui.md §7.3）。
+        assert!(start.contains("ZCode  0.1.0"), "{start}");
+        assert!(start.contains("~/project"), "{start}");
+        assert!(!start.contains("Type a message"), "{start}");
+        // Puffin 的欢迎块没有 `Try "…"` 的示例行。
+        assert!(!start.contains("Try \""), "{start}");
         ui.submit("hi there");
         let screen = ui.wait_for("world").await;
-        assert!(screen.contains("❯ hi there"), "{screen}");
+        assert!(screen.contains(" › hi there"), "{screen}");
         assert!(screen.contains("hello"), "{screen}");
         // 回合结束：footer 不再提示中断。
-        ui.wait("the turn to end", |s| !s.contains("esc to interrupt"))
+        ui.wait("the turn to end", |s| !s.contains("esc stop"))
             .await;
     })
     .await;
@@ -41,13 +46,14 @@ async fn esc_interrupts_a_running_turn() {
         events.truncate(3);
         send(&sender, events);
         let running = ui.wait_for("partial line").await;
-        assert!(running.contains("esc to interrupt"), "{running}");
-        assert!(running.contains("tokens"), "status line: {running}");
+        assert!(running.contains("esc stop"), "{running}");
+        // 没有常驻的状态行（以前写 token 数）：工作光标在 transcript 的末尾（tui-kit.md §4.0「尾巴」）。
+        assert!(!running.contains("tokens"), "no status line: {running}");
         ui.key(KeyCode::Esc);
-        let screen = ui
-            .wait_for("Interrupted · What should ZCode do instead?")
-            .await;
-        assert!(!screen.contains("esc to interrupt"), "{screen}");
+        // 回合停下之后它的最后一行下面是 Puffin 的 `Stopped.`（以前是 `Interrupted · What should ZCode do instead?`）。
+        let screen = ui.wait_for("Stopped.").await;
+        assert!(!screen.contains("What should ZCode do instead"), "{screen}");
+        assert!(!screen.contains("esc stop"), "{screen}");
         drop(sender);
     })
     .await;
@@ -63,7 +69,7 @@ async fn ctrl_c_twice_exits_and_a_model_failure_shows_its_reason() {
         ui.submit("hi");
         ui.wait_for("busy right now").await;
         ui.press(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        ui.wait_for("Press Ctrl-C again to exit").await;
+        ui.wait_for("Press ^C again to exit").await;
         ui.press(KeyCode::Char('c'), KeyModifiers::CONTROL);
         // 退出后事件循环不再画；脚本结束时它已经返回。
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -72,9 +78,9 @@ async fn ctrl_c_twice_exits_and_a_model_failure_shows_its_reason() {
     assert!(session.is_some());
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn thinking_folds_into_a_summary_and_ctrl_o_shows_it() {
-    let thinking = vec![
+/// 一个回合：思考 `weighing the options`，回答 `decided`。
+fn thinking_turn() -> Vec<Item> {
+    vec![
         Ok(ModelEvent::MessageStart {
             id: "msg".into(),
             model: "scripted".into(),
@@ -108,19 +114,64 @@ async fn thinking_folds_into_a_summary_and_ctrl_o_shows_it() {
             usage: Default::default(),
         }),
         Ok(ModelEvent::MessageStop),
-    ];
-    let model = GatedModel::scripted(vec![thinking]);
-    with_ui(model, Setup::default(), |mut ui| async move {
+    ]
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn thinking_folds_into_a_summary_and_ctrl_o_shows_it() {
+    let model = GatedModel::scripted(vec![thinking_turn()]);
+    // 缺陷修复（0.1.86 发版验证，全量测试的负载下两次重试都失败）：思考的用时是界面时钟上思考行建立到消息收拢之差，
+    // 过了 1 ms 收起的一句就是 `Thought for 1s`。真实时钟下这个测试只在两步落在同一毫秒时才看到光秃秃的 `Thought`，
+    // 所以界面用固定时钟，用时恒为 0。
+    let setup = Setup {
+        ui_clock: Some(Arc::new(FixedClock(0))),
+        ..Setup::default()
+    };
+    with_ui(model, setup, |mut ui| async move {
         ui.submit("think");
         let screen = ui.wait_for("decided").await;
-        assert!(screen.contains("Thought for"), "{screen}");
+        // 结束的思考收成一段工作的一句（Puffin 的收拢；以前是 `Thought for Ns`）。
+        assert!(screen.lines().any(|l| l.trim() == "Thought"), "{screen}");
         assert!(!screen.contains("weighing the options"), "{screen}");
+        // ctrl+o 在原地换成详细的样子（Puffin `details_open`）：思考显示全文；再按一次换回来。以前打开占满屏幕的详细视图。
         ui.press(KeyCode::Char('o'), KeyModifiers::CONTROL);
-        let detail = ui.wait_for("Showing detailed transcript").await;
-        assert!(detail.contains("weighing the options"), "{detail}");
-        ui.key(KeyCode::Esc);
-        ui.wait("the detail view to close", |s| {
-            !s.contains("detailed transcript")
+        let detail = ui.wait_for("weighing the options").await;
+        assert!(!detail.contains("Transcript  ›  Details"), "{detail}");
+        assert!(!detail.contains("Showing detailed transcript"), "{detail}");
+        assert!(detail.contains("decided"), "{detail}");
+        ui.press(KeyCode::Char('o'), KeyModifiers::CONTROL);
+        ui.wait("the details to close", |s| {
+            !s.contains("weighing the options") && s.contains("decided")
+        })
+        .await;
+    })
+    .await;
+}
+
+/// 缺陷修复：点开的块（单独展开）以前在 ^O 打开又关上之后还开着，看起来是 ^O 收不起来。^O 关上时全部收起
+/// （docs/puffin-tui.md §4.2「工作的收拢」的「展开」）。
+#[tokio::test(flavor = "multi_thread")]
+async fn ctrl_o_folds_a_block_opened_by_a_click() {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    let model = GatedModel::scripted(vec![thinking_turn()]);
+    with_ui(model, Setup::default(), |mut ui| async move {
+        ui.submit("think");
+        let screen = ui
+            .wait("the turn to end", |s| {
+                s.contains("decided") && !s.contains("esc stop")
+            })
+            .await;
+        // 点收拢行：只展开这一块。
+        let row = row_of(&screen, "Thought").unwrap();
+        let line = screen.lines().nth(usize::from(row)).unwrap();
+        let col = u16::try_from(line.find("Thought").unwrap()).unwrap();
+        ui.mouse(MouseEventKind::Down(MouseButton::Left), col, row);
+        ui.mouse(MouseEventKind::Up(MouseButton::Left), col, row);
+        ui.wait_for("weighing the options").await;
+        ui.press(KeyCode::Char('o'), KeyModifiers::CONTROL);
+        ui.press(KeyCode::Char('o'), KeyModifiers::CONTROL);
+        ui.wait("every block to fold", |s| {
+            !s.contains("weighing the options") && s.contains("decided")
         })
         .await;
     })

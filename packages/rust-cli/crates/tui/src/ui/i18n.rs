@@ -90,57 +90,15 @@ strings! {
     requires_terminal: "TUI requires an interactive terminal.", "TUI 需要交互式终端。";
     // Git Bash 的 mintty（tui-input.md §9.6，工作线 F71）。
     mintty_unsupported: "This terminal (mintty, the Git Bash window) cannot run ZCode: its keys do not reach Windows programs. Use Windows Terminal, or run `winpty zcode.cmd`.", "这个终端（mintty，即 Git Bash 的窗口）不能运行 ZCode：按键到不了 Windows 程序。请用 Windows Terminal，或者运行 `winpty zcode.cmd`。";
-    placeholder: "Ask ZCode to do anything", "让 ZCode 做点什么";
-    placeholder_queued: "Queued messages will be sent automatically", "排队的消息会自动发出";
-    interrupt_hint: "{esc} to interrupt", "{esc} 中断";
-    for_shortcuts: "{?} for shortcuts", "{?} 查看快捷键";
-    composer_selection_hint: "{ctrl+c} copy · {esc} clear", "{ctrl+c} 复制 · {esc} 取消选择";
-    esc_latest: "{esc} latest", "{esc} 回到最新";
+    placeholder: "Send a message", "发送一条消息";
     no_matches: "no matches", "没有匹配";
     loading: "loading...", "加载中...";
-    page_hint: "{↑/↓} scroll · {esc} close", "{↑/↓} 滚动 · {esc} 关闭";
-    status_title: "Status", "状态";
     select_model: "Select model", "选择模型";
     select_model_subtitle: "Applies to this session and new sessions started here.", "用于本会话与之后在这里开始的新会话。";
-    help_title: "Slash commands", "斜杠命令";
-    help_not_implemented: "(not implemented)", "（未实现）";
     no_models: "No model is configured. Add a provider or set ZCODE_API_KEY.", "没有可用的模型。先添加供应商，或设置 ZCODE_API_KEY。";
     copied: "Copied the last reply", "已复制最后一条回复";
     nothing_to_copy: "Nothing to copy yet", "还没有可复制的回复";
-    status_version: "Version", "版本";
-    status_model: "Model", "模型";
-    status_directory: "Directory", "目录";
-    status_permissions: "Permissions", "权限";
-    status_session: "Session", "会话";
-    status_mcp: "MCP servers", "MCP 服务器";
-    status_no_session: "not started", "还没有开始";
     cleared: "Started a new session.", "已开始新会话。";
-    starting_session: "Starting the session…", "正在开始会话…";
-    // 登录视图（tui.md §7.2，Node `tui.loginSetup` 的中英文）。
-    login_title: "Set Up Coding Plan", "配置 Coding Plan";
-    login_prompt: "Choose a login or API key setup method.", "选择登录或 API key 配置方式。";
-    login_help: "Use {Up/Down} to choose, {Enter} to select.", "使用 {Up/Down} 选择，{Enter} 确认。";
-    login_zai_detail: "Open browser login and create a Coding Plan API key.", "打开浏览器登录，并创建 Coding Plan API key。";
-    login_bigmodel_detail: "Open browser login; authorization is detected automatically.", "打开浏览器登录，CLI 会自动查询授权结果。";
-    login_key_detail: "Paste a Coding Plan API key manually.", "手动粘贴 Coding Plan API key。";
-    login_wait_zai: "Waiting for Z.AI authorization", "等待 Z.AI 授权";
-    login_wait_zai_detail: "Complete sign-in in your browser. I will continue when authorization finishes.", "请在浏览器里完成登录。授权完成后会继续配置。";
-    login_wait_bigmodel: "Waiting for BigModel authorization", "等待 BigModel 授权";
-    login_wait_bigmodel_detail: "Complete sign-in in your browser. Authorization is detected automatically.", "请在浏览器里完成登录，授权成功后会自动继续配置。";
-    login_wait_status: "Waiting for browser authorization...", "正在等待浏览器授权...";
-    login_wait_help: "{Esc} cancels and returns to setup choices.", "按 {Esc} 取消，并返回配置方式选择。";
-    login_cancelling: "Cancelling...", "正在取消...";
-    login_cancelled: "Login cancelled. Choose a setup method.", "已取消登录。请选择配置方式。";
-    login_key_zai: "Enter Z.AI Coding Plan API Key", "输入 Z.AI Coding Plan API Key";
-    login_key_bigmodel: "Enter BigModel Coding Plan API Key", "输入 BigModel Coding Plan API Key";
-    login_key_hidden: "Paste the key here. It is hidden while typing.", "在这里粘贴 key，输入时会隐藏显示。";
-    login_key_placeholder: "Paste API key", "粘贴 API key";
-    login_key_status: "Enter the API key, then press Enter.", "输入 API key 后按 Enter。";
-    login_key_help: "{Enter} saves the key. {Esc} returns to setup choices.", "按 {Enter} 保存 key，按 {Esc} 返回配置方式选择。";
-    login_key_empty: "API key is required.", "API key 不能为空。";
-    login_key_cleared: "API key input cleared.", "已清空 API key 输入。";
-    login_key_cancelled: "API key entry cancelled. Choose a setup method.", "已取消 API key 输入。请选择配置方式。";
-    login_key_saving: "Saving API key...", "正在保存 API key...";
 }
 
 pub fn strings(lang: Lang) -> &'static Strings {

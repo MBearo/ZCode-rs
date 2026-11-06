@@ -94,7 +94,7 @@ impl Actor {
             }
         };
         let ack = if self.titles.renames() == job.renames {
-            match self.rename(job.command, name.clone()).await {
+            match self.rename(job.command, name.clone(), None).await {
                 Ack::Accepted { .. } => Ack::Accepted {
                     result: CommandResult::Renamed {
                         message: format!("Session renamed to: {name}"),

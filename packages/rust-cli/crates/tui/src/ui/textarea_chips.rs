@@ -1,5 +1,5 @@
 //! 输入框里的占位文字是一个整体（docs/specs/rust-cli/tui-input.md §3.1，修复线 F26，用户要求）。
-//! 占位文字按文字认（`[Image #N]`、`[Pasted text #N]`、`[Pasted text #N +M lines]`，`]` 前可以有若干 `.`），
+//! 占位文字按文字认（`[Image #N]`、粘贴的帽 `[Pasted · <大小>]`，`]` 前可以有若干 `.`），
 //! ← / → 整块跳过，backspace / delete 整块删除，词移动与 kill 的范围移出占位文字；↑ / ↓ 与单击落在图片里时移到
 //! 较近的一端（只对图片这样做）。
 use super::TextArea;
@@ -7,9 +7,17 @@ use super::TextArea;
 /// `s` 以占位文字开头时它的字节长度。
 fn chip_len(s: &str) -> Option<usize> {
     let rest = s.strip_prefix('[')?;
-    let rest = rest
-        .strip_prefix("Image #")
-        .or_else(|| rest.strip_prefix("Pasted text #"))?;
+    // 粘贴的帽：`[Pasted · 40 lines]`、`[Pasted · 1.2k chars]`（Puffin 的标签；以前是 `[Pasted text #N +M lines]`）。
+    if let Some(size) = rest.strip_prefix("Pasted · ") {
+        let end = size.find(']')?;
+        let (n, unit) = size[..end].split_once(' ')?;
+        let number = !n.is_empty()
+            && n.chars()
+                .all(|c| c.is_ascii_digit() || matches!(c, ',' | '.' | 'k' | 'M'));
+        return (number && matches!(unit, "lines" | "chars"))
+            .then_some(1 + "Pasted · ".len() + end + 1);
+    }
+    let rest = rest.strip_prefix("Image #")?;
     let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
     if digits == 0 {
         return None;
@@ -43,21 +51,26 @@ pub fn chips(text: &str) -> Vec<(usize, usize)> {
 }
 
 impl TextArea {
+    /// 占位文字与整块的提及（`textarea_marks.rs`）：按键一样整块跳过、整块删除。
+    fn blocks(&self) -> Vec<(usize, usize)> {
+        let mut all = chips(&self.text);
+        all.extend(self.mark_ranges());
+        all
+    }
+
     /// 结束在 `at` 的占位文字。
     pub(super) fn chip_ending_at(&self, at: usize) -> Option<(usize, usize)> {
-        chips(&self.text).into_iter().find(|(_, end)| *end == at)
+        self.blocks().into_iter().find(|(_, end)| *end == at)
     }
 
     /// 开始在 `at` 的占位文字。
     pub(super) fn chip_starting_at(&self, at: usize) -> Option<(usize, usize)> {
-        chips(&self.text)
-            .into_iter()
-            .find(|(start, _)| *start == at)
+        self.blocks().into_iter().find(|(start, _)| *start == at)
     }
 
     /// `at` 在里面（不在两端）的占位文字。
     fn chip_containing(&self, at: usize) -> Option<(usize, usize)> {
-        chips(&self.text)
+        self.blocks()
             .into_iter()
             .find(|(start, end)| *start < at && at < *end)
     }

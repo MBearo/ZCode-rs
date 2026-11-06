@@ -93,6 +93,7 @@ async fn team_and_personal_exchanges_match_the_app() {
                 bigmodel_team_plans: format!("{}/coding-plan/team/plans", server.url()),
                 // App 的 `ZCODE_VERSION` 在源码检出里是 0.0.0-dev。
                 client_version: "0.0.0-dev".to_owned(),
+                usage_quota_url: None,
             },
         );
         let team = team_of(input);
@@ -160,6 +161,7 @@ async fn team_locations_are_checked_and_re_resolved() {
             bigmodel_api: server.url(),
             bigmodel_team_plans: format!("{}/coding-plan/team/plans", server.url()),
             client_version: "0.1.0-test".to_owned(),
+            usage_quota_url: None,
         },
     );
     let team = TeamProject {
@@ -244,6 +246,7 @@ async fn invalid_team_keys_are_rejected() {
             bigmodel_api: server.url(),
             bigmodel_team_plans: format!("{}/coding-plan/team/plans", server.url()),
             client_version: "0.1.0-test".to_owned(),
+            usage_quota_url: None,
         },
     );
     let team = TeamProject {

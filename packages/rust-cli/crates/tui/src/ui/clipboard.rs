@@ -202,6 +202,30 @@ pub fn notice(route: CopyRoute, text: &str, vars: &Vars, lang: Lang) -> Notice {
     Notice { text, duration }
 }
 
+/// 不是系统剪贴板时，复制的途径怎样粘贴回来的一句（HEAD 的途径说明，tui-select.md §3.3）：写在输入框上方安静的一行
+/// （runner 的 `copied`，与 VS Code 的警告同一处）。槽里照 Puffin 只说 `Copied N characters`，这一句不带字数。
+/// 系统剪贴板时没有这一句（Puffin 没有，画面同 Puffin）。
+pub fn route_line(route: CopyRoute, vars: &Vars, lang: Lang) -> Option<String> {
+    let key = || native_key(vars, cfg!(target_os = "macos"));
+    match (route, lang) {
+        (CopyRoute::Native, _) => None,
+        (CopyRoute::TmuxBuffer, Lang::En) => {
+            Some("Copied to the tmux buffer · paste with prefix + ]".to_owned())
+        }
+        (CopyRoute::TmuxBuffer, Lang::Zh) => {
+            Some("已复制到 tmux 缓冲区 · 用 prefix + ] 粘贴".to_owned())
+        }
+        (CopyRoute::Osc52, Lang::En) => Some(format!(
+            "Sent via OSC 52 · if paste fails, hold {} while selecting for native copy",
+            key()
+        )),
+        (CopyRoute::Osc52, Lang::Zh) => Some(format!(
+            "已通过 OSC 52 发送 · 粘贴不出来时按住 {} 再拖选，用终端自己的复制",
+            key()
+        )),
+    }
+}
+
 fn chars(count: usize) -> &'static str {
     if count == 1 { "char" } else { "chars" }
 }

@@ -9,7 +9,10 @@ use rust_cli_kernel_api::env_files::{FileKind, StatFile};
 use rust_cli_kernel_api::env_git::{gitdir_pointer, marks_git_root};
 use rust_cli_kernel_api::ids::EnvironmentId;
 use rust_cli_kernel_api::machine::Files;
-use rust_cli_kernel_api::panels::{ProjectSession, ProjectSessions};
+use rust_cli_kernel_api::panels::{
+    ProjectSession, ProjectSessions, SessionActivity, SessionPresence,
+};
+use rust_cli_kernel_api::peers::PeerStatus;
 use rust_cli_kernel_api::session_api::{Command, CommandEnvelope, SessionView};
 use rust_cli_kernel_api::store::{SessionQuery, SessionRecord};
 
@@ -143,6 +146,37 @@ async fn branch(files: &dyn Files, environment: &EnvironmentId, root: &EnvPath) 
 }
 
 impl LocalKernel {
+    /// 把登记处合进行（tui-cockpit.md §1）：别的进程的状态只有这里有；本进程的时刻与现场也从自己的登记读。
+    /// 跨会话关闭时登记是空的，行上只有 actor 的 view 给的状态。
+    async fn join_registry(&self, sessions: &mut [ProjectSession]) {
+        let port = &self.peers.port;
+        let others = port.peers().await.into_iter().map(|record| (false, record));
+        let own = port.own().await.into_iter().map(|record| (true, record));
+        let mut live: HashMap<_, _> = others
+            .chain(own)
+            .filter_map(|(here, record)| Some((record.session.clone()?, (here, record))))
+            .collect();
+        for session in sessions {
+            let Some((here, record)) = live.remove(&session.record.id) else {
+                continue;
+            };
+            if !here {
+                session.activity = record.status.map(|status| match status {
+                    PeerStatus::Waiting => SessionActivity::NeedsInput,
+                    PeerStatus::Busy => SessionActivity::Working,
+                    PeerStatus::Idle => SessionActivity::Ready,
+                });
+            }
+            session.presence = Some(SessionPresence {
+                here,
+                address: record.address,
+                since_ms: record.status_since_ms,
+                presence: record.presence,
+                tmux: record.tmux,
+            });
+        }
+    }
+
     /// 打开着的会话（不在会话表里时为 None）。加载中、关闭中的先等它稳定（session-lifecycle.md §3.3.1，F33）：
     /// 关闭中的 actor 不再接命令，关完之后才能直接读写存储。
     async fn open(&self, session: &SessionId) -> Option<Arc<Session>> {
@@ -187,6 +221,7 @@ impl LocalKernel {
                     activity: view.as_ref().map(activity),
                     last_reply: view.as_ref().and_then(last_reply),
                     branch: None,
+                    presence: None,
                     record,
                 }
             })
@@ -197,6 +232,7 @@ impl LocalKernel {
                 activity: Some(activity(&view)),
                 last_reply: last_reply(&view),
                 branch: None,
+                presence: None,
                 record: SessionRecord {
                     id,
                     title: view.meta.title.clone(),
@@ -207,6 +243,7 @@ impl LocalKernel {
                 },
             });
         }
+        self.join_registry(&mut sessions).await;
         // 每个目录读一次分支。
         let mut branches: HashMap<EnvPath, Option<String>> = HashMap::new();
         for session in &mut sessions {
@@ -279,7 +316,7 @@ impl LocalKernel {
                 [loaded.earlier, loaded.messages].concat(),
                 loaded
                     .model
-                    .unwrap_or_else(|| self.defaults.selection.clone()),
+                    .unwrap_or_else(|| self.defaults.selection.current()),
                 execution.mode,
             )
         })

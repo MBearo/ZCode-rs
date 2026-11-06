@@ -4,13 +4,13 @@ use super::super::{Composer, InputMode};
 fn the_editor_sees_expanded_pastes_and_they_fold_back() {
     let mut composer = Composer::default();
     composer.area.set_text("see ");
-    let long = "one\ntwo\nthree";
-    composer.paste_text(long);
+    let long = "one\ntwo\nthree\nfour\nfive\nsix";
+    composer.paste_text(long, 80);
     let expanded = composer.expanded_text();
     assert_eq!(expanded, format!("see {long}"));
     // 编辑器加了一个末尾换行：去掉；粘贴内容原样还在：折回占位文字。
     composer.load_edited(&format!("please {expanded}\n"));
-    assert_eq!(composer.area.text(), "please see [Pasted text #1 +3 lines]");
+    assert_eq!(composer.area.text(), "please see [Pasted · 6 lines]");
     // 以空行结尾时不去掉换行；内容改过的粘贴不再折回。
     composer.load_edited("rewritten\n\n");
     assert_eq!(composer.area.text(), "rewritten\n\n");
@@ -22,11 +22,11 @@ fn the_editor_sees_expanded_pastes_and_they_fold_back() {
 #[test]
 fn crlf_from_the_editor_is_normalized_like_a_paste() {
     let mut composer = Composer::default();
-    composer.paste_text("one\r\ntwo\r\nthree");
+    composer.paste_text("one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix", 80);
     let expanded = composer.expanded_text();
-    assert_eq!(expanded, "one\ntwo\nthree");
-    composer.load_edited("ask: one\r\ntwo\r\nthree\r\n");
-    assert_eq!(composer.area.text(), "ask: [Pasted text #1 +3 lines]");
+    assert_eq!(expanded, "one\ntwo\nthree\nfour\nfive\nsix");
+    composer.load_edited("ask: one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\n");
+    assert_eq!(composer.area.text(), "ask: [Pasted · 6 lines]");
     composer.load_edited("a\r\nb\rc\r\n\r\n");
     assert_eq!(composer.area.text(), "a\nb\nc\n\n");
 }

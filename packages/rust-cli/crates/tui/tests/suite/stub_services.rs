@@ -9,7 +9,7 @@ use rust_cli_tui::services::{CancellationToken, RedactedString, WorkspaceTrust};
 use rust_cli_tui::trust::TrustPrompt;
 use rust_cli_tui::{
     Account, Authorize, Clipboard, Configured, CopyRoute, Editor, Family, ImageBytes, LocaleStore,
-    LoginFailure, Preferences, Services, UiLocale, UiTheme,
+    LoginFailure, Preferences, Services, UiLocale,
 };
 use tokio::sync::oneshot;
 
@@ -25,10 +25,6 @@ impl LocaleStore for Stub {
 }
 
 impl Preferences for Stub {
-    fn save_theme(&self, _theme: UiTheme) -> BoxFuture<'static, Result<String, String>> {
-        Box::pin(async { Ok(SAVED_TO.to_owned()) })
-    }
-
     fn save_default_model(
         &self,
         _selection: ModelSelection,
@@ -94,7 +90,7 @@ impl WorkspaceTrust for Stub {
     }
 }
 
-/// 全是替身的服务；没有远端机器。
+/// 全是替身的服务；没有远端机器，本分支的可选端口（存储、看板、压缩阈值、文件长度、套餐用量、看文件）都没有。
 pub fn services() -> Services {
     let stub = Arc::new(Stub);
     Services {
@@ -105,6 +101,12 @@ pub fn services() -> Services {
         preferences: stub.clone(),
         trust: stub,
         machines: None,
+        stores: None,
+        cockpit: None,
+        compact_at: None,
+        file_len: None,
+        plan_usage: None,
+        peek_file: None,
     }
 }
 

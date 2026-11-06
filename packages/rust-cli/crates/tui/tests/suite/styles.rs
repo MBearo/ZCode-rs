@@ -1,9 +1,9 @@
 //! 配色与共用组件（docs/specs/rust-cli/tui.md §7.4，修复线 F26，用户决定）：选中行的
 //! 底色条与 `›`、按键提示的按键与说明、快捷键面板在输入框上面、模型名与路径的颜色；深浅两种背景、中英文。
 //! 旧代码的选中行是强调色的 `❯ `、提示整行 dim、快捷键面板在输入框下面，这些测试都失败。
-use ratatui::buffer::Buffer;
-use ratatui::style::{Color, Modifier};
-use rust_cli_tui::{ColorLevel, Palette};
+use super::support::Shot;
+use rust_cli_tui::{ColorLevel, Colors, Ink};
+use rust_cli_tui_kit::render::{Color, attr};
 
 use super::support::{GatedModel, Setup, Ui, with_ui};
 
@@ -15,178 +15,182 @@ fn setup(background: (u8, u8, u8), foreground: (u8, u8, u8), lang: &'static str)
         width: 100,
         height: 30,
         lang,
-        palette: Palette::new(ColorLevel::TrueColor, Some(background))
+        colors: Colors::new(ColorLevel::TrueColor, Some(background))
             .with_foreground(Some(foreground)),
         ..Setup::default()
     }
 }
 
-fn frame(ui: &Ui) -> Buffer {
-    ui.buffer.lock().unwrap().clone().unwrap()
+fn frame(ui: &Ui) -> Shot {
+    ui.frame()
 }
 
 /// 第一处 `needle` 所在的（列，行）。
-fn find(buffer: &Buffer, needle: &str) -> Option<(u16, u16)> {
-    let area = buffer.area;
-    (area.top()..area.bottom()).find_map(|y| {
-        let cells: Vec<(u16, String)> = (area.left()..area.right())
-            .map(|x| (x, buffer[(x, y)].symbol().to_owned()))
-            .collect();
-        let row: String = cells.iter().map(|(_, s)| s.as_str()).collect();
-        let at = row.find(needle)?;
-        // 字节位置换成列：数前面的格子。
-        let mut bytes = 0;
-        cells
-            .iter()
-            .find(|(_, s)| {
-                let hit = bytes >= at;
-                bytes += s.len();
-                hit
-            })
-            .map(|(x, _)| (*x, y))
-    })
+fn find(buffer: &Shot, needle: &str) -> Option<(u16, u16)> {
+    buffer.find(needle)
 }
 
-/// 选中行：`› ` 开头，整行铺底色条（行尾的格子也是），名字粗体。`row` 是选中行里的文字，`name` 是其中的名字。
-async fn assert_selected_bar(ui: &mut Ui, row: &str, name: &str, bar: Color) {
-    let wanted = format!("› {row}");
+/// 选中的条目（照 Puffin 的层，tui-kit.md §3.4、§4.2）：没有 `›` 与底色条，名字取 `Ink::selection`（rich 是 brand 的字，
+/// plain 再加粗）；底色与板的同一行一样（rich 是 panel，plain 是终端底）。`name` 是条目的名字，从第 3 列起、后面隔三格。
+async fn assert_chosen(ui: &mut Ui, name: &str, ink: Ink) {
+    let wanted = format!("   {name}   ");
     ui.wait(&wanted.clone(), move |s| s.contains(&wanted)).await;
     let buffer = frame(ui);
-    let (x, y) = find(&buffer, &format!("› {row}")).unwrap();
-    let offset = row.find(name).unwrap() as u16;
-    let cell = &buffer[(x + 2 + offset, y)];
-    assert_eq!(cell.bg, bar, "the bar under the name");
-    assert!(cell.modifier.contains(Modifier::BOLD), "the name is bold");
-    let last = &buffer[(buffer.area.right() - 1, y)];
-    assert_eq!(last.bg, bar, "the bar reaches the end of the row");
+    let (x, y) = find(&buffer, &format!("   {name}   ")).unwrap();
+    let cell = &buffer[(x + 3, y)];
+    let selection = ink.selection();
+    assert_eq!(
+        cell.fg,
+        selection.fg_color(),
+        "the selection ink on the name"
+    );
+    assert_eq!(
+        cell.has(attr::BOLD),
+        selection.has_attr(attr::BOLD),
+        "bold only in plain"
+    );
+    assert_eq!(cell.bg, buffer[(0, y)].bg, "no bar: the layer's ground");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn pickers_and_popups_share_the_selection_bar_in_both_themes() {
-    for (background, foreground, bar) in [
-        (DARK, LIGHT, Color::Rgb(99, 168, 248)),
-        (LIGHT, DARK, Color::Rgb(164, 205, 251)),
-    ] {
+async fn pickers_and_popups_share_the_chosen_ink_in_both_themes() {
+    for (background, foreground) in [(DARK, LIGHT), (LIGHT, DARK)] {
+        let bar = Ink::new(ColorLevel::TrueColor, Some(foreground), Some(background));
         let model = GatedModel::scripted(Vec::new());
         with_ui(
             model,
             setup(background, foreground, "en_US.UTF-8"),
             |mut ui| async move {
                 ui.wait_for("Ask before changes").await;
-                // `/mode` 的选择器（通用列表；工作线 F76 起是 App 的三个模式，当前的变更前确认在第 1 行）。
+                // `/mode` 的选择器（通用列表；工作线 F76 起是 App 的三个模式，当前的变更前确认在第 1 行，打开时选中它）。
                 ui.submit("/mode");
-                assert_selected_bar(&mut ui, "1. Ask before changes", "Ask before changes", bar)
-                    .await;
+                assert_chosen(&mut ui, "Ask before changes", bar).await;
                 ui.key(crossterm::event::KeyCode::Esc);
-                // 斜杠命令的弹出列表。
-                ui.type_text("/he");
-                assert_selected_bar(&mut ui, "/help", "/help", bar).await;
+                // esc 留着草稿 `/mode `（tui-kit.md §4.0「板」）：清掉再打。
+                ui.clear();
+                // 斜杠命令的弹出列表：S2 起是 Puffin 的命令架（tui-kit.md §4.2「斜杠命令」），没有底色条——选中的名字
+                // brand、描述 fg2。
+                // `/he` 列出 `/help` 所指的 `/keys`（命令架只写命令名，Puffin `shelf::matches`）。
+                ui.type_text("/ke");
+                ui.wait_for("/keys").await;
+                let buffer = frame(&ui);
+                let (x, y) = find(&buffer, "/keys").unwrap();
+                assert_eq!(buffer[(x, y)].fg, bar.theme.brand, "the chosen name");
+                let desc = (x + 5..buffer.area.right())
+                    .find(|&c| buffer[(c, y)].symbol() != " ")
+                    .unwrap();
+                assert_eq!(
+                    buffer[(desc, y)].fg,
+                    bar.theme.fg2.fg_color(),
+                    "its description"
+                );
             },
         )
         .await;
     }
 }
 
+/// 按键提示照 Puffin 的槽（tui-kit.md §3.8 的转换示例，docs/puffin-tui.md §4.2「按键提示（槽）」）：键 `fg2`、标签 `fg3`。
+/// 以前是粗体的键与 (153,153,153) 的说明（修复线 F26）。
 #[tokio::test(flavor = "multi_thread")]
-async fn key_hints_are_bold_keys_with_gray_labels() {
+async fn key_hints_take_the_puffin_slot_inks() {
+    let ink = Ink::new(ColorLevel::TrueColor, Some(LIGHT), Some(DARK));
+    let key_fg = Some(ink.theme.fg2.fg_color());
+    let label_fg = Some(ink.theme.fg3.fg_color());
+    assert_ne!(key_fg, label_fg);
     let model = GatedModel::scripted(Vec::new());
     with_ui(
         model,
         setup(DARK, LIGHT, "en_US.UTF-8"),
         |mut ui| async move {
-            ui.wait_for("? for shortcuts").await;
+            ui.wait_for("? keys").await;
             let buffer = frame(&ui);
-            let (x, y) = find(&buffer, "? for shortcuts").unwrap();
+            let (x, y) = find(&buffer, "? keys").unwrap();
             let key = &buffer[(x, y)];
-            assert!(key.modifier.contains(Modifier::BOLD), "{key:?}");
-            assert!(!key.modifier.contains(Modifier::DIM), "{key:?}");
+            assert_eq!(Some(key.fg), key_fg, "{key:?}");
+            assert!(!key.has(attr::BOLD), "{key:?}");
             let label = &buffer[(x + 2, y)];
-            assert_eq!(label.fg, Color::Rgb(153, 153, 153), "{label:?}");
-            assert!(!label.modifier.contains(Modifier::BOLD), "{label:?}");
-            // 列表底部的提示也一样。
-            ui.submit("/mode");
-            ui.wait_for("Enter to select · Esc to cancel").await;
+            assert_eq!(Some(label.fg), label_fg, "{label:?}");
+            // 层的槽也一样：模型选择器的 `←→ effort`（Puffin `picker_open` 的槽）；槽变了时淡入，等它画完。
+            ui.submit("/model");
+            ui.wait_for("←→ effort").await;
+            ui.settle().await;
             let buffer = frame(&ui);
-            let (x, y) = find(&buffer, "Enter to select").unwrap();
-            assert!(buffer[(x, y)].modifier.contains(Modifier::BOLD));
-            assert_eq!(buffer[(x + 6, y)].fg, Color::Rgb(153, 153, 153));
+            let (x, y) = find(&buffer, "←→ effort").unwrap();
+            assert_eq!(Some(buffer[(x, y)].fg), key_fg);
+            assert_eq!(Some(buffer[(x + 3, y)].fg), label_fg);
         },
     )
     .await;
 }
 
+/// `?` 按键表（S2 起照 Puffin 的按键表，kit `key_hints::sheet_of`，tui-kit.md §4.2「? 面板」）：在输入框的板上、输入行
+/// 之上，三组并排、组名在同一行；不再写「Keyboard shortcuts」的标题（§6）。打出的 `?` 在草稿里，槽空着（Puffin
+/// `sheet_open`，tui-kit.md §4.0「板」）；以前 `?` 不进草稿，槽写 `esc to close`。
 #[tokio::test(flavor = "multi_thread")]
 async fn the_shortcuts_panel_sits_above_the_input_box() {
-    for (lang, title, group, close) in [
-        (
-            "en_US.UTF-8",
-            "Keyboard shortcuts",
-            "Transcript",
-            "esc to close",
-        ),
-        ("zh_CN.UTF-8", "快捷键", "记录", "esc 关闭"),
+    for (lang, mode, group) in [
+        ("en_US.UTF-8", "Ask before changes", "Anywhere"),
+        ("zh_CN.UTF-8", "变更前确认", "任何时候"),
     ] {
         let model = GatedModel::scripted(Vec::new());
         with_ui(model, setup(DARK, LIGHT, lang), |mut ui| async move {
-            // footer 就绪：权限模式的符号（权限模式后面不再有 `shift+tab` 提示，2026-10-20）。
-            ui.wait("the footer", |s| s.contains("⏸")).await;
+            ui.wait("the status bar", |s| s.contains(mode)).await;
             ui.key(crossterm::event::KeyCode::Char('?'));
-            // 等关闭的提示（footer 平时的 `? for shortcuts` 里也有“快捷键”）。
-            let screen = ui.wait_for(close).await;
-            assert!(screen.contains(group), "{screen}");
-            assert!(screen.contains(title), "{screen}");
+            let screen = ui.wait_for(group).await;
             let lines: Vec<&str> = screen.lines().collect();
-            let panel = lines.iter().position(|l| l.trim() == title).unwrap();
-            let input = lines.iter().position(|l| l.starts_with("❯")).unwrap();
-            assert!(panel < input, "the panel is above the input box:\n{screen}");
-            // 三组并排：组名在同一行。
-            let groups = lines[panel + 2];
-            assert!(groups.contains(group), "{screen}");
-            let buffer = frame(&ui);
-            let (x, y) = find(&buffer, "shift+enter").unwrap();
+            let groups = lines.iter().position(|l| l.contains(group)).unwrap();
+            let input = lines.iter().position(|l| l.starts_with(" ›")).unwrap();
             assert!(
-                buffer[(x, y)].modifier.contains(Modifier::BOLD),
-                "keys are bold"
+                groups < input,
+                "the sheet is above the input row:\n{screen}"
+            );
+            assert_eq!(lines[input].trim_end(), " › ?", "{screen}");
+            let buffer = frame(&ui);
+            let (x, y) = find(&buffer, "⇧⏎").unwrap();
+            // 按键用 `Ink::key`（Puffin 按键提示的键：`fg2`，tui-kit.md §3.4），期望值经桥求。
+            let key = Ink::new(ColorLevel::TrueColor, Some(LIGHT), Some(DARK)).key();
+            assert_eq!(
+                Some(buffer[(x, y)].fg),
+                Some(key.fg_color()),
+                "keys use the key ink"
             );
         })
         .await;
     }
 }
 
+/// 启动头是 Puffin 的欢迎块（tui-kit.md §4.2「logo」）：`ZCode` 粗体、版本 fg3、目录 fg2（期望值经 `Ink` 求）；浅色背景时按
+/// 对比度调深，不同于深色背景的取值。
 #[tokio::test(flavor = "multi_thread")]
-async fn the_model_and_the_path_use_the_status_line_colors() {
-    for (background, foreground, model_rgb) in [
-        (DARK, LIGHT, Color::Rgb(246, 226, 183)),
-        ((30, 30, 46), (205, 214, 244), Color::Rgb(246, 226, 183)),
+async fn the_welcome_block_uses_the_puffin_inks() {
+    let ink_of = |background, foreground| {
+        let ink = Ink::new(ColorLevel::TrueColor, Some(foreground), Some(background));
+        (ink.theme.fg2.fg_color(), ink.theme.fg3.fg_color())
+    };
+    let (dark_path, _) = ink_of(DARK, LIGHT);
+    for (background, foreground) in [
+        (DARK, LIGHT),
+        ((30, 30, 46), (205, 214, 244)),
+        (LIGHT, DARK),
     ] {
+        let (fg2, fg3) = ink_of(background, foreground);
+        assert_ne!(fg2, fg3, "fg2 and fg3 differ");
         let model = GatedModel::scripted(Vec::new());
         with_ui(
             model,
             setup(background, foreground, "en_US.UTF-8"),
             |mut ui| async move {
-                let screen = ui.wait_for("scripted · ~/project").await;
-                assert!(screen.contains("scripted"), "{screen}");
+                ui.wait_for("ZCode  0.1.0").await;
                 let buffer = frame(&ui);
-                let (x, y) = find(&buffer, "scripted · ~/project").unwrap();
-                assert_eq!(buffer[(x, y)].fg, model_rgb, "the model in the header");
-                let (px, py) = find(&buffer, "~/project").unwrap();
-                assert_eq!(buffer[(px, py)].fg, Color::Rgb(171, 223, 167), "the path");
+                let (x, y) = find(&buffer, "ZCode  0.1.0").unwrap();
+                assert!(buffer[(x, y)].has(attr::BOLD), "ZCode is bold");
+                assert_eq!(buffer[(x + 7, y)].fg, fg3, "the version");
+                assert_eq!(buffer[(x, y + 1)].fg, fg2, "the folder");
+                assert!(matches!(buffer[(x, y + 1)].fg, Color::TrueColor(..)));
             },
         )
         .await;
     }
-    // 浅色背景：颜色按对比度调深，不同于深色背景的取值。
-    let model = GatedModel::scripted(Vec::new());
-    with_ui(
-        model,
-        setup(LIGHT, DARK, "en_US.UTF-8"),
-        |mut ui| async move {
-            ui.wait_for("scripted · ~/project").await;
-            let buffer = frame(&ui);
-            let (x, y) = find(&buffer, "scripted · ~/project").unwrap();
-            assert_ne!(buffer[(x, y)].fg, Color::Rgb(246, 226, 183));
-            assert!(matches!(buffer[(x, y)].fg, Color::Rgb(..)));
-        },
-    )
-    .await;
+    assert_ne!(ink_of(LIGHT, DARK).0, dark_path, "light backgrounds darken");
 }

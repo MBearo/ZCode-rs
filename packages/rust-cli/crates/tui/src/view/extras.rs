@@ -2,7 +2,7 @@
 //! 按模型累计的用量。都是内核事件的投影，随视图一起丢弃与重建；这里不保存内核以外的事实。
 use std::collections::BTreeMap;
 
-use rust_cli_kernel_api::agents::{TaskRecord, TaskStatus};
+use rust_cli_kernel_api::agents::TaskRecord;
 use rust_cli_kernel_api::env_shell::BackgroundStatus;
 use rust_cli_kernel_api::ids::{ToolUseId, TurnId};
 use rust_cli_kernel_api::message::Usage;
@@ -151,6 +151,11 @@ pub(super) struct Extras {
     pub(super) usage: BTreeMap<String, Usage>,
     /// 后台工作的终态（`BackgroundWork{work, status}`）：Shell 详情在内核已不认识它时用（tui-panels.md §3.3）。
     pub(super) ended: BTreeMap<String, BackgroundStatus>,
+    /// 回合的数与工作的毫秒（`/stats` 的卡，Puffin 投影的 `usage.turns`）：实时的回合结束时加一；冷加载的回合数是用户
+    /// 消息的条数，时长不知道（0）。
+    pub(super) turns: (u32, u64),
+    /// 最近一次模型调用的输入（含缓存）加输出（Puffin `usage.last_call_tokens`：没有窗口时 `/stats` 的卡说它）。
+    pub(super) last_call: Option<u64>,
 }
 
 impl Transcript {
@@ -172,6 +177,16 @@ impl Transcript {
     /// 本次视图里每个有改动的回合（`FileChanges`）。
     pub fn turn_changes(&self) -> &[TurnChanges] {
         &self.extras.turn_changes
+    }
+
+    /// 回合的数与工作的毫秒（`/stats` 的卡，tui-kit.md §4.2「会话的数字」）。
+    pub fn turn_totals(&self) -> (u32, u64) {
+        self.extras.turns
+    }
+
+    /// 最近一次模型调用的 token（输入含缓存，加输出）。
+    pub fn last_call_tokens(&self) -> Option<u64> {
+        self.extras.last_call
     }
 
     /// 按模型累计的用量（assistant 消息的 `usage`）。
@@ -233,6 +248,12 @@ impl Transcript {
             return;
         };
         *self.extras.usage.entry(model.to_owned()).or_default() += usage;
+        self.extras.last_call = Some(
+            usage.input_tokens
+                + usage.cache_creation_input_tokens
+                + usage.cache_read_input_tokens
+                + usage.output_tokens,
+        );
     }
 
     /// Agent 工具的进度：`{agentId, event}` 折叠进工具行的活动。返回是否认出了它。
@@ -296,19 +317,6 @@ impl Transcript {
             .map(|tool| (tool.name.clone(), tool.input.clone()))
             .collect()
     }
-}
-
-/// 任务状态的统计：（完成，进行中，待办）。
-pub fn task_counts(tasks: &[TaskRecord]) -> (usize, usize, usize) {
-    let done = tasks
-        .iter()
-        .filter(|t| t.status == TaskStatus::Completed)
-        .count();
-    let pending = tasks
-        .iter()
-        .filter(|t| t.status == TaskStatus::Pending)
-        .count();
-    (done, tasks.len() - done - pending, pending)
 }
 
 #[cfg(test)]

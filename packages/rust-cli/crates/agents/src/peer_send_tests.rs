@@ -61,6 +61,10 @@ fn peer(pid: u32, name: &str) -> PeerRecord {
         status: Some(PeerStatus::Busy),
         // 测试的时钟是 1000 ms：启动在 0 ms，`started 1s ago`。
         started_at_ms: 0,
+        session: None,
+        status_since_ms: None,
+        presence: Default::default(),
+        tmux: None,
     }
 }
 

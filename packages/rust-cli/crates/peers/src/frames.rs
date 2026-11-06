@@ -2,6 +2,7 @@
 //! 消息是 `type: user`，回执是 `type: control` / `action: peer_message_status`，另加
 //! 本工程的回复行（接收方的会话提交之后才回 `accepted`，README §6 规则 9）。
 
+use rust_cli_kernel_api::peers::{PeerPresence, TmuxPlace};
 use serde::{Deserialize, Serialize};
 
 /// 登记的版本。
@@ -29,6 +30,14 @@ pub(crate) struct Record {
     pub updated_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_updated_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "is_empty_presence")]
+    pub presence: PeerPresence,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tmux: Option<TmuxPlace>,
+}
+
+fn is_empty_presence(presence: &PeerPresence) -> bool {
+    *presence == PeerPresence::default()
 }
 
 /// `type: user` 的 `message`。

@@ -50,7 +50,7 @@ async fn a_pasted_image_reaches_the_model_after_the_text() {
             ui.wait_for("what is [Image #1]").await;
             ui.submit("please");
             ui.wait("the reply", |s| {
-                s.contains("a tiny png") && !s.contains("esc to interrupt")
+                s.contains("a tiny png") && !s.contains("esc stop")
             })
             .await;
         },
@@ -72,7 +72,7 @@ async fn an_empty_clipboard_explains_and_paths_become_images() {
     with_ui(model, setup(None), |mut ui| async move {
         ui.wait_for("Ask before changes").await;
         paste_key(&ui);
-        let key = if cfg!(windows) { "alt+v" } else { "ctrl+v" };
+        let key = if cfg!(windows) { "Alt+V" } else { "^V" };
         ui.wait_for(&format!(
             "No image found in clipboard. Use {key} to paste images."
         ))
@@ -124,7 +124,7 @@ async fn backspace_removes_the_whole_placeholder_and_its_image() {
             assert!(!screen.contains("#1"), "{screen}");
             ui.submit("it");
             ui.wait("the first reply", |s| {
-                s.contains("no picture") && !s.contains("esc to interrupt")
+                s.contains("no picture") && !s.contains("esc stop")
             })
             .await;
             // 撤销找回：再粘一张，删掉，ctrl+_ 撤销，图片一起回来。
@@ -137,7 +137,7 @@ async fn backspace_removes_the_whole_placeholder_and_its_image() {
             ui.wait_for("[Image #2]").await;
             ui.key(KeyCode::Enter);
             ui.wait("the second reply", |s| {
-                s.contains("with picture") && !s.contains("esc to interrupt")
+                s.contains("with picture") && !s.contains("esc stop")
             })
             .await;
         },

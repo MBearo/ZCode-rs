@@ -72,7 +72,7 @@ async fn kernel(dir: &str, base_url: Option<&str>) -> Result<LocalKernel> {
         ids,
     };
     let defaults = Defaults {
-        selection: ModelSelection::new(String::new(), String::new()),
+        selection: ModelSelection::new(String::new(), String::new()).into(),
         mode: PermissionMode::BypassPermissions,
         max_turns: None,
         search_tools: false,

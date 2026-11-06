@@ -1,19 +1,13 @@
-//! `/goal` 面板与 `goal_status` 行（goal.md §6）：三种面板、三种行、中英文。
-use rust_cli_kernel_api::goal::{ActiveGoal, GoalStatus, GoalView};
+//! `goal_status` 行（goal.md §6）：三种行、中英文。`/goal` 的卡在 cards.rs。
+use rust_cli_kernel_api::goal::GoalStatus;
+
+use rust_cli_tui_kit::render::attr;
 
 use super::*;
-use crate::ui::palette::{ColorLevel, Palette};
+use crate::ui::probe::{ColorLevel, Colors};
 
-fn text(lines: &[Line<'_>]) -> Vec<String> {
-    lines
-        .iter()
-        .map(|line| {
-            line.spans
-                .iter()
-                .map(|span| span.content.as_ref())
-                .collect()
-        })
-        .collect()
+fn text(lines: &[StyledLine]) -> Vec<String> {
+    lines.iter().map(StyledLine::plain).collect()
 }
 
 fn status(met: bool, failed: bool) -> GoalStatus {
@@ -30,9 +24,10 @@ fn status(met: bool, failed: bool) -> GoalStatus {
 }
 
 fn with_ctx<T>(lang: Lang, run: impl FnOnce(&Ctx<'_>) -> T) -> T {
-    let palette = Palette::new(ColorLevel::Ansi16, None);
+    let colors = Colors::new(ColorLevel::Ansi16, None);
+    let ink = colors.ink();
     let ctx = Ctx {
-        palette: &palette,
+        ink: &ink,
         lang,
         width: 80,
         expanded: false,
@@ -42,6 +37,7 @@ fn with_ctx<T>(lang: Lang, run: impl FnOnce(&Ctx<'_>) -> T) -> T {
         workspace_label: "~/project",
         version: "0.1.0",
         mcp_machines: &[],
+        skills: &[],
         machines: &[],
         markdown: None,
     };
@@ -67,71 +63,37 @@ fn status_rows_in_both_languages() {
             text(&status_lines(&status(false, true), ctx)),
         ]
     });
-    assert_eq!(
-        en[0],
-        [format!("{BULLET} Goal not yet met\u{2026} continuing")]
-    );
+    assert_eq!(en[0], [" ◎ Goal not yet met\u{2026} continuing"]);
     assert_eq!(
         en[1],
-        [format!(
-            "{BULLET} Goal achieved (1m \u{b7} 2 turns \u{b7} 1.2k tokens)"
-        )]
+        [" ✓ Goal achieved (1m \u{b7} 2 turns \u{b7} 1.2k tokens)"]
     );
     assert_eq!(
         en[2],
         [
-            format!("{BULLET} Goal could not be achieved (1m \u{b7} 2 turns \u{b7} 1.2k tokens)"),
-            "  no test runner".to_owned(),
+            " ✗ Goal could not be achieved (1m \u{b7} 2 turns \u{b7} 1.2k tokens)",
+            "   │ no test runner",
         ]
     );
+    // 记号与文字的墨（Puffin 的检查行，tui-kit.md §4.2「`/goal`」）：达成 ok 的 ✓，失败 err 的 ✗，继续 brand 的 ◎；句子
+    // 达成与失败 fg2 粗体，继续 fg3；统计 fg3；理由在 line 色的竖线后面，fg2。
+    with_ctx(Lang::En, |ctx| {
+        let theme = &ctx.ink.theme;
+        let row = |s: GoalStatus| status_lines(&s, ctx);
+        let met = row(status(true, false));
+        assert_eq!(met[0].spans[1].style, Style::fg(theme.ok));
+        assert_eq!(met[0].spans[3].style, theme.fg2.with_attr(attr::BOLD));
+        assert_eq!(met[0].spans[4].style, theme.fg3);
+        let failed = row(status(false, true));
+        assert_eq!(failed[0].spans[1].style, Style::fg(theme.err));
+        assert_eq!(failed[1].spans[1].style, theme.line);
+        assert_eq!(failed[1].spans[3].style, theme.fg2);
+        let going = row(status(false, false));
+        assert_eq!(going[0].spans[1].style, Style::fg(theme.brand));
+        assert_eq!(going[0].spans[3].style, theme.fg3);
+    });
     let zh = with_ctx(Lang::Zh, |ctx| {
         text(&status_lines(&status(true, false), ctx))
     });
-    assert_eq!(
-        zh,
-        [format!(
-            "{BULLET} 目标已达成（1m \u{b7} 2 轮 \u{b7} 1.2k token）"
-        )]
-    );
-}
-
-#[test]
-fn the_three_panels() {
-    let active = GoalView {
-        active: Some(ActiveGoal {
-            condition: "tests pass".to_owned(),
-            iterations: 3,
-            set_at_ms: 0,
-            tokens: 2_500,
-            last_reason: Some("  red\nmore detail".to_owned()),
-        }),
-        achieved: None,
-    };
-    let lines = with_ctx(Lang::En, |ctx| {
-        text(&panel_lines(&panel(&active, Lang::En, 120_000), ctx))
-    });
-    assert_eq!(
-        lines,
-        [
-            "◉ Goal active",
-            "  running 2m \u{b7} 3 turns \u{b7} 2.5k tokens",
-            "",
-            "  Goal: tests pass",
-            "  Last check: red",
-            "",
-            "  /goal clear to stop early",
-        ]
-    );
-    let achieved = GoalView {
-        active: None,
-        achieved: Some(status(true, false)),
-    };
-    let panel_zh = panel(&achieved, Lang::Zh, 0);
-    assert_eq!(panel_zh.title, "✓ 目标已达成");
-    assert!(panel_zh.success);
-    assert_eq!(panel_zh.hint, "/goal <condition> 设定新的目标");
-    let none = panel(&GoalView::default(), Lang::En, 0);
-    assert_eq!(none.title, "Goal");
-    assert_eq!(none.rows, [(None, "No goal set".to_owned())]);
-    assert_eq!(none.hint, "/goal <condition> to set one");
+    assert_eq!(zh, [" ✓ 目标已达成（1m \u{b7} 2 轮 \u{b7} 1.2k token）"]);
 }

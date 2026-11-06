@@ -1,9 +1,10 @@
-//! 消息区的显示（docs/specs/rust-cli/tui-display.md §2）：前台子代理的进度与 Done 行、后台子代理与 footer 的
-//! pill、Background 面板（`/tasks`）的停止、任务清单与 ctrl+t。内核是 LocalKernel（agents 的 Agent、TaskCreate 工具）。
+//! 消息区的显示（docs/specs/rust-cli/tui-display.md §2）：前台子代理的进度与 Done 行、后台子代理与任务行、^T 与 `/tasks`
+//! 打开的任务卡（tui-tasks.md）与在卡里停止、任务清单与 ^O 里的整个清单。内核是 LocalKernel（agents 的 Agent、TaskCreate 工具）。
 use crossterm::event::{KeyCode, KeyModifiers};
 use rust_cli_kernel_api::testing::{text_response, tool_use_response};
 use serde_json::json;
 
+use super::agents_tree::list;
 use super::support::{GatedModel, Setup, finish, request_text, send, with_ui};
 
 /// 子代理的请求（system 里有子代理的权限句）。
@@ -40,28 +41,27 @@ async fn a_foreground_agent_shows_its_progress_and_then_done() {
                         "subagent_type": "Explore", "run_in_background": false}),
             ),
         );
-        ui.wait_for("Initializing…").await;
+        // 在跑的子代理是一行调用：点阵、`Agent` 与它的描述（Puffin `tool_row::agent_row`）。以前下面另有
+        // `Initializing…` 与子代理说的话（`│ Checking files`），Puffin 只写它此刻的调用。
+        ui.wait_for("Agent  Find callers").await;
         let mut reply = text_response(&["Checking files"]);
         let tail = reply.split_off(3);
         send(&child, reply);
-        let screen = ui.wait_for("⎿  Checking files").await;
-        assert!(screen.contains("Explore(Find callers)"), "{screen}");
         finish(child, tail);
         finish(last, text_response(&["callers found"]));
+        // 结束之后这一段工作收成一句（Puffin 的收拢）；以前是 `│ Done (0 tool uses · 0 tokens · 0s)`。
         let screen = ui.wait_for("callers found").await;
-        assert!(
-            screen.contains("⎿  Done (0 tool uses · 0 tokens · 0s)"),
-            "{screen}"
-        );
+        assert!(screen.contains("✓ Ran 1 subagent"), "{screen}");
+        assert!(!screen.contains("Checking files"), "{screen}");
     })
     .await;
     assert!(is_subagent(&model.requests()[1]));
 }
 
-/// 修复线 F105（tui-display.md §2.3、D25，用户决定）：在跑的只有后台子代理时 footer 没有 pill（子代理列表已经列出它），
-/// ↓ 直接进入列表；Background 面板从 `/tasks` 打开，在那里停止。旧代码的 footer 写 `· 1 local agent` 与 `↓ to manage`。
+/// 任务行与任务卡（tui-tasks.md §2、§3，用户决定 2026-10-31）：在跑的后台子代理只在输入框上方的一行里数，右沿 `^T all
+/// tasks`；^T 打开任务卡，再按 ^T 或 esc 关上；`/tasks` 也打开它，`^X` 停止选中的子代理。状态栏里没有 pill、没有 `↓`。
 #[tokio::test(flavor = "multi_thread")]
-async fn a_background_agent_has_no_pill_and_stops_from_tasks() {
+async fn a_background_agent_is_counted_and_stops_from_the_card() {
     let (model, senders) = GatedModel::new(4);
     let mut senders: Vec<_> = senders.into_iter().map(Some).collect();
     let probe = model.clone();
@@ -75,8 +75,9 @@ async fn a_background_agent_has_no_pill_and_stops_from_tasks() {
                 &json!({"description": "Review code", "prompt": "Review it slowly"}),
             ),
         );
-        ui.wait_for("Backgrounded agent (↓ to manage · ctrl+o to expand)")
-            .await;
+        // 后台子代理的调用马上结束：这一段工作收成 `Ran 1 subagent`（Puffin 的收拢），以前是
+        // `Backgrounded agent (↓ to manage · ctrl+o to expand)`。
+        ui.wait_for("Ran 1 subagent").await;
         // 主线程的下一次请求与子代理的请求谁先到不定：按请求内容找出主线程那一个，先让它结束。
         let requests = loop {
             let requests = probe.requests();
@@ -90,31 +91,54 @@ async fn a_background_agent_has_no_pill_and_stops_from_tasks() {
             senders[main].take().unwrap(),
             text_response(&["started a review"]),
         );
-        // 子代理的行在 footer 下面；footer 里没有 pill，也没有 `↓ to manage`。
+        // 回合结束后：状态栏里没有 pill，也没有 `↓ to manage`；状态栏下面没有常驻的子代理列表。
         let screen = ui
-            .wait("the subagent row", |s| {
-                s.lines()
-                    .any(|l| l.contains("◯ general-purpose") && l.contains("Review code"))
-                    && !s.contains("esc to interrupt")
+            .wait("the turn to end", |s| {
+                s.contains("started a review") && !s.contains("esc stop")
             })
             .await;
         assert!(!screen.contains("local agent"), "{screen}");
         assert!(!screen.contains("· ↓ to manage"), "{screen}");
-        // ↓ 直接进入子代理列表。
-        ui.key(KeyCode::Down);
-        ui.wait_for("↑/↓ to select").await;
-        ui.key(KeyCode::Esc);
-        ui.wait("the list to lose focus", |s| !s.contains("↑/↓ to select"))
-            .await;
+        assert!(list(&screen).is_empty(), "{screen}");
+        // 任务行：只数，接着是打开卡的键 `↓/^T`（tui-tasks.md §2.2）。
+        let screen = ui.wait_for(" ○ 1 subagent running ").await;
+        let row = screen
+            .lines()
+            .find(|l| l.starts_with(" ○ 1 subagent running "))
+            .unwrap();
+        assert!(row.contains(" running   ↓/^T all tasks"), "{screen}");
+        // ^T 打开任务卡，再按 ^T 关上；esc 也关上。
+        for close in [
+            (KeyCode::Char('t'), KeyModifiers::CONTROL),
+            (KeyCode::Esc, KeyModifiers::NONE),
+        ] {
+            ui.press(KeyCode::Char('t'), KeyModifiers::CONTROL);
+            let card = ui
+                .wait("the subagent row", |s| {
+                    list(s)
+                        .iter()
+                        .any(|l| l.starts_with("   ○ general-purpose  Review code"))
+                })
+                .await;
+            assert!(
+                card.contains("   Subagents 1  ·  Commands  ·  Todos"),
+                "{card}"
+            );
+            assert!(!card.contains(" ○ 1 subagent running "), "{card}");
+            ui.press(close.0, close.1);
+            ui.wait("the card to close", |s| list(s).is_empty()).await;
+        }
+        // `/tasks` 也打开它；选中子代理按 ^X 停止（与 TaskStop 同一条路径）。
         ui.submit("/tasks");
-        let list = ui.wait_for("1 active agent").await;
-        assert!(list.contains("  Background"), "{list}");
-        assert!(
-            list.lines()
-                .any(|l| l.contains("Review code") && l.ends_with("running")),
-            "{list}"
-        );
-        ui.key(KeyCode::Char('x'));
+        ui.wait("the subagent row", |s| {
+            list(s)
+                .iter()
+                .any(|l| l.starts_with("   ○ general-purpose  Review code"))
+        })
+        .await;
+        ui.key(KeyCode::Down);
+        ui.wait_for("⏎ view").await;
+        ui.press(KeyCode::Char('x'), KeyModifiers::CONTROL);
         ui.wait_for("Stopped Review code").await;
         // 停止的通知开了一个回合（task-notification）。
         finish(
@@ -123,7 +147,7 @@ async fn a_background_agent_has_no_pill_and_stops_from_tasks() {
         );
         ui.key(KeyCode::Esc);
         ui.wait("the turn of the notification", |s| {
-            s.contains("review stopped") && !s.contains("esc to interrupt")
+            s.contains("review stopped") && !s.contains("esc stop")
         })
         .await;
         drop(senders);
@@ -134,11 +158,14 @@ async fn a_background_agent_has_no_pill_and_stops_from_tasks() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn task_list_shows_above_the_input_and_ctrl_t_toggles_it() {
+async fn the_task_line_counts_todos_and_the_card_lists_them() {
     let (model, senders) = GatedModel::new(2);
     let mut senders = senders.into_iter();
     let (first, second) = (senders.next().unwrap(), senders.next().unwrap());
     with_ui(model, Setup::default(), |mut ui| async move {
+        // 会话里还没有任务：^T 在卡的位置说一句，到下一个键（tui-tasks.md §3.1）。
+        ui.press(KeyCode::Char('t'), KeyModifiers::CONTROL);
+        ui.wait_for("No tasks in this session.").await;
         ui.submit("plan the work");
         finish(
             first,
@@ -149,21 +176,35 @@ async fn task_list_shows_above_the_input_and_ctrl_t_toggles_it() {
             ),
         );
         finish(second, text_response(&["planned"]));
-        let screen = ui.wait_for("1 tasks (0 done, 1 open)").await;
-        assert!(screen.contains("◻ Write the tests"), "{screen}");
+        // 任务行只数待办（tui-tasks.md §2）：`0 of 1 todos done`，步骤不在这里。
+        let screen = ui.wait_for(" ○ 0 of 1 todos done ").await;
+        assert!(!screen.contains("Write the tests"), "{screen}");
+        // 回合结束后清单还是这个回合写的：任务行留着。
+        ui.wait("the turn to end", |s| {
+            s.contains("planned") && !s.contains("esc stop") && s.contains("0 of 1 todos done")
+        })
+        .await;
+        // ^T：只有待办，任务卡落在 Todos：整个清单，右沿 `0 of 1 done`。
+        ui.press(KeyCode::Char('t'), KeyModifiers::CONTROL);
+        let card = ui.wait_for("   · Write the tests").await;
+        assert!(
+            card.contains("   Subagents  ·  Commands  ·  Todos 0/1"),
+            "{card}"
+        );
+        assert!(card.contains("0 of 1 done"), "{card}");
+        // ^O 不是卡的键：关上卡，照常处理。整个清单挂在最新的任务调用下面（tui-display.md §2.2，Puffin「^O 的 `Todos`
+        // 行」）。
+        ui.press(KeyCode::Char('o'), KeyModifiers::CONTROL);
+        let steps = |s: &str| s.lines().filter(|l| l.contains("Write the tests")).count();
         let screen = ui
-            .wait("the turn to end", |s| {
-                s.contains("planned") && !s.contains("esc to interrupt")
+            .wait("the list under the call", |s| {
+                !s.contains("   · Write the tests") && steps(s) == 1
             })
             .await;
-        assert!(screen.contains("ctrl+t to hide tasks"), "{screen}");
-        ui.press(KeyCode::Char('t'), KeyModifiers::CONTROL);
-        let screen = ui
-            .wait("the list to hide", |s| !s.contains("1 tasks (0 done"))
-            .await;
-        assert!(screen.contains("ctrl+t to show tasks"), "{screen}");
-        ui.press(KeyCode::Char('t'), KeyModifiers::CONTROL);
-        ui.wait_for("1 tasks (0 done, 1 open)").await;
+        assert!(screen.contains("0 of 1 todos done"), "{screen}");
+        // 再按 ^O 收起。
+        ui.press(KeyCode::Char('o'), KeyModifiers::CONTROL);
+        ui.wait("the list to fold", |s| steps(s) == 0).await;
     })
     .await;
 }

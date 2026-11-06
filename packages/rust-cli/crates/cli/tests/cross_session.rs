@@ -555,3 +555,156 @@ fn a_held_message_survives_reopening_the_session() {
         "{text}"
     );
 }
+
+/// 给 A 最新的会话写入一个压缩点（压缩提交的边界与摘要）：之后的冷读取里，压缩点之前的消息只供显示。
+fn compact_latest(sandbox: &Sandbox) {
+    use rust_cli_kernel_api::ids::{MessageId, OwnerEpoch};
+    use rust_cli_kernel_api::message::{
+        CompactBoundary, CompactTrigger, ContentBlock, Message, SystemMessage, UserMessage,
+        UserOrigin,
+    };
+    use rust_cli_kernel_api::store::{Fact, FactBatch, SessionStore};
+    let summary = MessageId::new("msg_compact_summary");
+    let messages = [
+        Message::System(SystemMessage::CompactBoundary(CompactBoundary {
+            id: MessageId::new("msg_compact_boundary"),
+            trigger: CompactTrigger::Auto,
+            pre_tokens: 5000,
+            summary: summary.clone(),
+            preserved: None,
+            discovered_tools: Vec::new(),
+        })),
+        Message::User(UserMessage {
+            id: summary,
+            content: vec![ContentBlock::Text {
+                text: "Summary:\nSUMMARY".to_owned(),
+            }],
+            origin: UserOrigin::CompactSummary,
+        }),
+    ];
+    let batch = FactBatch {
+        owner_epoch: OwnerEpoch::LOCAL,
+        command: None,
+        facts: messages
+            .into_iter()
+            .map(|message| Fact::MessageAppended { message })
+            .collect(),
+        turn: None,
+    };
+    with_latest(sandbox, async |store, session| {
+        store.commit(&session, batch).await.unwrap();
+    });
+}
+
+/// A 的完整历史（压缩点之前只供显示的一段接上模型侧的历史）里文字含 `needle` 的消息数。
+fn copies_in_history(sandbox: &Sandbox, needle: &str) -> usize {
+    use rust_cli_kernel_api::message::{ContentBlock, Message};
+    use rust_cli_kernel_api::store::SessionStore;
+    let loaded = with_latest(sandbox, async |store, session| {
+        store.load(&session).await.unwrap()
+    });
+    assert!(
+        !loaded.earlier.is_empty(),
+        "the compaction point is missing"
+    );
+    loaded
+        .earlier
+        .iter()
+        .chain(&loaded.messages)
+        .filter(|message| {
+            let text: String = match message {
+                Message::User(user) => user
+                    .content
+                    .iter()
+                    .filter_map(|block| match block {
+                        ContentBlock::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect(),
+                Message::Attachment(attachment) => attachment.text.clone(),
+                _ => String::new(),
+            };
+            text.contains(needle)
+        })
+        .count()
+}
+
+/// 修复线 F139（cross-session.md §3.3）：A 在工具边界并入 B 的消息，同一批记下 `peer_merged`；之后写入一个压缩点（并入的
+/// 消息落在压缩点之前），再 `-c` 重开。以前冷加载只在压缩点之后的对话里按文字找，找不到就再投递一次、还开了回合。
+#[test]
+fn a_merged_message_is_not_delivered_again_after_compaction() {
+    let sandbox = sandbox();
+    // B 的 SendMessage 有了结果（A 已提交并 ack）时建这个文件，A 的 Bash 等到它才结束：并入一定在这个工具边界。
+    let sent = sandbox.home.parent().unwrap().join("sent");
+    let wait_sent = format!("until [ -e '{}' ]; do sleep 0.05; done", sent.display());
+    let fixture_a = sse::serve_with(vec![
+        Reply::Fixed(call(
+            "toolu_wait",
+            "Bash",
+            &json!({"command": wait_sent, "description": "wait"}),
+        )),
+        Reply::Fixed(sse::text_reply("A done")),
+        Reply::Fixed(sse::text_reply("A again")),
+        Reply::Fixed(sse::text_reply("A extra")),
+    ]);
+    let a = zcode(
+        &sandbox,
+        &sandbox.work,
+        &fixture_a.url,
+        &[
+            "-p",
+            "wait",
+            "--permission-mode",
+            "dontAsk",
+            "--allowedTools",
+            "Bash",
+        ],
+        &[],
+    );
+    wait_registered(&sandbox.home, 1);
+    let fixture_b = sse::serve_with(sender_script(vec![Reply::From(Box::new(
+        move |_: &Value| {
+            std::fs::write(&sent, "").unwrap();
+            sse::text_reply("B done")
+        },
+    ))]));
+    let b = zcode(
+        &sandbox,
+        &sandbox.work_b,
+        &fixture_b.url,
+        &["-p", "send", "--permission-mode", "dontAsk"],
+        &[],
+    );
+    assert_eq!(finish(b), "B done");
+    assert_eq!(finish(a), "A done");
+    let first = fixture_a.main_requests();
+    assert!(
+        texts(first.last().unwrap())
+            .contains("Another ZCode session sent a message while you were working:"),
+        "{}",
+        texts(first.last().unwrap())
+    );
+    let merged = entries(&sandbox, "peer_merged");
+    let received = entries(&sandbox, "peer_message");
+    assert_eq!(merged.len(), 1, "{merged:?}");
+    assert_eq!(merged[0].0, format!("message:{}", received[0].0));
+
+    compact_latest(&sandbox);
+    let again = zcode(
+        &sandbox,
+        &sandbox.work,
+        &fixture_a.url,
+        &["-c", "-p", "again", "--permission-mode", "dontAsk"],
+        &[],
+    );
+    assert_eq!(finish(again), "A again");
+    // 重开之后只有这条输入的一个请求，里面没有这条消息；库里也只有并入的那一份。
+    let later = &fixture_a.main_requests()[first.len()..];
+    assert_eq!(later.len(), 1);
+    assert!(
+        !texts(&later[0]).contains("hello from B"),
+        "{}",
+        texts(&later[0])
+    );
+    assert_eq!(copies_in_history(&sandbox, "hello from B"), 1);
+}

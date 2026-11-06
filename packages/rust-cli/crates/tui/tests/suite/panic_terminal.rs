@@ -89,7 +89,8 @@ fn the_interface_keeps_working_after_a_panic_in_a_turn() {
     assert!(pty.raw(), "{replied:?}");
     assert!(!replied.contains(LEAVE), "{replied:?}");
     pty.send(b"/exit");
-    pty.until("the command", |text| shows(text, "Exit the CLI"));
+    // 命令架上 `/exit` 的说明照 Puffin（`Quit ZCode.`；以前是 `Exit the CLI`，等不到它时测试在按 ⏎ 之前就超时了）。
+    pty.until("the command", |text| shows(text, "Quit ZCode"));
     pty.send(b"\r");
     let (status, all) = pty.finish();
     assert!(status.success(), "{all:?}");

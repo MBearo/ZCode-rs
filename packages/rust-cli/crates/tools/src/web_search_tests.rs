@@ -71,7 +71,7 @@ async fn a_side_request_with_the_server_tool_becomes_the_result() {
     let model = Arc::new(ScriptedModel::new(vec![search_response()]));
     let tool = WebSearchTool::new(SideModel {
         model: model.clone(),
-        selection: selection(),
+        selection: selection().into(),
     });
     let (progress, _) = mpsc::channel(1);
     let context = Ctx::new(Arc::new(ScriptedInteractions::default())).build();
@@ -147,7 +147,7 @@ fn search_errors_and_empty_results_have_their_own_lines() {
 async fn validation_and_permissions_follow_the_spec() {
     let tool = WebSearchTool::new(SideModel {
         model: Arc::new(ScriptedModel::new(Vec::new())),
-        selection: selection(),
+        selection: selection().into(),
     });
     let context = Ctx::new(Arc::new(ScriptedInteractions::default())).build();
     assert_eq!(
@@ -208,7 +208,7 @@ async fn the_side_request_uses_the_current_main_model() {
     let model = Arc::new(ScriptedModel::new(vec![search_response()]));
     let tool = WebSearchTool::new(SideModel {
         model: model.clone(),
-        selection: selection(),
+        selection: selection().into(),
     });
     let current = rust_cli_kernel_api::model::ModelSelection {
         reasoning: Some("high".to_owned()),
@@ -235,7 +235,8 @@ async fn the_side_request_takes_the_effort_from_the_model_card() {
         selection: rust_cli_kernel_api::model::ModelSelection::new(
             "anthropic".to_owned(),
             GLM_5_3.to_owned(),
-        ),
+        )
+        .into(),
     });
     let (progress, _) = mpsc::channel(1);
     let context = Ctx::new(Arc::new(ScriptedInteractions::default())).build();
@@ -254,7 +255,7 @@ async fn web_search_needs_the_native_web_search_capability() {
     let model = Arc::new(ScriptedModel::new(vec![search_response()]));
     let tool = WebSearchTool::new(SideModel {
         model: model.clone(),
-        selection: selection(),
+        selection: selection().into(),
     });
     assert!(tool.needs_native_web_search());
     let fetch = crate::web_fetch::WebFetchTool::new(
@@ -298,7 +299,7 @@ async fn a_model_without_native_web_search_gets_the_recoverable_error() {
         let scripted = capable(web_search, None);
         let tool = WebSearchTool::new(SideModel {
             model: scripted.clone(),
-            selection: selection(),
+            selection: selection().into(),
         });
         let (progress, _) = mpsc::channel(1);
         let context = Ctx::new(Arc::new(ScriptedInteractions::default())).build();
@@ -330,7 +331,7 @@ async fn the_side_request_caps_max_tokens_at_the_configured_output_limit() {
         let scripted = capable(web_search, max_output_tokens);
         let tool = WebSearchTool::new(SideModel {
             model: scripted.clone(),
-            selection: selection(),
+            selection: selection().into(),
         });
         let (progress, _) = mpsc::channel(1);
         let context = Ctx::new(Arc::new(ScriptedInteractions::default())).build();

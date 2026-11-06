@@ -88,7 +88,7 @@ async fn compact(agent: Option<AgentId>) -> (Vec<String>, Arc<Listings>) {
     let mut request = request(history, CompactTrigger::Reactive);
     request.agent = agent;
     let result = Engine { ports: &ports }
-        .run(&request, true, &CancellationToken::new())
+        .run(&request, true, &CancellationToken::new(), None)
         .await
         .unwrap();
     let sources = result

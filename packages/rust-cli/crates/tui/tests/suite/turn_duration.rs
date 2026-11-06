@@ -1,28 +1,29 @@
 //! 回合结束那一行（docs/specs/rust-cli/tui-display.md §2.7，修复线 F118）：真实内核，内核的时钟固定在 0（UTC 的
 //! `12:00 AM`）。正常结束与出错结束的回合在最后有 `✻ <动词> for 0s · done 12:00 AM`，中断的没有；后台还有在跑的命令时
-//! 接 ` · 1 monitor still running`（与 footer 的 pill 同一份文字）。修前没有这一行。
+//! 接 ` · 1 monitor still running`（与任务行的命令一段同一份文字）。修前没有这一行。
 
 use crossterm::event::KeyCode;
 use rust_cli_kernel_api::message::ContentBlock;
 use rust_cli_kernel_api::model::{BlockDelta, ModelError, ModelEvent};
-use rust_cli_kernel_api::testing::text_response;
+use rust_cli_kernel_api::testing::{text_response, tool_use_response};
+use serde_json::json;
 
 use super::ledger::Ledger;
 use super::support::{GatedModel, Setup, row_of, send, with_ui};
 
 const LINE: &str = " for 0s · done 12:00 AM";
 
-/// 画面上回合结束那一行（`✻ ` 开头、带 `LINE`）。
+/// 画面上回合结束那一行（带 `LINE`）。不先去掉行首的空格：`✻` 必须在第 1 列，与工具行的记号同一列。
 fn turn_line(screen: &str) -> Option<String> {
     screen
         .lines()
-        .map(str::trim)
-        .find(|line| line.starts_with("✻ ") && line.contains(LINE))
-        .map(str::to_owned)
+        .find(|line| line.starts_with(" ✻ ") && line.contains(LINE))
+        .map(|line| line.trim().to_owned())
 }
 
+/// 回合不在跑：输入框右边没有 `esc stop`。
 fn idle(screen: &str) -> bool {
-    !screen.contains("esc to interrupt")
+    !screen.contains("esc stop")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -58,6 +59,43 @@ async fn a_finished_turn_ends_with_the_duration_line() {
         // 在回复下面，空一行。
         let reply = row_of(&screen, "hello there").unwrap();
         assert_eq!(row_of(&screen, LINE), Some(reply + 2), "{screen}");
+    })
+    .await;
+}
+
+/// 这一行与工具行在同一个网格上：记号同一列，文字同一列。画面是真实的一帧，工具行不是写死的。
+#[tokio::test(flavor = "multi_thread")]
+async fn the_line_lines_up_with_the_tool_rows() {
+    let model = GatedModel::scripted(vec![
+        tool_use_response(
+            "t1",
+            "TaskCreate",
+            &json!({"subject": "Check it", "description": "Check it"}),
+        ),
+        text_response(&["done"]),
+    ]);
+    with_ui(model, Setup::default(), |mut ui| async move {
+        ui.submit("go");
+        let screen = ui
+            .wait("the tool row and the line", |s| {
+                turn_line(s).is_some() && s.contains("TaskCreate")
+            })
+            .await;
+        let tool = screen
+            .lines()
+            .find(|line| line.contains("TaskCreate"))
+            .unwrap_or_default();
+        let turn = screen
+            .lines()
+            .find(|line| line.contains(LINE))
+            .unwrap_or_default();
+        // 第 0 列是边距，第 1 列是记号，第 2 列空，文字从第 3 列起。
+        let shape = |line: &str| {
+            let cells: Vec<char> = line.chars().take(4).collect();
+            cells[0] == ' ' && cells[1] != ' ' && cells[2] == ' ' && cells[3] != ' '
+        };
+        assert!(shape(tool), "{tool:?}\n{screen}");
+        assert!(shape(turn), "{turn:?}\n{screen}");
     })
     .await;
 }
@@ -114,7 +152,7 @@ async fn an_interrupted_turn_has_no_line() {
         ui.key(KeyCode::Esc);
         let screen = ui
             .wait("the interrupted turn", |s| {
-                s.contains("Interrupted") && idle(s)
+                s.contains("Stopped.") && idle(s)
             })
             .await;
         assert!(turn_line(&screen).is_none(), "{screen}");
@@ -124,7 +162,7 @@ async fn an_interrupted_turn_has_no_line() {
     .await;
 }
 
-/// 后台有一条在跑的 monitor：这一行接 ` · 1 monitor still running`，footer 是 `1 monitor`。
+/// 后台有一条在跑的 monitor：这一行接 ` · 1 monitor still running`，任务行是 `1 monitor running`（同一个写法）。
 #[tokio::test(flavor = "multi_thread")]
 async fn a_running_monitor_is_named_at_the_end_of_the_line() {
     let model = GatedModel::scripted(vec![text_response(&["watching"])]);
@@ -140,7 +178,7 @@ async fn a_running_monitor_is_named_at_the_end_of_the_line() {
                 turn_line(s).is_some_and(|line| line.ends_with("· 1 monitor still running"))
             })
             .await;
-        assert!(screen.contains("· 1 monitor · ↓ to manage"), "{screen}");
+        assert!(screen.contains("○ 1 monitor running"), "{screen}");
     })
     .await;
 }

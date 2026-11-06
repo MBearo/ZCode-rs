@@ -36,6 +36,8 @@ members = [
   "crates/runtime",
   "crates/platform",
   "crates/tui",
+  "crates/tui-ports",
+  "crates/tui-kit",
   "crates/headless",
   "crates/protocol-core",
   "crates/protocol-zcode",
@@ -100,24 +102,16 @@ async-trait = "0.1"
 # rust-cli-platform：credentials.json 的 base64url（Node `Buffer` 的 base64url，无填充）。
 base64 = "0.23"
 bytes = "1"
-# rust-cli-tui：终端输入流（event-stream）；与 ratatui 0.30 的 crossterm 后端同版本。
+# rust-cli-tui、rust-cli-tui-kit：原始模式、备用屏、尺寸与终端输入流（event-stream，docs/specs/rust-cli/tui-kit.md §2.2）。
 crossterm = { version = "0.29", features = ["event-stream"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-# rust-cli（cli）：解开执行器的 npm 平台包（gzip，remote-exec.md §26.4）。Cargo.lock 里本来就有（syntect 用它，同样的
-# 缺省特性 rust_backend），不引入新包。
+# rust-cli（cli）：解开执行器的 npm 平台包（gzip，remote-exec.md §26.4）；缺省特性 rust_backend。
 flate2 = "1"
 # Retry-After 的 HTTP-date 形式。
 httpdate = "1"
-# rust-cli-tui：markdown 解析（复制来的组件层，docs/specs/rust-cli/tui.md §3）。
-pulldown-cmark = { version = "0.13", default-features = false }
-# rust-cli-tui：全屏终端界面。
-ratatui = "0.30"
-# rust-cli-tui：unix 上探测终端背景色（OSC 11）时的 poll / read。
+# rust-cli-tui、rust-cli-tui-kit：unix 上探测终端背景色（OSC 10/11）时的带超时 poll / read（tui-kit.md §2.2）。
 rustix = { version = "1", features = ["event"] }
-# rust-cli-tui：代码块、diff 与命令的高亮（主题来自 two-face）。
-syntect = { version = "5.3", default-features = false, features = ["parsing", "default-syntaxes", "default-themes", "regex-fancy"] }
-two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
-# rust-cli-tui：搜索按字素匹配（docs/specs/rust-cli/tui-input.md §2.3.3，F114）；Cargo.lock 里本来就有（ratatui 用它）。
+# rust-cli-tui：搜索按字素匹配（docs/specs/rust-cli/tui-input.md §2.3.3，F114）。
 unicode-segmentation = "1.13"
 unicode-width = "0.2"
 # kernel-api `env_path::nfc`：工具路径参数的 NFC（docs/specs/rust-cli/tools-files.md §3.2）。
@@ -220,6 +214,8 @@ rust-cli-query = { path = "crates/query" }
 rust-cli-session = { path = "crates/session" }
 rust-cli-runtime = { path = "crates/runtime" }
 rust-cli-tui = { path = "crates/tui" }
+rust-cli-tui-ports = { path = "crates/tui-ports" }
+rust-cli-tui-kit = { path = "crates/tui-kit" }
 rust-cli-headless = { path = "crates/headless" }
 rust-cli-protocol-core = { path = "crates/protocol-core" }
 rust-cli-protocol-zcode = { path = "crates/protocol-zcode" }

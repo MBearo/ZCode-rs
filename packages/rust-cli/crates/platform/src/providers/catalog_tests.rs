@@ -258,3 +258,30 @@ fn the_configured_model_is_the_raw_default_model_selection() {
 fn sel(provider: &str, model: &str) -> rust_cli_kernel_api::model::ModelSelection {
     rust_cli_kernel_api::model::ModelSelection::new(provider.to_owned(), model.to_owned())
 }
+
+/// 列出的模型（platform.md §11.2a `models`）：不能用的 provider 的模型也在；能用的模板都在列出的里面。
+#[test]
+fn listed_models_include_the_ones_that_cannot_run() {
+    let builtin: Value = serde_json::from_str(BUNDLED_BUILTIN).unwrap();
+    let closed = snapshot(
+        &resolve(&builtin["config"], &json!({}), None),
+        &Default::default(),
+    );
+    assert!(closed.templates.is_empty());
+    assert!(
+        closed.listed.iter().any(|m| m.provider == ENTITLED),
+        "{:?}",
+        closed.listed
+    );
+    let open = fixture_snapshot();
+    for template in &open.templates {
+        assert!(
+            open.listed
+                .iter()
+                .any(|m| m.provider == template.provider && m.model == template.model && m.enabled),
+            "{} {}",
+            template.provider,
+            template.model
+        );
+    }
+}

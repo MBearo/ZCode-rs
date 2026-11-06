@@ -13,6 +13,7 @@ use rust_cli_kernel_api::orchestration::ContextRequest;
 use rust_cli_prompts::models;
 use rust_cli_prompts::texts::{self, render};
 
+use crate::analysis::PromptSection;
 use crate::config::{OutputStyle, Surface};
 use crate::render::{Bullet, bullets};
 use rust_cli_kernel_api::tool_names;
@@ -102,21 +103,31 @@ fn guidance(facts: &PromptFacts<'_>) -> Option<String> {
     Some(render(texts::guidance(), &[("lines", &bullets(lines))]))
 }
 
-/// 会话段：按固定的顺序，空段跳过。
-fn session_sections(facts: &PromptFacts<'_>) -> Vec<String> {
+/// 会话段：按固定的顺序，空段跳过。每段带 `/context` 明细里的名字（context-usage.md §3.1）。
+fn session_sections(facts: &PromptFacts<'_>) -> Vec<PromptSection> {
+    let section = PromptSection::new;
     let mut sections = vec![
-        texts::communication_lean().to_owned(),
-        texts::pronouns().to_owned(),
-        texts::action_caution().to_owned(),
+        section("Communication", texts::communication_lean().to_owned()),
+        section("Pronouns", texts::pronouns().to_owned()),
+        section("Caution", texts::action_caution().to_owned()),
     ];
-    sections.extend(guidance(facts));
+    sections.extend(guidance(facts).map(|text| section("Session guidance", text)));
     if let Some(dir) = facts.memory_dir {
-        sections.push(render(texts::memory_lean(), &[("memory_dir", dir)]));
+        sections.push(section(
+            "Memory",
+            render(texts::memory_lean(), &[("memory_dir", dir)]),
+        ));
     }
     // 没有环境段（修复线 F51，context.md §6）。`/context` 的计数用同一个列表。
-    sections.push(texts::context_management().to_owned());
-    sections.push(texts::act_dont_rederive().to_owned());
-    sections.push(total_tokens(TOTAL_TOKENS_BUDGET));
+    sections.push(section(
+        "Context management",
+        texts::context_management().to_owned(),
+    ));
+    sections.push(section(
+        "Working style",
+        texts::act_dont_rederive().to_owned(),
+    ));
+    sections.push(section("Token budget", total_tokens(TOTAL_TOKENS_BUDGET)));
     sections
 }
 
@@ -126,18 +137,24 @@ pub(crate) fn total_tokens(left: u64) -> String {
 
 /// `/context` 计数用的段落（分析用的段落列表，context-usage.md §3）：静态段一段，加会话段的各段；
 /// 拼起来与 [`system_blocks`] 的后两块相同，不含身份句。给了 `--system-prompt` 时是它，`--append-system-prompt`
-/// 是最后一段。
-pub(crate) fn sections(facts: &PromptFacts<'_>) -> Vec<String> {
+/// 是最后一段。每段带名字（§3.1）。
+pub(crate) fn sections(facts: &PromptFacts<'_>) -> Vec<PromptSection> {
     let mut sections = match facts.custom {
-        Some(custom) => vec![custom.to_owned()],
+        Some(custom) => vec![PromptSection::new("Custom prompt", custom.to_owned())],
         None => {
-            let mut sections = vec![lean_body(facts)];
+            let mut sections = vec![PromptSection::new("Core instructions", lean_body(facts))];
             sections.extend(session_sections(facts));
             sections
         }
     };
-    sections.extend(facts.append.map(str::to_owned));
+    sections.extend(appended(facts));
     sections
+}
+
+fn appended(facts: &PromptFacts<'_>) -> Option<PromptSection> {
+    facts
+        .append
+        .map(|text| PromptSection::new("Appended prompt", text.to_owned()))
 }
 
 /// system 段（cli-args.md §4.2，段落的数组分块）：
@@ -160,8 +177,11 @@ pub(crate) fn system_blocks(facts: &PromptFacts<'_>) -> Vec<SystemBlock> {
             },
         ];
     }
-    let mut session = session_sections(facts);
-    session.extend(facts.append.map(str::to_owned));
+    let session: Vec<String> = session_sections(facts)
+        .into_iter()
+        .chain(appended(facts))
+        .map(|section| section.text)
+        .collect();
     vec![
         SystemBlock {
             text: texts::identity().to_owned(),

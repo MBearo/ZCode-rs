@@ -45,7 +45,7 @@ fn setup(pages: Vec<(&str, FetchedUrl)>, replies: &[&str]) -> Run {
     ));
     let side = SideModel {
         model: model.clone(),
-        selection: selection(),
+        selection: selection().into(),
     };
     Run {
         env: Arc::new(TextEnv::web(pages)),

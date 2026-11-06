@@ -1,4 +1,3 @@
-use ratatui::style::{Color, Modifier};
 use rust_cli_kernel_api::compaction::ContextNotice;
 use rust_cli_kernel_api::metering::{OutputSpeed, RequestStats};
 use rust_cli_kernel_api::permission::PermissionMode;
@@ -6,7 +5,7 @@ use rust_cli_kernel_api::session_api::{KernelEvent, SequencedEvent};
 use rust_cli_kernel_api::testing::selection;
 
 use super::*;
-use crate::ui::palette::{ColorLevel, Palette};
+use crate::ui::probe::{ColorLevel, Colors};
 use crate::view::Transcript;
 
 fn app(lang: Lang, notice: ContextNotice) -> App {
@@ -22,12 +21,24 @@ fn app(lang: Lang, notice: ContextNotice) -> App {
     app
 }
 
-/// 右侧最后一段：上下文提示的文字与样式。
-/// 上下文提示：模型名贴最右（F116），它前面是分隔点，再前面是提示。
+/// 状态栏（宽 `width`、终端 30 行）各行的文字。
+fn bar(app: &App, width: usize) -> Vec<String> {
+    status(app, width, 30, Vec::new(), false)
+        .iter()
+        .map(StyledLine::plain)
+        .collect()
+}
+
+/// 状态栏里上下文提示那一段的文字与样式：这些 App 没有用量与速度，提示是右边唯一的部分，是最后一段非空白的段。
 fn context(app: &App) -> (String, Style) {
-    let (line, _) = footer(app, 160);
-    let notice = line.spans.iter().rev().nth(2).unwrap();
-    (notice.content.to_string(), notice.style)
+    let lines = status(app, 200, 30, Vec::new(), false);
+    let span = lines[0]
+        .spans
+        .iter()
+        .rev()
+        .find(|s| !s.text.trim().is_empty())
+        .unwrap();
+    (span.text.to_string(), span.style)
 }
 
 /// F14：上下文快满的四种显示（compact.md §2.1）。真实内核的显示见 tests/suite/context_low.rs；`N% context used`
@@ -66,19 +77,15 @@ fn the_context_notice_has_four_wordings() {
         let (text, style) = context(&app(Lang::En, notice));
         assert_eq!(text, en);
         assert_eq!(context(&app(Lang::Zh, notice)).0, zh);
+        let ink = &app(Lang::En, notice).ink;
         if matches!(notice, ContextNotice::Low { .. }) {
-            // 自动压缩关闭时是错误色。
-            assert_eq!(style.fg, Some(Color::Red), "{text}");
+            // 自动压缩关闭时是快满的琥珀色（`code`，Puffin 的 `near`，tui-kit.md §3.4）。
+            assert_eq!(style, Style::fg(ink.theme.code), "{text}");
         } else {
-            assert!(style.add_modifier.contains(Modifier::DIM), "{text}");
+            assert_eq!(style, ink.theme.fg2, "{text}");
         }
     }
-    let (line, _) = footer(&app(Lang::En, ContextNotice::Hidden), 160);
-    let plain: String = line
-        .spans
-        .iter()
-        .map(|span| span.content.as_ref())
-        .collect();
+    let plain = bar(&app(Lang::En, ContextNotice::Hidden), 160).join("\n");
     assert!(
         !plain.contains("context") && !plain.contains("auto-compact"),
         "{plain}"
@@ -104,7 +111,7 @@ fn speed_app(
         ((0, 0, 0), (230, 230, 230))
     };
     let mut app = App::new(
-        Palette::new(ColorLevel::TrueColor, Some(background)).with_foreground(Some(foreground)),
+        Colors::new(ColorLevel::TrueColor, Some(background)).with_foreground(Some(foreground)),
         lang,
         Transcript::new(
             selection(),
@@ -122,6 +129,7 @@ fn speed_app(
             event: KernelEvent::ContextUsage {
                 used_tokens: 66_600,
                 max_tokens: 180_000,
+                compact_at: None,
             },
         },
         0,
@@ -137,9 +145,12 @@ fn speed_app(
         );
     }
     if let Some(stats) = stats {
-        let seq = app.snapshots.request_stats.begin();
+        let seq = app.snapshots.request_stats.begin(0);
         assert!(app.snapshots.request_stats.arrived(seq, Some(stats)));
     }
+    // 画一次：状态栏的速度是画之前听说视图的现场估算（status_motion.rs），没有在跑的调用时说量到的数。
+    let started = app.started;
+    crate::ui::status_motion::note(&mut app, started, 0);
     app
 }
 
@@ -151,6 +162,7 @@ fn node_stats() -> RequestStats {
         cache_read_tokens: 1_820,
         unknown_cache_usage: false,
         last: None,
+        ..RequestStats::default()
     }
 }
 
@@ -163,162 +175,93 @@ fn node_speed() -> OutputSpeed {
     }
 }
 
-fn plain(line: &Line<'_>) -> String {
-    line.spans
-        .iter()
-        .map(|span| span.content.as_ref())
-        .collect()
-}
-
-/// footer 右侧：依次是 TPS、ctx、cache，模型名贴最右（工作线 F116，tui-display.md §2.6）；文字用次要文字的颜色，
-/// 中文用中文短词。
+/// 状态栏照 Puffin（tui-kit.md §4.2）：左边是模式与 `⇧⇥`、模型、cwd；右边是上下文的表、数与量、速度；缓存命中率不在这里，
+/// 只在 `/stats` 的卡里（tui-display.md §2.6）。数 fg2、单位与窗口的大小 fg3。
 #[test]
-fn the_request_stats_come_before_the_model_name() {
+fn the_status_bar_says_who_where_and_how_much() {
     for light in [false, true] {
         let app = stats_app(Lang::En, light, Some(node_stats()));
-        let (line, _) = footer(&app, 160);
-        let text = plain(&line);
+        let shown = bar(&app, 160);
+        assert_eq!(shown.len(), 1, "{shown:?}");
+        let line = &shown[0];
         assert!(
-            text.ends_with("40 tok/s \u{b7} ctx 37.0% \u{b7} cache 91.0% \u{b7} scripted"),
-            "{text}"
+            line.starts_with("   Ask before changes ⇧⇥  ·  scripted  ·  ~/project"),
+            "{line}"
         );
-        for item in ["40 tok/s", "ctx 37.0%", "cache 91.0%"] {
-            let span = line.spans.iter().find(|s| s.content == item).unwrap();
-            assert_eq!(span.style, app.palette.secondary(), "{item} light={light}");
-            assert!(span.style.fg.is_some(), "{item}: 真彩色的次要文字");
-        }
-        let zh = stats_app(Lang::Zh, light, Some(node_stats()));
-        let text = plain(&footer(&zh, 160).0);
         assert!(
-            text.ends_with("40 tok/s \u{b7} 上下文 37.0% \u{b7} 缓存 91.0% \u{b7} scripted"),
-            "{text}"
+            line.ends_with("━━━━────── 37%  67k/180k  ·  40 tok/s "),
+            "{line}"
         );
-    }
-}
-
-/// ctx 与 cache 保留一位小数、四舍五入到 0.1，整数也写 `.0`；TPS 仍是整数（工作线 F115，用户决定 2026-10-29，
-/// tui-display.md §2.6）。
-#[test]
-fn ctx_and_cache_show_one_decimal() {
-    let ctx = |used_tokens, max_tokens, lang| {
-        let stats = RequestStats {
-            requests: 3,
-            input_tokens: 3_000,
-            cache_read_tokens: 2_000,
-            unknown_cache_usage: false,
-            last: None,
+        let lines = status(&app, 160, 30, Vec::new(), false);
+        let span = |text: &str| {
+            lines[0]
+                .spans
+                .iter()
+                .find(|s| s.text == text)
+                .unwrap_or_else(|| panic!("{text}"))
+                .style
         };
-        let mut app = stats_app(lang, false, Some(stats));
-        app.view.apply(
-            SequencedEvent {
-                seq: 10,
-                revision: 0,
-                event: KernelEvent::ContextUsage {
-                    used_tokens,
-                    max_tokens,
-                },
-            },
-            0,
-        );
-        plain(&footer(&app, 160).0)
-    };
-    // 1,120 / 180,000 = 0.62%：整数时写 1%；2,000 / 3,000 的命中率 66.67%。
-    let text = ctx(1_120, 180_000, Lang::En);
-    assert!(
-        text.ends_with("40 tok/s \u{b7} ctx 0.6% \u{b7} cache 66.7% \u{b7} scripted"),
-        "{text}"
-    );
-    let text = ctx(1_120, 180_000, Lang::Zh);
-    assert!(
-        text.ends_with("上下文 0.6% \u{b7} 缓存 66.7% \u{b7} scripted"),
-        "{text}"
-    );
-    // 第二位小数四舍五入：9,108 / 180,000 = 5.06%，9,072 / 180,000 = 5.04%。
-    assert!(ctx(9_108, 180_000, Lang::En).contains("ctx 5.1%"));
-    assert!(ctx(9_072, 180_000, Lang::En).contains("ctx 5.0%"));
-    // 用满与超出窗口都是 100.0%；窗口为 0 时也是 100.0%。
-    assert!(ctx(180_000, 180_000, Lang::En).contains("ctx 100.0%"));
-    assert!(ctx(200_000, 180_000, Lang::En).contains("ctx 100.0%"));
-    assert!(ctx(5, 0, Lang::En).contains("ctx 100.0%"));
-    assert!(ctx(0, 180_000, Lang::En).contains("ctx 0.0%"));
+        assert_eq!(span("37%"), app.ink.theme.fg2);
+        assert_eq!(span("/180k"), app.ink.theme.fg3);
+        assert_eq!(span(" tok/s"), app.ink.theme.fg3);
+        assert_eq!(span("⇧⇥"), app.ink.theme.line);
+        assert_eq!(span("Ask before changes"), app.ink.theme.fg3);
+    }
+    let zh = stats_app(Lang::Zh, false, Some(node_stats()));
+    let line = bar(&zh, 160).join("");
+    assert!(line.starts_with("   变更前确认 ⇧⇥"), "{line}");
+    assert!(!line.contains("缓存"), "{line}");
 }
 
-/// 没有值的项连同它前面的分隔点一起不显示：没有回执、TPS 没有值、命中率未知、内核没给上下文用量。
+/// 没有值的部分不出现：没有速度时没有 tok/s，没有用量时没有表。
 #[test]
-fn items_without_values_are_left_out() {
-    let none = stats_app(Lang::En, false, None);
-    let text = plain(&footer(&none, 160).0);
-    assert!(text.ends_with("ctx 37.0% \u{b7} scripted"), "{text}");
-    let no_content = OutputSpeed {
-        first_content_ms: None,
-        ..node_speed()
-    };
-    let no_tps = speed_app(Lang::En, false, Some(node_stats()), Some(no_content));
-    let text = plain(&footer(&no_tps, 160).0);
-    assert!(
-        text.ends_with("ctx 37.0% \u{b7} cache 91.0% \u{b7} scripted"),
-        "{text}"
-    );
-    let unknown = stats_app(
+fn parts_without_values_are_left_out() {
+    let none = speed_app(Lang::En, false, None, None);
+    let text = bar(&none, 160).join("");
+    assert!(text.trim_end().ends_with("37%  67k/180k"), "{text}");
+    assert!(!text.contains("tok/s"), "{text}");
+    let unknown = speed_app(
         Lang::En,
         false,
         Some(RequestStats {
             unknown_cache_usage: true,
             ..node_stats()
         }),
+        Some(node_speed()),
     );
-    let text = plain(&footer(&unknown, 160).0);
+    let text = bar(&unknown, 160).join("");
     assert!(
-        text.ends_with("40 tok/s \u{b7} ctx 37.0% \u{b7} scripted"),
+        text.contains("40 tok/s") && !text.contains("cache"),
         "{text}"
     );
-    // 新会话的草稿：没有上下文用量、也没有回执，只有模型名。
-    let mut draft = stats_app(Lang::En, false, None);
-    draft.reset();
-    let text = plain(&footer(&draft, 160).0);
-    assert!(text.ends_with("scripted"), "{text}");
-    assert!(!text.contains("ctx") && !text.contains("tok/s"), "{text}");
+    let draft = app(Lang::En, ContextNotice::Hidden);
+    let text = bar(&draft, 160).join("");
+    assert!(text.trim_end().ends_with("~/project"), "{text}");
 }
 
-/// 修复线 F105（tui-display.md §2.6、D26）：TPS 只取会话 actor 给的输出速度，不取用量表回执里的最近一行；没有速度
-/// （冷打开、切换会话之后）时不显示，即使回执里有最近一行。旧代码按回执的 `last` 显示 40 tok/s。
+/// F105：速度取会话 actor 给的输出速度，不取用量表。
 #[test]
 fn the_speed_comes_from_the_session_not_the_usage_rows() {
-    let stored = RequestStats {
-        last: Some(rust_cli_kernel_api::metering::LastRequest {
-            output_tokens: Some(120),
-            duration_ms: Some(5_000),
-            first_token_ms: Some(2_000),
-        }),
-        ..node_stats()
-    };
-    let cold = speed_app(Lang::En, false, Some(stored), None);
-    let text = plain(&footer(&cold, 160).0);
-    assert!(
-        text.ends_with("ctx 37.0% \u{b7} cache 91.0% \u{b7} scripted"),
-        "{text}"
-    );
-    let live = speed_app(Lang::En, false, Some(node_stats()), Some(node_speed()));
-    let text = plain(&footer(&live, 160).0);
-    // TPS 是右侧第一项（F116），后面接 ctx。
-    assert!(text.contains(" 40 tok/s \u{b7} ctx 37.0%"), "{text}");
+    let cold = speed_app(Lang::En, false, Some(node_stats()), None);
+    assert!(!bar(&cold, 160).join("").contains("tok/s"));
+    let live = speed_app(Lang::En, false, None, Some(node_speed()));
+    assert!(bar(&live, 160).join("").contains("  ·  40 tok/s"));
 }
 
-/// 切换会话与 `/clear` 之后，晚到的旧回执不覆盖（回执带序号，tui-display.md §2.6）。
 #[test]
 fn a_late_receipt_from_the_old_session_is_dropped() {
     let mut app = stats_app(Lang::En, false, None);
-    let old = app.snapshots.request_stats.begin();
+    let old = app.snapshots.request_stats.begin(0);
     app.reset();
     assert!(!app.snapshots.request_stats.arrived(old, Some(node_stats())));
     assert_eq!(
         app.snapshots.request_stats.stats(),
         &RequestStats::default()
     );
-    let new = app.snapshots.request_stats.begin();
+    let new = app.snapshots.request_stats.begin(0);
     assert!(app.snapshots.request_stats.arrived(new, Some(node_stats())));
     // 查询失败（存储不支持）时当作没有值。
-    let again = app.snapshots.request_stats.begin();
+    let again = app.snapshots.request_stats.begin(0);
     assert!(app.snapshots.request_stats.arrived(again, None));
     assert_eq!(
         app.snapshots.request_stats.stats(),
@@ -326,98 +269,168 @@ fn a_late_receipt_from_the_old_session_is_dropped() {
     );
 }
 
-/// 窄终端：依次省掉 `? for shortcuts`、cache、TPS、ctx、上下文提示，最后才省模型名；模型名不被统计挤掉。
+/// 窄终端照 Puffin 的名次丢（docs/puffin-tui.md §4.2「丢弃的次序」）：名次低的先走（缓存、窗口的大小、速度、用掉的数、
+/// cwd……），模式与百分数最后走；终端至少 20 行时，一行要丢掉不是附加的部分而两行留得住它时分成两行。
 #[test]
-fn narrow_terminals_drop_cache_then_tps_then_context() {
-    let mut app = stats_app(Lang::En, false, Some(node_stats()));
-    app.view.apply(
+fn narrow_terminals_drop_parts_by_rank_or_split_in_two() {
+    let app = stats_app(Lang::En, false, Some(node_stats()));
+    let at = |width: usize, height: usize| -> Vec<String> {
+        status(&app, width, height, Vec::new(), false)
+            .iter()
+            .map(StyledLine::plain)
+            .collect()
+    };
+    // 名次低的先走，再按名次从高到低放回放得下的（Puffin `fit`）：`⇧⇥` 很短，大的部分走了以后它回来。
+    let one = at(70, 10);
+    assert_eq!(one.len(), 1, "{one:?}");
+    assert!(
+        !one[0].contains("67k") && !one[0].contains("cache"),
+        "{one:?}"
+    );
+    assert!(
+        one[0].contains("Ask before changes") && one[0].contains("37%"),
+        "{one:?}"
+    );
+    let two = at(70, 30);
+    assert_eq!(two.len(), 2, "{two:?}");
+    assert!(
+        two[0].contains("scripted") && two[0].contains("~/project"),
+        "{two:?}"
+    );
+    assert!(two[1].starts_with("   ━━━━──────"), "{two:?}");
+    // 模式（名次 100）最后走，百分数（90）其次。
+    let small = at(30, 10);
+    assert_eq!(
+        small[0].trim_end(),
+        "   Ask before changes     37%",
+        "{small:?}"
+    );
+    let tiny = at(24, 10);
+    assert_eq!(tiny[0].trim_end(), "   Ask before changes", "{tiny:?}");
+}
+
+/// 槽（docs/puffin-tui.md §4.2「按键提示（槽）」）：空的输入框上是 Puffin 的 `? keys`，在输入行的右端，止于 `edge`；占位是
+/// `Send a message`。键 fg2、说明 fg3。以前是 `Try "…"` 与 `← for projects · ? for shortcuts`。
+#[test]
+fn the_slot_sits_at_the_right_of_the_input_row() {
+    let app = stats_app(Lang::En, false, None);
+    let line = crate::ui::pane::input_line(&app, 100);
+    let text = line.plain();
+    assert!(text.starts_with(" ›  Send a message"), "{text}");
+    assert!(text.ends_with("? keys"), "{text}");
+    assert_eq!(text.chars().count(), 99, "{text}");
+    let key = line.spans.iter().find(|s| s.text == "?").unwrap();
+    assert_eq!(key.style, app.ink.key());
+    let zh = stats_app(Lang::Zh, false, None);
+    let text = crate::ui::pane::input_line(&zh, 100).plain();
+    assert!(text.starts_with(" ›  发送一条消息"), "{text}");
+    assert!(text.ends_with("? 按键"), "{text}");
+}
+
+/// 别的代理有消息时（tui-cockpit.md §3.4）的 App：现在的会话 `current`，`kinds` 是 runner 读来的组。
+fn news_app(kinds: &[(&str, crate::ui::cockpit::Kind)]) -> App {
+    let mut app = stats_app(Lang::En, false, None);
+    app.session = Some("current".to_owned());
+    app.cockpit_news = kinds.iter().map(|(id, k)| ((*id).to_owned(), *k)).collect();
+    app
+}
+
+fn slot_text(app: &App) -> String {
+    slot(app).spans.iter().map(|s| s.text.as_ref()).collect()
+}
+
+/// 槽的 ← 提示（tui-cockpit.md §3.4）：一直写着 `← agent cockpit`，空闲时在 `? keys` 前；别的代理有消息时说明换成数，
+/// 按急的次序只数一种，不数现在的会话；记号是组的墨，数 fg3；回合在跑时在 `esc stop` 后；栈里有东西时在
+/// `⌫ take back` 后；有草稿时没有（← 移动光标）。
+#[test]
+fn the_slot_always_points_at_the_cockpit_and_counts_news() {
+    use crate::ui::cockpit::Kind;
+    // 没有消息：名字。Working 不算消息；现在的会话不数。
+    let quiet = news_app(&[("a", Kind::Work), ("current", Kind::Need)]);
+    assert_eq!(slot_text(&quiet), "← agent cockpit  ? keys");
+    let spans = slot(&quiet).spans;
+    assert_eq!(spans[0].text, "←");
+    assert_eq!(spans[0].style, quiet.ink.theme.fg2);
+    assert_eq!(spans[1].style, quiet.ink.theme.fg3);
+    let app = news_app(&[("a", Kind::New), ("b", Kind::Need), ("c", Kind::Need)]);
+    assert_eq!(slot_text(&app), "← ● 2 need you  ? keys");
+    let spans = slot(&app).spans;
+    let mark = spans.iter().find(|s| s.text == "●").unwrap();
+    assert_eq!(mark.style, Style::fg(app.ink.theme.code));
+    let words = spans.iter().find(|s| s.text == " 2 need you").unwrap();
+    assert_eq!(words.style, app.ink.theme.fg3);
+    // 失败的比新的急。
+    let failed = news_app(&[("a", Kind::New), ("b", Kind::Failed)]);
+    assert_eq!(slot_text(&failed), "← ✗ 1 failed  ? keys");
+    assert_eq!(
+        slot_text(&news_app(&[("a", Kind::New)])),
+        "← ○ 1 new  ? keys"
+    );
+    // 中文同页头一行的数。
+    let mut zh = news_app(&[("b", Kind::Need)]);
+    zh.lang = Lang::Zh;
+    assert_eq!(slot_text(&zh), "← ● 1 个等你  ? 按键");
+    zh.cockpit_news.clear();
+    assert_eq!(slot_text(&zh), "← 代理驾驶舱  ? 按键");
+    // 有草稿：← 移动光标，没有提示。
+    let mut typing = news_app(&[("b", Kind::Need)]);
+    typing.composer.set_text("hi");
+    assert!(!slot_text(&typing).contains('←'), "{}", slot_text(&typing));
+    // 栈里有东西。
+    let mut stacked = news_app(&[("b", Kind::Need)]);
+    stacked
+        .after_turn
+        .push(("/clear".to_owned(), crate::ui::app::Action::Interrupt));
+    assert_eq!(slot_text(&stacked), "⌫ take back  ← ● 1 needs you");
+    // 回合在跑。
+    let mut running = news_app(&[("b", Kind::Need)]);
+    running.view.apply(
         SequencedEvent {
-            seq: 3,
+            seq: 9,
             revision: 0,
-            event: KernelEvent::ContextNotice {
-                notice: ContextNotice::UntilAutoCompact { percent: 10 },
+            event: KernelEvent::TurnStarted {
+                turn: rust_cli_kernel_api::ids::TurnId::new("turn_1"),
+                command: None,
             },
         },
         0,
     );
-    let mut seen: Vec<(bool, String)> = Vec::new();
-    for width in (20..=160).rev() {
-        let text = plain(&footer(&app, width).0);
-        let shortcuts = text.contains("? for shortcuts");
-        // 按显示的先后列：统计、提示，模型名贴最右（F116）。
-        let right: Vec<&str> = [
-            "40 tok/s",
-            "ctx 37.0%",
-            "cache 91.0%",
-            "10% until auto-compact",
-            "scripted",
-        ]
-        .into_iter()
-        .filter(|item| text.contains(item))
-        .collect();
-        let right = right.join(" | ");
-        if seen.last().map(|(s, r)| (*s, r.as_str())) != Some((shortcuts, right.as_str())) {
-            seen.push((shortcuts, right));
-        }
-    }
-    let steps: Vec<(bool, &str)> = seen.iter().map(|(s, r)| (*s, r.as_str())).collect();
-    assert_eq!(
-        steps,
-        [
-            (
-                true,
-                "40 tok/s | ctx 37.0% | cache 91.0% | 10% until auto-compact | scripted"
-            ),
-            (
-                false,
-                "40 tok/s | ctx 37.0% | cache 91.0% | 10% until auto-compact | scripted"
-            ),
-            (
-                false,
-                "40 tok/s | ctx 37.0% | 10% until auto-compact | scripted"
-            ),
-            (false, "ctx 37.0% | 10% until auto-compact | scripted"),
-            (false, "10% until auto-compact | scripted"),
-            (false, "scripted"),
-            (false, ""),
-        ]
-    );
+    assert_eq!(slot_text(&running), "esc stop  ← ● 1 needs you");
+    running.cockpit_news.clear();
+    assert_eq!(slot_text(&running), "esc stop  ← agent cockpit");
 }
 
-/// 修复线 F117（tui-display.md §2.3）：pill 写 `1 shell, 2 monitors`；终端变窄时先省右侧，pill 的文字不拆开、不缩写，
-/// 放不下时整行从末尾截断。
+/// 点槽的提示同按 ←：打开驾驶舱（tui-cockpit.md §3.4）；`? keys` 照旧打开按键表。名字与数都能点。
 #[test]
-fn a_narrow_footer_keeps_the_monitor_count_whole_until_the_line_is_cut() {
-    use rust_cli_kernel_api::env_shell::BackgroundStatus;
-    use rust_cli_kernel_api::manage::{BackgroundEntry, BackgroundKind};
-    let mut app = app(Lang::En, ContextNotice::Hidden);
-    let entry = |id: &str, kind| BackgroundEntry::new(id, kind, id, BackgroundStatus::Running);
-    app.snapshots.background = vec![
-        entry("b1", BackgroundKind::Shell),
-        entry("b2", BackgroundKind::Monitor),
-        entry("s3", BackgroundKind::Monitor),
-    ];
-    let pill = "1 shell, 2 monitors";
-    let wide = plain(&footer(&app, 160).0);
-    assert!(wide.contains(&format!(" · {pill} · ↓ to manage")), "{wide}");
-    assert!(wide.ends_with("scripted"), "{wide}");
-    let tip = "↓ to manage";
-    let left = &wide[..wide.find(tip).unwrap() + tip.len()];
-    let mut cut = false;
-    for width in (12..=160).rev() {
-        let text = plain(&footer(&app, width).0);
-        assert!(text.width() <= width, "{width}: {text}");
-        if text.contains(pill) {
-            assert!(!cut, "the pill came back at {width}: {text}");
-            continue;
-        }
-        // 整行截断之前右侧已经省光；截断时只从末尾切掉一段，前面（含 pill 的前半）原样。
-        cut = true;
-        assert!(!text.contains("scripted"), "{width}: {text}");
-        assert!(
-            left.starts_with(text.trim_end_matches('…')),
-            "{width}: {text}"
-        );
-    }
-    assert!(cut);
+fn clicking_the_cockpit_hint_opens_the_cockpit() {
+    use crate::ui::cockpit::Kind;
+    let quiet = news_app(&[]);
+    let line = crate::ui::pane::input_line(&quiet, 100);
+    let targets = slot_targets(&quiet, &line);
+    assert!(
+        targets
+            .iter()
+            .any(|(_, w, t)| matches!(t, Target::OpenCockpit)
+                && *w == string_width("← agent cockpit")),
+        "{}",
+        line.plain()
+    );
+    let app = news_app(&[("b", Kind::Need)]);
+    let line = crate::ui::pane::input_line(&app, 100);
+    let text = line.plain();
+    let targets = slot_targets(&app, &line);
+    let (at, width, _) = targets
+        .iter()
+        .find(|(_, _, t)| matches!(t, Target::OpenCockpit))
+        .unwrap_or_else(|| panic!("{text}"));
+    assert_eq!(*width, string_width("← ● 1 needs you"));
+    assert!(
+        text[text.char_indices().nth(*at).unwrap().0..].starts_with("← ● 1 needs you"),
+        "{text}"
+    );
+    assert!(
+        targets
+            .iter()
+            .any(|(_, _, t)| matches!(t, Target::Shortcuts))
+    );
 }

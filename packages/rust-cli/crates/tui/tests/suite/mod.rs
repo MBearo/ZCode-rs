@@ -1,11 +1,14 @@
 mod agents_tree;
 mod agents_view;
+mod auto_compact;
 mod auto_restore;
 mod background;
 mod background_asks;
 #[cfg(unix)]
 mod background_pty;
 mod cd;
+mod cockpit_hint;
+mod cockpit_presence;
 mod compacted_resume;
 mod context;
 mod context_low;
@@ -27,6 +30,7 @@ mod footer_viewing;
 mod fork;
 mod fork_agent;
 mod goal;
+mod hover;
 mod input_bash;
 mod input_editor;
 mod input_files;
@@ -53,6 +57,7 @@ mod panic_terminal;
 mod peers;
 mod permissions;
 mod plan_open;
+mod program_status;
 mod projects;
 #[cfg(unix)]
 mod pty;
@@ -63,11 +68,13 @@ mod queue_send_now;
 mod resume_page;
 mod resume_store;
 mod sessions_seed;
+mod shot;
 mod skills;
 mod slash;
 mod stall;
 #[cfg(unix)]
 mod standalone_pty;
+mod startup;
 mod stream;
 mod stub_services;
 mod styles;

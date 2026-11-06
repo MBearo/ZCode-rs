@@ -397,6 +397,25 @@ fn billing_and_quota_codes_are_quota_exhausted() {
     ));
 }
 
+/// 修 bug（2026-11-02，provider-errors.md §5.1）：套餐用尽的句式带着 `rate_limit_error` 到达时也是配额用尽。
+#[test]
+fn plan_limit_wording_beats_the_rate_limit_type() {
+    let body = api_error(
+        "rate_limit_error",
+        "You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends.",
+    );
+    assert_eq!(failure(429, &[], &body).class, Class::QuotaExhausted);
+    assert!(matches!(
+        from_stream(&body),
+        ModelError::QuotaExhausted { .. }
+    ));
+    let plain = api_error(
+        "rate_limit_error",
+        "Number of requests has exceeded your rate limit",
+    );
+    assert_eq!(failure(429, &[], &plain).class, Class::RateLimited);
+}
+
 /// 流里不带事件名的错误块按错误分类（provider-errors.md D20）；正常的块不算。
 #[test]
 fn unnamed_error_frames_are_errors() {

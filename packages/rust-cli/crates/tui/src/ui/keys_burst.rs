@@ -24,6 +24,8 @@ impl App {
         let Some(key) = self.keys.keyboard.admit(key) else {
             return actions;
         };
+        // 手在键盘上：鼠标下面的高亮直到鼠标再动之前不再有意义（tui-select.md §9）。
+        self.clear_hover();
         if self.keys.burst.is_none() {
             actions.extend(self.dispatch(key, now));
             return actions;
@@ -58,6 +60,8 @@ impl App {
     /// 焦点变化（`Event::FocusGained` / `FocusLost`）。
     pub fn focus_changed(&mut self) {
         self.keys.keyboard.focus_changed();
+        // 离开窗口之后终端不再报告鼠标，存的位置不再对应它（tui-select.md §9）。
+        self.clear_hover();
     }
 
     fn flush_due(&mut self, now: Instant, actions: &mut Vec<Action>) {
@@ -194,7 +198,6 @@ impl App {
         self.overlay.is_none()
             && self.pending().is_none()
             && self.view.peer_held().is_none()
-            && self.focus.is_none()
             && self.viewing.is_none()
             && self.port.find.is_none()
             && self.composer.search.is_none()

@@ -59,6 +59,26 @@ pub(super) const QUOTA_CODES: [&str; 7] = [
     "exceeded_current_quota_error",
 ];
 
+/// 套餐、配额用尽的说法（不区分大小写；provider-errors.md §5.1，D4）：码不可靠时按它认，只看 4xx。
+///
+/// 修 bug（2026-11-02）：Kimi 的套餐用量上限（`You've reached your 5-hour usage limit. Your quota will reset when the
+/// current 5-hour window ends. To continue now, purchase extra usage or upgrade your plan: …`）带的是限流码，以前归
+/// `RateLimited`，每个回合白白重试 10 次（2026-10-31 至 11-02 的日志里 28 次）才失败，重试行一直说 `is limiting
+/// requests`。等几分钟不会好，所以按句式归 `QuotaExhausted`、不重试。只收“等不会好”的说法：`usage limit` 单独出现
+/// 也可能是每分钟的限流，不收。
+const QUOTA_PHRASES: [&str; 4] = [
+    "quota will reset",
+    "upgrade your plan",
+    "purchase extra usage",
+    "exceeded your current quota",
+];
+
+/// 正文（不区分大小写）说的是不是套餐、配额用尽。
+pub(super) fn quota_exhausted(raw: &str) -> bool {
+    let raw = raw.to_lowercase();
+    QUOTA_PHRASES.iter().any(|phrase| raw.contains(phrase))
+}
+
 /// 内容安全拦截的错误码（不是结束原因；provider-errors.md §2.3）。
 pub(super) const CONTENT_FILTER_CODES: [&str; 1] = ["content_filter"];
 

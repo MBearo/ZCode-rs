@@ -71,6 +71,8 @@ pub struct Afk {
     last_input: Option<Instant>,
     /// 终端报告的焦点；终端不报告时为 None（照常计时）。
     focused: Option<bool>,
+    /// 见过一次失去焦点：之后才按“有焦点时不计”处理（Puffin `kept/afk.rs`：终端在启动时报告有焦点不算）。
+    lost_once: bool,
     timer: Option<Timer>,
 }
 
@@ -90,6 +92,7 @@ impl Afk {
     /// 终端报告焦点变化。
     pub fn focus(&mut self, focused: bool) {
         self.focused = Some(focused);
+        self.lost_once |= !focused;
     }
 
     /// 视图里的待处理交互（每次视图变化后）：换了提问就重新计时；不是提问时停。
@@ -130,7 +133,7 @@ impl Afk {
     pub fn tick(&mut self, now: Instant) -> Option<Tick> {
         let config = self.config?;
         let timer = self.timer.as_mut().filter(|timer| !timer.fired)?;
-        if self.focused == Some(true) {
+        if self.focused == Some(true) && self.lost_once {
             timer.start = now;
         }
         let since = self

@@ -67,11 +67,3 @@ pub fn cancel(lang: Lang) -> &'static str {
 pub fn confirm(lang: Lang) -> &'static str {
     lang.pick("Confirm", "确认启用")
 }
-
-/// 底部的按键提示（`{键}` 模板，tui.md §7.4）。
-pub fn hint(lang: Lang) -> &'static str {
-    lang.pick(
-        "{↑/↓} to navigate · {Space} to check · {Enter} to select · {Esc} to cancel",
-        "{↑/↓} 移动 · {space} 勾选 · {enter} 选择 · {esc} 取消",
-    )
-}

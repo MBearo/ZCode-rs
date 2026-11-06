@@ -51,6 +51,8 @@ pub(crate) struct Machines {
     scope: TaskScope,
     /// 清单与连接（R4，remote-exec.md §21.2）：`start` 时建（`-p` 不连机器时没有）。
     fleet: OnceLock<Arc<Fleet>>,
+    /// 建议的主机从这个 ssh 配置读（remote-exec.md §21.3）：`start` 时记下。
+    ssh_config: OnceLock<std::path::PathBuf>,
 }
 
 /// 启动时的输入（自己持有，不借用 `Startup`：入口之后会把 `Startup` 的一部分移走）。
@@ -68,6 +70,8 @@ pub(crate) struct Start {
     pub mcp: std::collections::BTreeMap<String, Vec<rust_cli_kernel_api::mcp::McpConnect>>,
     /// 绑定到远端机器的全部 MCP 服务器（服务器名，机器名；含停用的）：TUI 的工具行标出机器（§22.8）。
     pub mcp_marks: Vec<(String, String)>,
+    /// TUI 建议添加的主机读的 ssh 配置（remote-exec.md §21.3）：测试变量给的 `-F` 文件，否则 `~/.ssh/config`。
+    pub ssh_config: std::path::PathBuf,
 }
 
 /// 执行器的 npm 来源（F100，remote-exec.md §26.7）：入口只建一个，机器清单里的机器与部署配置的 SSH 主 env 共用（同一个
@@ -98,6 +102,10 @@ impl Start {
         let assume = &facts.hooks.assume;
         let ssh = facts.hooks.machine_ssh.clone();
         let executor = facts.process.executor_paths();
+        let ssh_config = ssh.config.clone().map_or_else(
+            || facts.process.home.join(".ssh").join("config"),
+            std::path::PathBuf::from,
+        );
         Self {
             source,
             list: MachineList::new(&paths.machines()),
@@ -114,6 +122,7 @@ impl Start {
             executor,
             mcp: std::collections::BTreeMap::new(),
             mcp_marks: Vec::new(),
+            ssh_config,
         }
     }
 
@@ -146,14 +155,15 @@ impl Machines {
                 tracing::error!(task = panic.task, message = %panic.message, "machine task panicked");
             }),
             fleet: OnceLock::new(),
+            ssh_config: OnceLock::new(),
         }
     }
 
     /// TUI 的机器服务（R4，§21.2）；`start` 之前或不连机器时没有。
-    pub(crate) fn service(&self) -> Option<Arc<dyn rust_cli_tui::machines::Machines>> {
-        self.fleet
-            .get()
-            .map(|fleet| crate::frontends::tui_machines::service(fleet.clone()))
+    pub(crate) fn service(&self) -> Option<Arc<dyn rust_cli_tui_ports::machines::Machines>> {
+        self.fleet.get().map(|fleet| {
+            crate::frontends::tui_machines::service(fleet.clone(), self.ssh_config.get().cloned())
+        })
     }
 
     pub(crate) fn registry(&self) -> Arc<dyn EnvironmentRegistry> {
@@ -175,6 +185,7 @@ impl Machines {
                 Vec::new()
             }
         };
+        let _ = self.ssh_config.set(start.ssh_config.clone());
         let list = start.list.clone();
         let mcp = std::mem::take(&mut start.mcp);
         let make = move |entry: &MachineEntry| endpoint::machine(&start, entry);

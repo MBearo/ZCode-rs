@@ -246,7 +246,7 @@ fn manual(credentials: &Credentials, provider: &str) -> bool {
 }
 
 /// 手工 key 连接：有身份，且有按身份存的 key。
-fn manual_authorized(credentials: &Credentials, provider: &str) -> bool {
+pub(crate) fn manual_authorized(credentials: &Credentials, provider: &str) -> bool {
     credentials
         .present(&identity_key(provider))
         .is_some_and(|identity| {

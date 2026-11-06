@@ -9,6 +9,8 @@
 //!   `ZAI_PRODUCTION_BUSINESS_BASE_URL` / `ZAI_TEST_BUSINESS_BASE_URL`，缺省 `https://api.z.ai`（测试环境
 //!   `https://api.z.ai`）。工作线 F47：z.ai 的 token 与团队都照 App，以前按 Node 的换证 adapter 固定
 //!   `https://api.z.ai`（生产缺省相同）。
+//! - 套餐额度（Puffin `/usage`，platform.md §11.3）：`ZCODE_BIGMODEL_USAGE_QUOTA_URL`，其次 `BIGMODEL_USAGE_QUOTA_URL`
+//!   覆盖整条 quota/limit 地址（App `resolveQuotaUrlFromEnv`）。
 
 use rust_cli_platform::AccountOrigins;
 
@@ -112,6 +114,12 @@ pub(crate) fn account_origins(
         bigmodel_api: bigmodel,
         bigmodel_team_plans: format!("{team_plans_origin}/coding-plan/team/plans"),
         client_version: version.to_owned(),
+        // App `resolveQuotaUrlFromEnv`：原样留着，查询时才解析（不对时那一次查询失败，不挡启动，platform.md §11.3）。
+        usage_quota_url: first(&[
+            rust_cli_base::names::env::ZCODE_BIGMODEL_USAGE_QUOTA_URL,
+            rust_cli_base::names::env::BIGMODEL_USAGE_QUOTA_URL,
+        ])
+        .map(|(_, value)| value),
     })
 }
 

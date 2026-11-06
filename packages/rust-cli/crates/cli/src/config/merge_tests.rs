@@ -136,28 +136,6 @@ fn the_ui_locale_is_taken_from_the_last_layer_with_a_valid_value() {
     assert!(warnings.is_empty());
 }
 
-/// `ui.theme`（tui-manage.md §2.1）：同 `ui.locale` 的按键覆盖，只认 Node 的三个值。
-#[test]
-fn the_ui_theme_is_taken_from_the_last_layer_with_a_valid_value() {
-    use rust_cli_base::ui_prefs::UiTheme;
-    let user = object(json!({"ui": {"theme": "light"}}));
-    let projects = [
-        object(json!({"ui": {"theme": "dark"}})),
-        object(json!({"ui": {"theme": "dark-ansi"}})),
-    ];
-    let mut warnings = Vec::new();
-    assert_eq!(
-        theme(&layers(&user, &projects), &mut warnings),
-        Some(UiTheme::Dark)
-    );
-    assert_eq!(warnings.len(), 1, "{warnings:?}");
-    let mut warnings = Vec::new();
-    assert_eq!(
-        theme(&layers(&user, &[]), &mut warnings),
-        Some(UiTheme::Light)
-    );
-}
-
 /// 自动更新的开关（update.md §10，F48）：顶层 `checkForUpdateOnStartup` 按键覆盖，只认布尔，缺省开。
 #[test]
 fn the_update_check_switch_is_taken_from_the_last_layer_with_a_boolean() {
@@ -236,4 +214,31 @@ fn disabled_servers_and_origins_follow_the_shadowing() {
     assert!(!found.origins["repo"].user);
     // 离工作区根最近的项目文件。
     assert_eq!(found.origins["repo"].path, layers(&user, &projects)[2].path);
+}
+
+/// `compact.autoThresholdTokens`（compact.md §2.3）：按键覆盖，正整数才算，坏值记警告、跳过这一层；定了值的不是用户级
+/// 文件时说出是哪个文件（写回用户级配置改不了它）。
+#[test]
+fn the_auto_compact_threshold_is_taken_from_the_last_layer_with_a_positive_count() {
+    let user = object(json!({"compact": {"autoThresholdTokens": 150_000}}));
+    let projects = [
+        object(json!({"compact": {"autoThresholdTokens": 120_000}})),
+        object(json!({"compact": {"autoThresholdTokens": "soon"}})),
+        object(json!({"compact": {"autoThresholdTokens": 0}})),
+    ];
+    let mut warnings = Vec::new();
+    let (tokens, pinned) = compact_at(&layers(&user, &projects), &mut warnings);
+    assert_eq!(tokens, Some(120_000));
+    assert_eq!(pinned.as_deref(), Some("project"));
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    let mut warnings = Vec::new();
+    assert_eq!(
+        compact_at(&layers(&user, &[]), &mut warnings),
+        (Some(150_000), None)
+    );
+    assert_eq!(
+        compact_at(&layers(&object(json!({})), &[]), &mut warnings),
+        (None, None)
+    );
+    assert!(warnings.is_empty());
 }

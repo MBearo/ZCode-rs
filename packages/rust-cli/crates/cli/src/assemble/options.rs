@@ -14,7 +14,7 @@ use rust_cli_model::{
     BYTE_IDLE_MAX, BYTE_IDLE_MIN, ByteIdle, EVENT_IDLE_FLOOR, STALL_NOTICE, StreamIdle,
 };
 use rust_cli_paths::StoragePaths;
-use rust_cli_runtime::{CompactConfig, CompactThresholds};
+use rust_cli_runtime::{AutoCompactAt, CompactConfig, CompactThresholds};
 
 /// 关掉自动压缩并去掉“Run /compact”提示的变量（F55：以前在一个函数里写了两次）。
 const DISABLE_COMPACT: &str = rust_cli_base::names::env::DISABLE_COMPACT;
@@ -99,7 +99,8 @@ fn window(value: &str) -> Option<u64> {
 }
 
 /// `limits`：压缩的上限查询（平台层或显式覆盖的内置规则，修复线 F61：两种模式都接，compact.md §2）；
-/// `max_output_tokens` 是入口读一次的 `ZCODE_MAX_OUTPUT_TOKENS`（F58）。
+/// `max_output_tokens` 是入口读一次的 `ZCODE_MAX_OUTPUT_TOKENS`（F58）。配置的 `compact.autoThresholdTokens` 由入口放进
+/// 返回值的 `at`（compact.md §2.3）。
 pub(crate) fn compact(
     snapshot: &EnvSnapshot,
     max_output_tokens: Option<u32>,
@@ -119,7 +120,9 @@ pub(crate) fn compact(
                 .and_then(window),
             // 摘要的输出预留也看输出上限（compact.md §2，F42）。
             max_output_tokens: max_output_tokens.map(u64::from),
+            at: None,
         },
+        at: AutoCompactAt::default(),
         limits: Some(limits),
     }
 }

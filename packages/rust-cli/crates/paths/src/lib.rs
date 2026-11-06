@@ -62,12 +62,15 @@ const TASKS_DIR: &str = "tasks";
 const LOG_DIR: &str = concat!(rust_cli_dir!(), "/log");
 /// 跨会话的登记处与收件箱 socket（docs/specs/rust-cli/cross-session.md §2.2）。
 const PEERS_DIR: &str = concat!(rust_cli_dir!(), "/peers");
+const COCKPIT_DIR: &str = concat!(rust_cli_dir!(), "/cockpit");
 /// 自动更新的缓存（docs/specs/rust-cli/update.md §4，F48）。
 const UPDATE_CACHE: &str = concat!(rust_cli_dir!(), "/version.json");
 /// 远端机器的清单（docs/specs/rust-cli/remote-exec.md §20.3.1）。
 const MACHINES_FILE: &str = concat!(rust_cli_dir!(), "/machines.json");
 /// MCP 服务器绑定到哪台机器（docs/specs/rust-cli/remote-exec.md §22.2）。
 const MCP_MACHINES_FILE: &str = concat!(rust_cli_dir!(), "/mcp-machines.json");
+/// 上次启动的缺省模型（docs/specs/rust-cli/performance.md §12.4）。
+const DEFAULT_MODEL_FILE: &str = concat!(rust_cli_dir!(), "/default-model.json");
 /// 规整后目录名的上限（UTF-16 码元）。
 const MAX_SANITIZED_LENGTH: usize = 200;
 /// `<dataBaseDir>` 的用户根下的配置根（`.zcode/v2`）。
@@ -317,6 +320,12 @@ impl StoragePaths {
         self.root.join(PEERS_DIR)
     }
 
+    /// 驾驶舱的笔记目录 `<storage.dir>/rust-cli/cockpit`：每个会话的 `<id>.turn.json` 与 `<id>.seen.json`
+    /// （docs/specs/rust-cli/tui-cockpit.md §1）。
+    pub fn cockpit(&self) -> StoragePath {
+        self.root.join(COCKPIT_DIR)
+    }
+
     /// 执行器的目录 `~/.zcode/rust-cli/exec/`（docs/specs/rust-cli/remote-exec.md §19.4）：在用户根下，不跟
     /// `storage.dir` 走（执行器模式不读配置；远端也按同一个位置找）。
     pub fn executor(&self) -> ExecutorPaths {
@@ -341,6 +350,12 @@ impl StoragePaths {
     /// §22.2）：用户根下，不随 `storage.dir`（同 [`StoragePaths::machines`]）。
     pub fn mcp_machines(&self) -> StoragePath {
         StoragePath(user_path(&self.home, MCP_MACHINES_FILE))
+    }
+
+    /// 上次启动定下的缺省模型 `~/.zcode/rust-cli/default-model.json`（docs/specs/rust-cli/performance.md §12.4，F140）：
+    /// 下次启动时状态栏先用它。用户根下，不随 `storage.dir`（账号是用户级的，同 [`StoragePaths::machines`]）。
+    pub fn default_model(&self) -> StoragePath {
+        StoragePath(user_path(&self.home, DEFAULT_MODEL_FILE))
     }
 }
 

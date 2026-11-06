@@ -1,26 +1,70 @@
-//! 交互的回答（docs/specs/rust-cli/tui.md §5.2）。
+//! 请求的界面状态与按键（docs/specs/rust-cli/tui-kit.md §4.2「权限询问、提问、计划审批」，照 Puffin 的 `shell/asks.rs`）：
+//! 打开后点亮之前不能回答、数字与 ⏎ 回答、打字选中 Deny 并带着字发出、提问逐页、计划的批准与继续计划、板上的字、槽的键、
+//! 旧界面多出的可改前缀。
 use std::time::{Duration, Instant};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
 use rust_cli_kernel_api::ids::{InteractionId, ToolUseId};
+use rust_cli_kernel_api::orchestration::{Answer, PermissionAnswer};
+use rust_cli_kernel_api::permission::{PermissionMode, PermissionRule};
+use rust_cli_kernel_api::session_api::{KernelEvent, SequencedEvent};
 use serde_json::{Value, json};
 
 use super::*;
+use crate::ui::app::{Action, App};
 use crate::ui::i18n::Lang;
-use crate::ui::palette::{ColorLevel, Palette};
-use crate::ui::text::plain;
+use crate::ui::lines::plain;
 
-fn permission() -> InteractionRequest {
+/// 点亮之后（[`ARM_TICKS`] 个 tick 之后）。
+const ARMED: Duration = Duration::from_millis(ARM_TICKS as u64 * TICK_MS + 1);
+
+fn app(lang: Lang) -> App {
+    crate::ui::test_support::app_in(lang)
+}
+
+/// 请求 `id` 到达（视图收到 `InteractionAsked`，界面跟上）。
+fn ask(app: &mut App, id: &str, request: InteractionRequest, now: Instant) {
+    let seq = app.view.pending_all().len() as u64 + 1;
+    app.view.apply(
+        SequencedEvent {
+            seq,
+            revision: 0,
+            event: KernelEvent::InteractionAsked {
+                interaction: InteractionId::new(id),
+                request,
+            },
+        },
+        0,
+    );
+    app.sync_interaction(now);
+}
+
+fn bash(command: &str, suggestions: &[&str]) -> InteractionRequest {
     InteractionRequest::Permission {
         machine: Default::default(),
         tool_use: ToolUseId::new("tu1"),
         tool: "Bash".into(),
-        input: json!({"command": "rm -rf build", "description": "clean the build"}),
-        message: "rm needs approval".into(),
-        suggestions: Vec::new(),
+        input: json!({"command": command, "description": "clean the build"}),
+        message: "This command requires approval".into(),
+        suggestions: suggestions
+            .iter()
+            .map(|content| PermissionRule {
+                tool: "Bash".into(),
+                content: Some((*content).into()),
+            })
+            .collect(),
         rule_seed: None,
         asked_by: None,
     }
+}
+
+/// 带“不再询问”种子的 Bash 询问：种子由内核放进询问（算法在 policy），界面只显示、编辑。
+fn seeded(command: &str, suggestions: &[&str], seed: &str) -> InteractionRequest {
+    let mut request = bash(command, suggestions);
+    if let InteractionRequest::Permission { rule_seed, .. } = &mut request {
+        *rule_seed = Some(seed.to_owned());
+    }
+    request
 }
 
 fn question() -> InteractionRequest {
@@ -40,325 +84,300 @@ fn plan() -> InteractionRequest {
     }
 }
 
-/// 弹出后 200 ms 依次按键，返回第一个回答。
-fn answer(request: &InteractionRequest, keys: &[KeyCode]) -> Option<Value> {
-    let start = Instant::now();
-    let mut ui = Interaction::new(InteractionId::new("i1"), request, start);
-    let at = start + Duration::from_millis(200);
-    // 比回答的 JSON（同前端交给内核之前的形状，工作线 F134 起回答是 `Answer`）。
+/// 依次按键（都在 `at`），返回第一个回答。
+fn press(app: &mut App, keys: &[KeyCode], at: Instant) -> Option<Action> {
     keys.iter()
-        .find_map(|code| ui.on_key(request, KeyEvent::new(*code, KeyModifiers::NONE), at))
-        .map(|answer| serde_json::to_value(answer).unwrap())
+        .find_map(|code| app.on_key(crate::ui::test_support::key(*code), at))
 }
 
 fn chars(text: &str) -> Vec<KeyCode> {
     text.chars().map(KeyCode::Char).collect()
 }
 
-#[test]
-fn permission_answers_allow_deny_and_feedback() {
-    assert_eq!(
-        answer(&permission(), &[KeyCode::Enter]),
-        Some(json!({"decision": "allow"}))
-    );
-    assert_eq!(
-        answer(&permission(), &[KeyCode::Down, KeyCode::Enter]),
-        Some(json!({"decision": "deny"}))
-    );
-    assert_eq!(
-        answer(&permission(), &[KeyCode::Esc]),
-        Some(json!({"decision": "deny"}))
-    );
-    let mut keys = vec![KeyCode::Tab];
-    keys.extend(chars("use make clean"));
-    keys.push(KeyCode::Enter);
-    assert_eq!(
-        answer(&permission(), &keys),
-        Some(json!({"decision": "deny", "feedback": "use make clean"}))
-    );
+/// 期望的回答写成 JSON（同前端交给内核之前的形状），比较时换成 `Answer`。
+fn resolve(id: &str, answer: Value) -> Option<Action> {
+    let answer: Answer = serde_json::from_value(answer).expect("an answer");
+    Some(Action::Resolve {
+        interaction: InteractionId::new(id),
+        answer,
+    })
 }
 
-#[test]
-fn keys_right_after_the_view_opens_are_ignored() {
-    let request = permission();
+/// 一个请求打开、点亮之后按 `keys` 的回答。
+fn answered(request: InteractionRequest, keys: &[KeyCode]) -> Option<Action> {
     let start = Instant::now();
-    let mut ui = Interaction::new(InteractionId::new("i1"), &request, start);
-    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-    assert_eq!(ui.on_key(&request, enter, start), None);
-    assert!(
-        ui.on_key(&request, enter, start + Duration::from_millis(151))
-            .is_some()
-    );
+    let mut app = app(Lang::En);
+    ask(&mut app, "i1", request, start);
+    press(&mut app, keys, start + ARMED)
+}
+
+/// 板上的行与槽（纯文字）。
+fn board(app: &App, at: Instant) -> (Vec<String>, String) {
+    let (laid, _, _) = app.ask_laid(100, at, false).expect("an ask is open");
+    let rows = laid
+        .lines
+        .iter()
+        .map(|line| plain(line).trim_end().to_owned())
+        .collect();
+    let slot = laid.slot.iter().map(|span| &*span.text).collect::<String>();
+    (rows, slot.trim().to_owned())
 }
 
 #[test]
-fn questions_answer_with_labels_or_decline() {
+fn permission_answers_by_digit_enter_or_typing() {
+    let deny = json!({"decision": "deny"});
     assert_eq!(
-        answer(&question(), &[KeyCode::Char('2')]),
-        Some(json!({"decision": "answered", "answers": {"Which database?": "SQLite"}}))
+        answered(bash("rm -rf build", &[]), &[KeyCode::Enter]),
+        resolve("i1", json!({"decision": "allow"}))
     );
-    // Other 行：输入自己的回答。
-    let mut keys = vec![KeyCode::Char('3')];
-    keys.extend(chars("DuckDB"));
+    // 没有建议规则：Allow once、Full access、Deny。
+    assert_eq!(
+        answered(bash("rm -rf build", &[]), &[KeyCode::Char('3')]),
+        resolve("i1", deny.clone())
+    );
+    assert_eq!(
+        answered(bash("rm -rf build", &[]), &[KeyCode::Up, KeyCode::Enter]),
+        resolve("i1", deny)
+    );
+    // 打字：选中 Deny，⏎ 带着字发出。
+    let mut keys = chars("use make clean");
     keys.push(KeyCode::Enter);
     assert_eq!(
-        answer(&question(), &keys),
-        Some(json!({"decision": "answered", "answers": {"Which database?": "DuckDB"}}))
+        answered(bash("rm -rf build", &[]), &keys),
+        resolve(
+            "i1",
+            json!({"decision": "deny", "feedback": "use make clean"})
+        )
     );
+    // 有建议规则：Always allow 记住它们。
     assert_eq!(
-        answer(&question(), &[KeyCode::Esc]),
-        Some(json!({"decision": "declined"}))
+        answered(bash("npm test", &["npm test *"]), &[KeyCode::Char('2')]),
+        resolve(
+            "i1",
+            json!({"decision": "allow", "remember": [{"tool": "Bash", "content": "npm test *"}]})
+        )
+    );
+    // esc 停下回合，不是回答。
+    assert_eq!(
+        answered(bash("rm -rf build", &[]), &[KeyCode::Esc]),
+        Some(Action::Interrupt)
     );
 }
 
-/// 修复线 F20：批准只关掉 plan（回答里的模式是弹出时的权限模式，只作记录），第二行是继续计划。
+/// 打开后 [`ARM_TICKS`] 个 tick 内 ⏎ 与数字不起作用（Puffin `armed`）；回答发出后回答的键不起作用，直到它离开视图。
 #[test]
-fn plan_approval_approves_or_keeps_planning() {
-    assert_eq!(
-        answer(&plan(), &[KeyCode::Enter]),
-        Some(json!({"decision": "approve", "mode": "default"}))
+fn answers_wait_to_arm_and_answer_once() {
+    let start = Instant::now();
+    let mut app = app(Lang::En);
+    ask(&mut app, "i1", bash("rm -rf build", &[]), start);
+    assert_eq!(press(&mut app, &[KeyCode::Enter], start), None);
+    assert_eq!(press(&mut app, &[KeyCode::Char('1')], start), None);
+    assert!(app.composer.area.text().is_empty());
+    let at = start + ARMED;
+    assert!(press(&mut app, &[KeyCode::Enter], at).is_some());
+    assert_eq!(press(&mut app, &[KeyCode::Enter], at), None);
+    assert_eq!(press(&mut app, &[KeyCode::Char('3')], at), None);
+}
+
+/// Full access 先经确认框；确认后允许这一次再切到完全访问（Puffin `YoloThen::Answer`）。
+#[test]
+fn full_access_asks_first() {
+    let start = Instant::now();
+    let mut app = app(Lang::En);
+    ask(&mut app, "i1", bash("rm -rf build", &[]), start);
+    let at = start + ARMED;
+    assert_eq!(press(&mut app, &[KeyCode::Char('2')], at), None);
+    assert!(matches!(
+        app.overlay,
+        Some(crate::ui::app::Overlay::YoloConfirm(_))
+    ));
+    let confirmed = press(
+        &mut app,
+        &[KeyCode::Up, KeyCode::Char(' '), KeyCode::Char('2')],
+        at,
     );
     assert_eq!(
-        answer(&plan(), &[KeyCode::Char('1')]),
-        Some(json!({"decision": "approve", "mode": "default"}))
+        confirmed,
+        Some(Action::Many(vec![
+            Action::Resolve {
+                interaction: InteractionId::new("i1"),
+                answer: Answer::Permission(PermissionAnswer::Allow {
+                    remember: Vec::new(),
+                }),
+            },
+            Action::SetMode(PermissionMode::BypassPermissions),
+        ]))
     );
-    let mut keys = vec![KeyCode::Char('2')];
-    keys.extend(chars("smaller steps"));
+}
+
+#[test]
+fn questions_answer_by_pick_or_own_words() {
+    assert_eq!(
+        answered(question(), &[KeyCode::Char('2')]),
+        resolve(
+            "i1",
+            json!({"decision": "answered", "answers": {"Which database?": "SQLite"}})
+        )
+    );
+    assert_eq!(
+        answered(question(), &[KeyCode::Down, KeyCode::Enter]),
+        resolve(
+            "i1",
+            json!({"decision": "answered", "answers": {"Which database?": "SQLite"}})
+        )
+    );
+    // 输入框里的字是这一页自己的回答。
+    let mut keys = chars("DuckDB");
     keys.push(KeyCode::Enter);
     assert_eq!(
-        answer(&plan(), &keys),
-        Some(json!({"decision": "keep_planning", "feedback": "smaller steps"}))
+        answered(question(), &keys),
+        resolve(
+            "i1",
+            json!({"decision": "answered", "answers": {"Which database?": "DuckDB"}})
+        )
+    );
+}
+
+/// 修复线 F20：批准只关掉 plan（回答里的模式是弹出时的权限模式）；打字是继续计划，带着字。
+#[test]
+fn plans_approve_or_keep_planning() {
+    let approve = json!({"decision": "approve", "mode": "default"});
+    assert_eq!(
+        answered(plan(), &[KeyCode::Enter]),
+        resolve("i1", approve.clone())
     );
     assert_eq!(
-        answer(&plan(), &[KeyCode::Esc]),
-        Some(json!({"decision": "keep_planning"}))
+        answered(plan(), &[KeyCode::Char('1')]),
+        resolve("i1", approve)
+    );
+    let mut keys = chars("smaller steps");
+    keys.push(KeyCode::Enter);
+    assert_eq!(
+        answered(plan(), &keys),
+        resolve(
+            "i1",
+            json!({"decision": "keep_planning", "feedback": "smaller steps"})
+        )
     );
 }
 
+/// 板上的字与 Puffin 一字不差：板头、`N more waiting`、编号的回答；输入框的灰字与槽是请求的。
 #[test]
-fn views_show_the_request() {
-    let palette = Palette::new(ColorLevel::Ansi16, None);
-    let view = View {
-        palette: &palette,
-        lang: Lang::En,
-        width: 60,
-        height: 40,
-        now_ms: 0,
-    };
-    let text = |request: &InteractionRequest| -> Vec<String> {
-        let ui = Interaction::new(InteractionId::new("i1"), request, Instant::now());
-        ui.lines(request, &view).0.iter().map(plain).collect()
-    };
-    let shown = text(&permission());
-    assert!(
-        shown.iter().any(|l| l.contains("Bash command")),
-        "{shown:?}"
+fn the_board_says_what_puffin_says() {
+    let start = Instant::now();
+    let mut app = app(Lang::En);
+    ask(
+        &mut app,
+        "i1",
+        bash("cargo build", &["cargo build:*"]),
+        start,
     );
-    assert!(shown.iter().any(|l| l.contains("│ rm -rf build")));
-    assert!(shown.iter().any(|l| l.contains("rm needs approval")));
-    // 工作线 F76：焦点行同提问视图的 `❯`（以前是选择列表组件的 `›` 与底色条）。
-    assert!(shown.iter().any(|l| l.contains("❯ 1. Yes")));
-    let shown = text(&plan());
-    assert!(shown.iter().any(|l| l.contains("Ready to code?")));
-    assert!(shown.iter().any(|l| l.contains("1. Yes, exit plan mode")));
-    assert!(shown.iter().any(|l| l.contains("2. No, keep planning")));
-    assert!(!shown.iter().any(|l| l.contains("auto-accept edits")));
-    let shown = text(&question());
-    assert!(shown.iter().any(|l| l.contains("Which database?")));
-    assert!(shown.iter().any(|l| l.contains("2. SQLite")));
-    // Edit 的审批带 diff 预览。
-    let edit = InteractionRequest::Permission {
-        machine: Default::default(),
-        tool_use: ToolUseId::new("tu4"),
-        tool: "Edit".into(),
-        input: json!({"file_path": "/w/a.rs", "old_string": "a", "new_string": "b"}),
-        message: String::new(),
-        suggestions: Vec::new(),
-        rule_seed: None,
-        asked_by: None,
-    };
-    let shown = text(&edit);
-    assert!(shown.iter().any(|l| l.contains("- a")), "{shown:?}");
-    assert!(shown.iter().any(|l| l.contains("+ b")));
-    assert!(shown.iter().any(|l| l.contains("make this edit to a.rs")));
-}
-
-/// 一个 Bash 询问；`seed` 是内核放进询问的“不再询问”种子（算法在 policy，`suggest_seed_tests.rs`）。
-fn bash_ask(command: &str, suggestions: &[&str], seed: Option<&str>) -> InteractionRequest {
-    InteractionRequest::Permission {
-        machine: Default::default(),
-        tool_use: ToolUseId::new("tu5"),
-        tool: "Bash".into(),
-        input: json!({ "command": command }),
-        message: "This command requires approval".into(),
-        suggestions: suggestions
-            .iter()
-            .map(|content| rust_cli_kernel_api::permission::PermissionRule {
-                tool: "Bash".into(),
-                content: Some((*content).into()),
-            })
-            .collect(),
-        rule_seed: seed.map(str::to_owned),
-        asked_by: None,
+    // 第二个请求是别的工具：同一工具的两个才多一个 Allow all（`allow_all_asks`）。
+    let mut other = bash("cargo test", &[]);
+    if let InteractionRequest::Permission {
+        tool_use,
+        tool,
+        input,
+        ..
+    } = &mut other
+    {
+        *tool_use = ToolUseId::new("tu9");
+        *tool = "Read".into();
+        *input = json!({"file_path": "/Users/dev/project/README.md"});
     }
-}
-
-fn suggested() -> InteractionRequest {
-    bash_ask("npm test", &["npm test *"], Some("npm test *"))
-}
-
-fn shown(request: &InteractionRequest, lang: Lang) -> Vec<String> {
-    let palette = Palette::new(ColorLevel::Ansi16, None);
-    let view = View {
-        palette: &palette,
-        lang,
-        width: 120,
-        height: 40,
-        now_ms: 0,
+    ask(&mut app, "i2", other, start);
+    let (rows, slot) = board(&app, start + ARMED);
+    assert!(
+        rows[0].trim_start().starts_with("Run this command?"),
+        "{rows:#?}"
+    );
+    assert!(rows[0].ends_with("1 more waiting"), "{rows:#?}");
+    let starts = |at: usize, text: &str| {
+        assert!(
+            rows[at].trim_start().starts_with(text),
+            "{at}: {:?}",
+            rows[at]
+        );
     };
-    let mut ui = Interaction::new(InteractionId::new("i1"), request, Instant::now());
-    ui.workspace = "/w".to_owned();
-    ui.lines(request, &view).0.iter().map(plain).collect()
+    starts(1, "1  Allow once");
+    starts(2, "2  Always allow");
+    assert!(rows[2].contains("Bash(cargo build:*)"), "{:?}", rows[2]);
+    starts(3, "3  Full access");
+    starts(4, "4  Deny");
+    assert_eq!(slot, "1–4 answer  esc stop");
+    assert_eq!(app.ask_placeholder(), Some("Tell it what to do instead"));
+    // 打了字：⏎ 拒绝并带着字发出。
+    press(&mut app, &chars("no"), start + ARMED);
+    assert_eq!(board(&app, start + ARMED).1, "⏎ deny and send");
 }
 
-fn remember(content: &str) -> Value {
-    json!({"decision": "allow", "remember": [{"tool": "Bash", "content": content}]})
-}
-
-/// 判决链给了建议规则：多一行"不再询问"；Bash 的这一行是种子（工作线 F72，shell-permissions.md §4.10）。
+/// 旧界面多出的（工作线 F72）：选中 Always allow 时 ⇥ 把 Bash 的前缀放进输入框，⏎ 记住改过的前缀。
 #[test]
-fn a_suggested_rule_adds_the_dont_ask_again_row() {
-    assert_eq!(
-        answer(&suggested(), &[KeyCode::Char('2')]),
-        Some(remember("npm test *"))
-    );
-    assert_eq!(
-        answer(&suggested(), &[KeyCode::Down, KeyCode::Enter]),
-        Some(remember("npm test *"))
-    );
-    assert_eq!(
-        answer(
-            &suggested(),
-            &[KeyCode::Down, KeyCode::Down, KeyCode::Enter]
+fn the_bash_prefix_can_be_edited() {
+    let start = Instant::now();
+    let mut app = app(Lang::En);
+    ask(
+        &mut app,
+        "i1",
+        seeded(
+            "git push origin main",
+            &["git push origin main"],
+            "git push *",
         ),
-        Some(json!({"decision": "deny"}))
+        start,
     );
+    let at = start + ARMED;
+    press(&mut app, &[KeyCode::Down], at);
+    // 选中 Always allow：槽照旧是 Puffin 的（⇥ 改规则只列在 `?` 面板里，tui-kit.md §4.3）。
+    assert_eq!(board(&app, at).1, "1–4 answer  esc stop");
+    press(&mut app, &[KeyCode::Tab], at);
+    assert_eq!(board(&app, at).1, "⏎ always allow  esc stop");
+    // 改前缀：删到只剩第一个字再打（删光了就不再是前缀，⏎ 是 Deny，`settle_ask`）。
+    let seeded = app.composer.area.text().to_owned();
+    assert!(seeded.starts_with('g'), "{seeded:?}");
+    for _ in 1..seeded.chars().count() {
+        press(&mut app, &[KeyCode::Backspace], at);
+    }
+    press(&mut app, &chars("it push *"), at);
     assert_eq!(
-        answer(&suggested(), &[KeyCode::Char('3')]),
-        Some(json!({"decision": "deny"}))
-    );
-    let lines = shown(&suggested(), Lang::En);
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.contains("2. Yes, and don\u{2019}t ask again for: npm test *")),
-        "{lines:?}"
-    );
-    assert!(lines.iter().any(|l| l.contains("3. No")), "{lines:?}");
-    let lines = shown(&suggested(), Lang::Zh);
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.contains("2. 是，以后不再询问：npm test *")),
-        "{lines:?}"
+        press(&mut app, &[KeyCode::Enter], at),
+        resolve(
+            "i1",
+            json!({"decision": "allow", "remember": [{"tool": "Bash", "content": "git push *"}]})
+        )
     );
 }
 
-/// 这一行用询问里的种子，不用判决链的精确规则（种子怎么算是内核的事，tools `pipeline_tests.rs`）。
+/// 中文界面：板头与回答照翻译。
 #[test]
-fn the_seed_is_not_the_exact_suggestion() {
-    let request = bash_ask(
-        "git -C /repo status",
-        &["git -C /repo status"],
-        Some("git *"),
+fn the_chinese_board_is_translated() {
+    let start = Instant::now();
+    let mut app = app(Lang::Zh);
+    ask(&mut app, "i1", bash("rm -rf build", &[]), start);
+    let (rows, slot) = board(&app, start + ARMED);
+    assert!(!rows[0].starts_with("Run this command?"), "{rows:#?}");
+    assert!(
+        rows.iter().all(|row| !row.contains("Allow once")),
+        "{rows:#?}"
     );
-    assert_eq!(
-        answer(&request, &[KeyCode::Down, KeyCode::Enter]),
-        Some(remember("git *"))
-    );
+    assert!(!slot.contains("answer"), "{slot}");
 }
 
-/// 焦点在种子这一行时键入的字改种子（数字也是字），退格删字；`*` 是整个 Bash，空的只允许这一次。
+/// 照 Puffin（`AskUi.pinned`）：请求打开时视图钉在它的行，滚动一次放开；新的请求成为在回答的那个时重新钉住。`below` 时
+/// 槽是 `PgDn read on  esc stop`。
 #[test]
-fn the_seed_row_is_editable() {
-    let request = suggested();
-    let mut keys = vec![KeyCode::Down];
-    keys.extend([KeyCode::Backspace; 6]);
-    keys.extend(chars("run 2 *"));
-    keys.push(KeyCode::Enter);
-    assert_eq!(answer(&request, &keys), Some(remember("npm run 2 *")));
-    let mut keys = vec![KeyCode::Down];
-    keys.extend([KeyCode::Backspace; 10]);
-    keys.push(KeyCode::Char('*'));
-    keys.push(KeyCode::Enter);
+fn an_open_ask_pins_the_view_until_a_scroll() {
+    let start = Instant::now();
+    let mut app = app(Lang::En);
+    assert!(!app.ask_pinned());
+    ask(&mut app, "i1", bash("ls", &[]), start);
+    assert!(app.ask_pinned());
+    app.unpin_ask();
+    assert!(!app.ask_pinned());
+    let (laid, _, _) = app.ask_laid(100, start + ARMED, true).unwrap();
+    let slot: String = laid.slot.iter().map(|span| &*span.text).collect();
     assert_eq!(
-        answer(&request, &keys),
-        Some(json!({"decision": "allow", "remember": [{"tool": "Bash"}]}))
+        slot.split_whitespace().collect::<Vec<_>>(),
+        ["PgDn", "read", "on", "esc", "stop"]
     );
-    let mut keys = vec![KeyCode::Down];
-    keys.extend([KeyCode::Backspace; 10]);
-    keys.push(KeyCode::Enter);
-    assert_eq!(answer(&request, &keys), Some(json!({"decision": "allow"})));
-}
-
-/// 复合命令有多条建议：没有种子，这一行列出全部建议规则与工作目录，选它记住全部。
-#[test]
-fn several_suggestions_are_listed() {
-    let request = bash_ask(
-        "mytool a && othertool b c",
-        &["mytool a *", "othertool b *"],
-        None,
-    );
-    let lines = shown(&request, Lang::En);
-    assert!(
-        lines.iter().any(|l| l
-            .contains("2. Yes, and don't ask again for mytool a and othertool b commands in /w")),
-        "{lines:?}"
-    );
-    assert_eq!(
-        answer(&request, &[KeyCode::Char('2')]),
-        Some(json!({"decision": "allow", "remember": [
-            {"tool": "Bash", "content": "mytool a *"},
-            {"tool": "Bash", "content": "othertool b *"},
-        ]}))
-    );
-}
-
-/// 旧会话的询问（agents.md §4.1.2，工作线 F72）：标题后标出会话与子代理；会话没有标题时写“之前的会话”。
-#[test]
-fn asks_of_closed_sessions_name_the_session() {
-    let request = InteractionRequest::Permission {
-        machine: Default::default(),
-        tool_use: ToolUseId::new("tu9"),
-        tool: "Bash".into(),
-        input: json!({"command": "mytool build"}),
-        message: "This command requires approval".into(),
-        suggestions: Vec::new(),
-        rule_seed: None,
-        asked_by: Some("Explore".into()),
-    };
-    let palette = Palette::new(ColorLevel::Ansi16, None);
-    let title = |origin: &str, lang: Lang| {
-        let view = View {
-            palette: &palette,
-            lang,
-            width: 120,
-            height: 40,
-            now_ms: 0,
-        };
-        let mut ui = Interaction::new(InteractionId::new("i1"), &request, Instant::now());
-        ui.origin = Some(origin.to_owned());
-        plain(&ui.lines(&request, &view).0[1])
-    };
-    assert!(
-        title("Fix the build", Lang::En)
-            .ends_with("Bash command · from the Explore agent in session \"Fix the build\""),
-        "{}",
-        title("Fix the build", Lang::En)
-    );
-    assert!(title("", Lang::En).ends_with("· from the Explore agent in an earlier session"));
-    assert!(
-        title("Fix the build", Lang::Zh).ends_with("· 来自会话「Fix the build」的 Explore 子代理")
-    );
-    assert!(title(" ", Lang::Zh).ends_with("· 来自之前的会话的 Explore 子代理"));
 }

@@ -1,13 +1,13 @@
 //! 回合结束那一行的排版（docs/specs/rust-cli/tui-display.md §2.7，修复线 F118）。
-use ratatui::style::Modifier;
 use rust_cli_kernel_api::ids::TurnId;
 use rust_cli_kernel_api::turn_duration::TurnDuration;
+use rust_cli_tui_kit::render::attr;
 
 use super::*;
 use crate::ui::cells::tests::ctx;
 use crate::ui::i18n::Lang;
-use crate::ui::palette::{ColorLevel, Palette};
-use crate::ui::text::plain;
+use crate::ui::lines::plain;
+use crate::ui::probe::{ColorLevel, Colors};
 
 /// 2026-10-30 04:52 UTC。
 const AT: u64 = 1_793_335_920_000;
@@ -23,11 +23,11 @@ fn line(turn: &str, duration_ms: u64, waiting_agents: u32) -> TurnDuration {
 }
 
 fn shown(line: &TurnDuration, still: Option<&str>, lang: Lang, width: usize) -> Vec<String> {
-    let palette = Palette::new(ColorLevel::TrueColor, Some((0, 0, 0)));
+    let colors = Colors::new(ColorLevel::TrueColor, Some((0, 0, 0)));
     let ctx = Ctx {
         lang,
         width,
-        ..ctx(&palette, false)
+        ..ctx(&colors, false)
     };
     lines(line, still, &ctx).iter().map(plain).collect()
 }
@@ -102,15 +102,15 @@ fn the_done_time_matches_the_old_split() {
 fn a_finished_turn_reads_verb_duration_and_done_time() {
     assert_eq!(
         shown(&line("turn_2", 62_000, 0), None, Lang::En, 80),
-        ["✻ Baked for 1m 2s · done 4:52 AM"]
+        [" ✻ Baked for 1m 2s · done 4:52 AM"]
     );
     assert_eq!(
         shown(&line("turn_1", 400, 0), None, Lang::En, 80),
-        ["✻ Worked for 0s · done 4:52 AM"]
+        [" ✻ Worked for 0s · done 4:52 AM"]
     );
     assert_eq!(
         shown(&line("turn_1", 3_723_000, 0), None, Lang::Zh, 80),
-        ["✻ 用时 1h 2m 3s · 完成于 4:52"]
+        [" ✻ 用时 1h 2m 3s · 完成于 4:52"]
     );
 }
 
@@ -118,7 +118,7 @@ fn a_finished_turn_reads_verb_duration_and_done_time() {
 fn running_background_commands_are_named_at_the_end() {
     assert_eq!(
         shown(&line("turn_3", 0, 0), Some("1 monitor"), Lang::En, 80),
-        ["✻ Brewed for 0s · done 4:52 AM · 1 monitor still running"]
+        [" ✻ Brewed for 0s · done 4:52 AM · 1 monitor still running"]
     );
     assert_eq!(
         shown(
@@ -127,7 +127,7 @@ fn running_background_commands_are_named_at_the_end() {
             Lang::En,
             80
         ),
-        ["✻ Brewed for 0s · done 4:52 AM · 1 shell, 2 monitors still running"]
+        [" ✻ Brewed for 0s · done 4:52 AM · 1 shell, 2 monitors still running"]
     );
     assert_eq!(
         shown(
@@ -136,7 +136,7 @@ fn running_background_commands_are_named_at_the_end() {
             Lang::Zh,
             80
         ),
-        ["✻ 用时 0s · 完成于 4:52 · 1 shell、2 monitor 仍在运行"]
+        [" ✻ 用时 0s · 完成于 4:52 · 1 shell、2 monitor 仍在运行"]
     );
 }
 
@@ -144,68 +144,78 @@ fn running_background_commands_are_named_at_the_end() {
 fn waiting_for_background_agents_replaces_the_line_with_a_bold_count() {
     assert_eq!(
         shown(&line("turn_1", 5_000, 1), Some("1 shell"), Lang::En, 80),
-        ["✻ Waiting for 1 background agent to finish"]
+        [" ✻ Waiting for 1 background agent to finish"]
     );
     assert_eq!(
         shown(&line("turn_1", 5_000, 2), None, Lang::En, 80),
-        ["✻ Waiting for 2 background agents to finish"]
+        [" ✻ Waiting for 2 background agents to finish"]
     );
     assert_eq!(
         shown(&line("turn_1", 5_000, 2), None, Lang::Zh, 80),
-        ["✻ 等待 2 个后台代理完成"]
+        [" ✻ 等待 2 个后台代理完成"]
     );
-    let palette = Palette::new(ColorLevel::TrueColor, Some((0, 0, 0)));
-    let rendered = lines(&line("turn_1", 0, 3), None, &ctx(&palette, false));
+    let colors = Colors::new(ColorLevel::TrueColor, Some((0, 0, 0)));
+    let ctx = ctx(&colors, false);
+    let rendered = lines(&line("turn_1", 0, 3), None, &ctx);
     let count = rendered[0]
         .spans
         .iter()
-        .find(|span| span.content == "3")
+        .find(|span| span.text == "3")
         .unwrap();
-    assert!(
-        count
-            .style
-            .add_modifier
-            .contains(Modifier::BOLD | Modifier::DIM)
-    );
+    assert!(count.style.has_attr(attr::BOLD));
+    assert_eq!(count.style.fg_color(), ctx.ink.theme.fg3.fg_color());
 }
 
 #[test]
 fn a_narrow_terminal_wraps_under_the_text() {
     let wrapped = shown(&line("turn_3", 0, 0), Some("1 monitor"), Lang::En, 24);
     assert!(wrapped.len() > 1, "{wrapped:?}");
-    assert!(wrapped[0].starts_with("✻ Brewed"));
+    assert!(wrapped[0].starts_with(" ✻ Brewed"));
+    // 续行与首行的文字同一列（第 3 列），第 3 列是字不是空格。
     assert!(
-        wrapped[1..].iter().all(|row| row.starts_with("  ")),
+        wrapped[1..]
+            .iter()
+            .all(|row| row.starts_with("   ") && !row.starts_with("    ")),
         "{wrapped:?}"
     );
     assert_eq!(
         wrapped
             .iter()
-            .map(|row| row.trim_start_matches("✻ ").trim())
+            .map(|row| row.trim_start_matches(" ✻ ").trim())
             .collect::<Vec<_>>()
             .join(" "),
         "Brewed for 0s · done 4:52 AM · 1 monitor still running"
     );
 }
 
-/// 整行 dim，不另取颜色：深浅主题都一样。
 #[test]
-fn the_whole_line_is_dim_in_both_themes() {
-    for palette in [
-        Palette::new(ColorLevel::TrueColor, Some((0, 0, 0))),
-        Palette::new(ColorLevel::TrueColor, Some((255, 255, 255))),
+fn the_line_wraps_at_the_body_width_on_a_wide_terminal() {
+    let colors = Colors::new(ColorLevel::TrueColor, Some((0, 0, 0)));
+    let ctx = Ctx {
+        lang: Lang::En,
+        width: 200,
+        ..ctx(&colors, false)
+    };
+    let still = "1 shell, ".repeat(20);
+    let rendered = lines(&line("turn_3", 0, 0), Some(&still), &ctx);
+    assert!(rendered.len() > 1);
+    assert!(rendered.iter().all(|row| row.width() <= 99), "{rendered:?}");
+}
+
+/// 整行是主题的 fg3（kit 的 transcript 里安静的字；上游是 ratatui 的 DIM）：深浅主题各取各的 fg3。
+#[test]
+fn the_whole_line_is_quiet_in_both_themes() {
+    for colors in [
+        Colors::new(ColorLevel::TrueColor, Some((0, 0, 0))),
+        Colors::new(ColorLevel::TrueColor, Some((255, 255, 255))),
     ] {
-        let rendered = lines(
-            &line("turn_3", 0, 0),
-            Some("1 shell"),
-            &ctx(&palette, false),
-        );
+        let ctx = ctx(&colors, false);
+        let rendered = lines(&line("turn_3", 0, 0), Some("1 shell"), &ctx);
         for span in rendered.iter().flat_map(|line| line.spans.iter()) {
-            if span.content.trim().is_empty() {
+            if span.text.trim().is_empty() {
                 continue;
             }
-            assert!(span.style.add_modifier.contains(Modifier::DIM), "{span:?}");
-            assert_eq!(span.style.fg, None, "{span:?}");
+            assert_eq!(span.style, ctx.ink.theme.fg3, "{span:?}");
         }
     }
 }

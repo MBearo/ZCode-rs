@@ -9,7 +9,7 @@ use rust_cli_kernel_api::env::WorkspaceRef;
 use rust_cli_kernel_api::machine::{EnvInfo, Files};
 use rust_cli_kernel_api::store::LocalSettings;
 use rust_cli_kernel_api::workspace_trust::TrustKey;
-use rust_cli_tui::trust::TrustPrompt;
+use rust_cli_tui_ports::trust::TrustPrompt;
 
 use super::{Decision, Inputs, decide, record};
 
@@ -38,7 +38,7 @@ impl InAppTrust {
     }
 }
 
-impl rust_cli_tui::services::WorkspaceTrust for InAppTrust {
+impl rust_cli_tui_ports::services::WorkspaceTrust for InAppTrust {
     fn check(&self, workspace: WorkspaceRef) -> BoxFuture<'static, Option<TrustPrompt>> {
         let this = Self {
             info: self.info.clone(),

@@ -51,14 +51,11 @@ fn the_line_comes_after_the_error_of_its_turn() {
         KernelEvent::TurnDuration(line()),
     ]);
     let bodies: Vec<&Body> = view.rows().iter().map(|row| &row.body).collect();
-    assert_eq!(
-        bodies,
-        [
-            &Body::Turn(TurnState::Failed),
-            &Body::Error("bad request".into()),
-            &Body::Duration(Box::new(line())),
-        ]
-    );
+    // 失败的回合在本线是 Puffin 的失败块（`Body::Failure`），回合结束那一行排在它之后。
+    assert_eq!(bodies.len(), 3, "{bodies:?}");
+    assert_eq!(bodies[0], &Body::Turn(TurnState::Failed));
+    assert!(matches!(bodies[1], Body::Failure(_)), "{bodies:?}");
+    assert_eq!(bodies[2], &Body::Duration(Box::new(line())));
     assert!(!view.running());
     assert!(view.rows().iter().all(|row| !row.live()));
 }

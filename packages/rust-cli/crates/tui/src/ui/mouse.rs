@@ -11,11 +11,11 @@
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use ratatui::layout::Rect;
-use unicode_width::UnicodeWidthChar;
+use rust_cli_tui_kit::render::width::display_width;
 
 use super::app::{Action, App, Overlay};
 use super::composer::Popup;
+use super::geom::Rect;
 use super::selection::{text_at, word_at};
 
 /// 连击（双击、三击）的间隔上限（原来 400 ms）。
@@ -43,18 +43,14 @@ pub enum Target {
     /// 审批或提问的第 i 个选项。
     Choice(usize),
     Shortcuts,
-    /// footer 下面子代理列表的第 i 行（0 = main，tui-panels.md §1.3）。
-    Agent(usize),
-    /// footer 的 `← for projects`：打开项目页（tui-panels.md §2）。
-    Agents,
-    /// 会话面板的第 i 个可见会话。
-    Session(usize),
-    /// footer 的后台任务 pill：打开 Background 面板（§3.1）。
-    Pill,
-    /// Background 面板的第 i 项。
-    Background(usize),
-    /// 新会话的背景标志（tui.md §7.3）：按下就开始按压，悬停不变色。
-    Logo,
+    /// 槽里驾驶舱的提示（tui-cockpit.md §3.4）：同按 ←。
+    OpenCockpit,
+    /// 任务行左边的一处（tui-tasks.md §2.2「点击」）：一个部分落在它的种类，记号与 `^T`（`None`）同按 ^T。
+    Tasks(Option<super::task_card::TaskKind>),
+    /// 任务卡这个种类的第 i 行（Subagents 0 = main，tui-tasks.md §3.2）。
+    Task(usize),
+    /// 驾驶舱的第 i 个代理：点它选中，点选中的等于 ⏎（tui-cockpit.md §3.1）。
+    Cockpit(usize),
 }
 
 /// 上一帧的可点击区域与 transcript 的可见行。
@@ -68,11 +64,13 @@ pub struct Hits {
     pub expandable: std::collections::HashSet<u64>,
     /// 当前选区的文字。
     pub selected: Option<String>,
+    /// 这一帧画了的背景标志（tui.md §7.3）。
+    pub mark: Option<super::logo::Stage>,
     /// 输入框文字区与它的第一可见行。
     pub composer: Option<(Rect, usize)>,
     /// 全屏视图这一帧的屏幕行（双击选词用）与软折行的续行（屏幕行号 → 记号，tui-select.md §2.3）。
     pub screen_rows: Vec<String>,
-    pub soft: Vec<(u16, crate::ui::text::SoftWrap)>,
+    pub soft: Vec<(u16, rust_cli_tui_kit::render::Continuation)>,
 }
 
 /// 选区的一端：（块的键，块内第几行，显示列）。
@@ -83,15 +81,46 @@ pub struct Point {
     pub col: usize,
 }
 
+/// 选区的单位（Puffin `Grain`，docs/puffin-tui.md §4.4「连击」）：单击是格，双击是词，三击是逻辑行。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Grain {
+    Cell,
+    Word,
+    Line,
+}
+
+/// transcript 的选区：`anchor` 是按下处、`head` 是指针处，选中的是两处各按 `grain` 取的单位的并集（同 Puffin 的
+/// `base` 加指针下的单位）；单位在绘制时按排好的行算（`mouse_draw::select`），跟着内容走。格的选区两端相同时是空的：
+/// 不画、不复制。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Selection {
     pub anchor: Point,
     pub head: Point,
+    pub grain: Grain,
+    /// 左键还按着：拖动扩大选区。
     pub dragging: bool,
     /// 拖到 transcript 第一行（1）/ 最后一行（-1）时每帧滚动的方向。
     pub edge: isize,
-    /// 这个选区已经复制过（松开即复制之后；ctrl+c 只清掉它）。
-    pub copied: bool,
+    /// 这个选区复制过时复制出的字有多少（松开即复制之后；ctrl+c 只清掉它）。槽里的 `Copied N characters` 按它说
+    /// （Puffin 的 `Copied.says` 在复制那一刻定下）：以前按每一帧重算的选中的字，流式回答在复制之后长出来的字也算进去，
+    /// 字数变了、槽又淡入一次（孪生 copy-feedback）。
+    pub copied: Option<Copied>,
+}
+
+/// 复制出的字的行数与字数。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Copied {
+    pub lines: usize,
+    pub chars: usize,
+}
+
+impl Copied {
+    pub fn of(text: &str) -> Copied {
+        Copied {
+            lines: text.split('\n').count(),
+            chars: text.chars().count(),
+        }
+    }
 }
 
 /// 全屏视图里的选区：两端是屏幕坐标（列，行），含两端。
@@ -116,6 +145,8 @@ pub struct Click {
     y: u16,
     at: Instant,
     count: u8,
+    /// 按在 transcript 上时按下处的位置：transcript 的连击比的是它（Puffin 比 transcript 的位置，不是屏幕格）。
+    point: Option<Point>,
 }
 
 fn contains(rect: Rect, x: u16, y: u16) -> bool {
@@ -148,13 +179,6 @@ impl App {
             .then_some(*key)
     }
 
-    /// 鼠标停在还没展开的可展开块的文字上时，这个块的键：绘制时去掉它的 dim（§8.2）。展开的块不再有悬停效果。
-    pub fn hovered_block(&self) -> Option<u64> {
-        let (x, y) = self.pointer.hover?;
-        self.block_at(x, y)
-            .filter(|key| !self.port.expanded_cells.contains(key))
-    }
-
     /// transcript 里屏幕位置对应的选区端点。
     fn point_at(&self, x: u16, y: u16) -> Option<Point> {
         let t = self.pointer.hits.transcript;
@@ -171,14 +195,8 @@ impl App {
         let (x, y) = (mouse.column, mouse.row);
         match mouse.kind {
             // 滚轮只有一个分发点（`wheel.rs`，tui-select.md §4.1）。
-            MouseEventKind::ScrollUp => {
-                self.wheel(false, now);
-                return None;
-            }
-            MouseEventKind::ScrollDown => {
-                self.wheel(true, now);
-                return None;
-            }
+            MouseEventKind::ScrollUp => return self.wheel(false),
+            MouseEventKind::ScrollDown => return self.wheel(true),
             _ => {}
         }
         if self.overlay.as_ref().is_some_and(Overlay::full_screen) {
@@ -196,7 +214,7 @@ impl App {
                 None
             }
             MouseEventKind::Moved => {
-                self.pointer.hover = Some((x, y));
+                self.hover_moved(x, y);
                 None
             }
             _ => None,
@@ -231,7 +249,7 @@ impl App {
                     (TRIPLE_CLICK, Some(text)) => (
                         0,
                         text.chars()
-                            .map(|c| c.width().unwrap_or(0))
+                            .map(display_width)
                             .sum::<usize>()
                             .saturating_sub(1),
                     ),
@@ -275,7 +293,7 @@ impl App {
                 None
             }
             MouseEventKind::Moved => {
-                self.pointer.hover = Some((x, y));
+                self.hover_moved(x, y);
                 None
             }
             _ => None,
@@ -298,6 +316,26 @@ impl App {
             y,
             at: now,
             count,
+            point: None,
+        });
+        count
+    }
+
+    /// transcript 上的第几次按下（Puffin `press`）：与上一次按在同一个 transcript 位置（块、块内行、列）且不到 500 ms
+    /// 时多算一次，三次之后又是一次；只比两次按下的时刻。
+    fn transcript_clicks(&mut self, x: u16, y: u16, point: Point, now: Instant) -> u8 {
+        let count = match self.pointer.click {
+            Some(c) if c.point == Some(point) && now.duration_since(c.at) < MULTI_CLICK => {
+                c.count % TRIPLE_CLICK + 1
+            }
+            _ => 1,
+        };
+        self.pointer.click = Some(Click {
+            x,
+            y,
+            at: now,
+            count,
+            point: Some(point),
         });
         count
     }
@@ -321,13 +359,14 @@ impl App {
     }
 
     fn press_left(&mut self, x: u16, y: u16, now: Instant) -> Option<Action> {
-        // 背景标志在按下时就有反应（像金属被按进去），不等松开（tui.md §7.3）。
-        if self.target_at(x, y) == Some(Target::Logo) {
-            self.logo.press(x, y, now);
-            return None;
-        }
         if let Some(target) = self.target_at(x, y) {
             self.pointer.press = Some(target);
+            return None;
+        }
+        // 背景标志：按下立刻按下去（tui.md §7.3）。开着的层的点击目标优先，所以放在上面的判断之后。
+        if let Some(stage) = self.pointer.hits.mark
+            && self.mark.press(&stage, x, y, now)
+        {
             return None;
         }
         if let Some((rect, _)) = self.pointer.hits.composer
@@ -352,29 +391,30 @@ impl App {
         }
         self.composer.area.clear_selection();
         self.pointer.screen_selection = None;
-        let count = self.click_count(x, y, now);
-        let point = self.point_at(x, y)?;
-        let text = &self.pointer.hits.rows[usize::from(y - self.pointer.hits.transcript.y)].1;
-        let (from, to) = match count {
-            DOUBLE_CLICK => word_at(text, point.col),
-            TRIPLE_CLICK => (
-                0,
-                text.chars()
-                    .map(|c| c.width().unwrap_or(0))
-                    .sum::<usize>()
-                    .max(1),
-            ),
-            _ => (point.col, point.col + 1),
+        let Some(point) = self.point_at(x, y) else {
+            self.pointer.selection = None;
+            self.pointer.click = None;
+            return None;
+        };
+        // 挑选回退的点时按在你的一条消息（是点的）上是换点；按在别处照常开始选择（Puffin `rewind_key` 的点击）。
+        if self.pick_at_row(point.key) {
+            self.pointer.click = None;
+            return None;
+        }
+        // 照 Puffin 的选择（docs/puffin-tui.md §4.4「选择与复制」）：按下时的选区就是按下处的单位——单击的格是空的（不画
+        // 一格底色），双击是词，三击是逻辑行；拖动按同一单位扩大。以前单击就画一格，双击、三击只选屏幕上的一行且不能拖动。
+        let grain = match self.transcript_clicks(x, y, point, now) {
+            DOUBLE_CLICK => Grain::Word,
+            TRIPLE_CLICK => Grain::Line,
+            _ => Grain::Cell,
         };
         self.pointer.selection = Some(Selection {
-            anchor: Point { col: from, ..point },
-            head: Point {
-                col: to.saturating_sub(1),
-                ..point
-            },
-            dragging: count == 1,
+            anchor: point,
+            head: point,
+            grain,
+            dragging: true,
             edge: 0,
-            copied: false,
+            copied: None,
         });
         None
     }
@@ -420,11 +460,11 @@ impl App {
         }
         let selection = self.pointer.selection.as_mut()?;
         selection.edge = 0;
-        if !selection.dragging {
-            // 双击、三击的选区：松开即复制。
+        selection.dragging = false;
+        if selection.grain != Grain::Cell {
+            // 双击、三击的选区（词与行从不是空的）：松开即复制。
             return Some(Action::CopySelection { clear: false });
         }
-        selection.dragging = false;
         if selection.anchor == selection.head {
             // 没有拖动：清掉选区；点在可以展开的块的文字上时展开 / 收起这个块（§8.2）。双击、三击的
             // 第二下起是选词、选行，不再切换。
@@ -457,8 +497,9 @@ impl App {
 
     /// 复制过之后（松开即复制）记下；ctrl+c 据此只清选区。
     pub fn mark_copied(&mut self) {
+        let copied = self.pointer.hits.selected.as_deref().map(Copied::of);
         if let Some(selection) = self.pointer.selection.as_mut() {
-            selection.copied = true;
+            selection.copied = copied;
         }
         if let Some(selection) = self.pointer.screen_selection.as_mut() {
             selection.copied = true;
@@ -497,36 +538,42 @@ impl App {
                 let digit = char::from_digit(u32::try_from(index + 1).ok()?, DECIMAL)?;
                 self.dispatch(key(KeyCode::Char(digit)), now)
             }
+            // 点 `? for shortcuts` 等于打出 `?`（草稿空着时，draft_layer.rs）。
             Target::Shortcuts => {
-                self.overlay = Some(Overlay::Shortcuts);
+                if self.composer.is_empty() {
+                    self.composer.set_text("?");
+                    self.keys_closed = false;
+                    self.overlay = Some(Overlay::Shortcuts);
+                }
+                None
+            }
+            // 槽只在草稿空着时有这个提示；点它同按 ←。
+            Target::OpenCockpit => self.dispatch(key(KeyCode::Left), now),
+            Target::Tasks(kind) => {
+                self.click_tasks(kind);
                 None
             }
             // 点击一行等于选中再按 enter。
-            Target::Agent(index) => {
-                self.focus = None;
-                self.view_agent(index, now)
-            }
-            Target::Agents => self.open_projects(),
-            // 项目页：点击一行等于选中再按 enter；`/resume` 页：只移焦点（打开要按 enter）。
-            Target::Session(index) => match self.overlay {
-                Some(Overlay::Resume(_)) => {
-                    self.resume_clicked(index);
-                    None
+            Target::Task(index) => self.tasks_activate(index),
+            Target::Cockpit(index) => {
+                let Some(Overlay::Sessions(list)) = self.overlay.as_mut() else {
+                    return None;
+                };
+                if list.choice == index {
+                    return self.dispatch(key(KeyCode::Enter), now);
                 }
-                _ => self.project_clicked(index),
-            },
-            Target::Pill => {
-                self.open_background();
+                list.choice = index;
                 None
             }
-            Target::Background(index) => self.background_activate(index, now),
-            // 按下时已经处理（`press_left`）。
-            Target::Logo => None,
         }
     }
 }
 
+#[path = "mouse_hover.rs"]
+mod hover;
 #[path = "mouse_draw.rs"]
 mod paint;
+
+pub use hover::Hover;
 
 pub use paint::{draw_copied, paint_hover, paint_screen, select};

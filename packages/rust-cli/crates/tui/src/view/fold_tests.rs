@@ -14,6 +14,7 @@ use rust_cli_kernel_api::tool::{ToolOutput, ToolProgress};
 use serde_json::json;
 
 use super::*;
+use rust_cli_tui_kit::app::widgets::entries::Compaction;
 
 fn selection() -> ModelSelection {
     ModelSelection::new("fixture", "scripted")
@@ -236,15 +237,84 @@ fn an_interrupt_settles_streaming_rows_and_running_tools() {
     assert!(rows.iter().all(|row| !row.live()));
 }
 
+/// 失败的回合是一个失败块（Puffin `turns::failure`）：原文、认得的原因、这个回合你的第一条消息（⏎ 再发它）。
 #[test]
 fn a_failed_turn_shows_its_reason() {
     let mut feed = Feed::new();
     feed.push(started()).push(finished(TurnOutcome::Failed {
         message: "busy".into(),
     }));
+    let bodies = bodies(&feed.view);
+    assert_eq!(bodies[0], Body::Turn(TurnState::Failed));
+    let Body::Failure(failure) = &bodies[1] else {
+        panic!("失败块：{bodies:?}");
+    };
+    assert_eq!(failure.message, "busy");
+    assert_eq!(failure.reason, "");
+    let mut feed = Feed::new();
+    feed.push(started()).push(finished(TurnOutcome::Failed {
+        message: "Prompt is too long".into(),
+    }));
+    let Body::Failure(failure) = &bodies_of(&feed)[1] else {
+        panic!("失败块");
+    };
+    assert_eq!(failure.reason, "context_exceeded");
+}
+
+fn bodies_of(feed: &Feed) -> Vec<Body> {
+    bodies(&feed.view)
+}
+
+/// 开始了的压缩失败了（compact.md §4.1）：压缩的行定为失败（Puffin `compact_failed`），回合照常成功。
+#[test]
+fn a_failed_compaction_marks_its_row_failed() {
+    let mut feed = Feed::new();
+    feed.push(started())
+        .push(KernelEvent::CompactStarted {
+            trigger: rust_cli_kernel_api::message::CompactTrigger::Auto,
+        })
+        .push(KernelEvent::CompactFailed {
+            trigger: rust_cli_kernel_api::message::CompactTrigger::Auto,
+            message: "Error during compaction: overloaded".into(),
+        })
+        .push(finished(TurnOutcome::Success));
     assert_eq!(
         bodies(&feed.view),
-        [Body::Turn(TurnState::Failed), Body::Error("busy".into())]
+        [
+            Body::Turn(TurnState::Success),
+            Body::Compact(super::Compact {
+                status: Compaction::Failed,
+                before: None,
+                after: None,
+            }),
+        ]
+    );
+}
+
+/// 压缩是一行：开始时在跑，做完之后的第一次上下文占用给出压缩后的 token（Puffin `context_usage`）。
+#[test]
+fn a_compaction_is_one_row_with_its_token_arrow() {
+    let mut feed = Feed::new();
+    feed.push(started())
+        .push(KernelEvent::CompactStarted {
+            trigger: rust_cli_kernel_api::message::CompactTrigger::Manual,
+        })
+        .push(KernelEvent::CompactDone {
+            boundary: MessageId::new("b1"),
+        })
+        .push(KernelEvent::ContextUsage {
+            used_tokens: 7_900,
+            max_tokens: 200_000,
+            compact_at: Some(160_000),
+        });
+    let running = bodies(&feed.view);
+    assert_eq!(
+        running[1],
+        Body::Compact(super::Compact {
+            status: Compaction::Success,
+            before: None,
+            after: Some(7_900),
+        })
     );
 }
 
@@ -380,3 +450,6 @@ fn workspace_changes_replace_the_view_workspace() {
 #[cfg(test)]
 #[path = "fold_view_tests.rs"]
 mod refresh;
+
+#[path = "fold_returned_tests.rs"]
+mod returned;

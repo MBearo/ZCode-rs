@@ -58,7 +58,7 @@ use rust_cli_kernel_api::tool::ChangedFiles;
 use rust_cli_prompts::{models, reminder};
 use serde_json::Value;
 
-pub use analysis::{Analysis, MemoryFile};
+pub use analysis::{Analysis, MemoryFile, PromptSection};
 pub use config::{Attribution, ContextConfig, OutputStyle, Surface};
 
 use crate::instructions::{Lookup, Memo};

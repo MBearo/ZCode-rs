@@ -19,17 +19,17 @@ async fn ctrl_enter_does_not_interrupt_the_running_turn() {
         let mut head = text_response(&["Once upon a time\n"]);
         let tail = head.split_off(3);
         send(&first, head);
-        // 修复线 F35：等流出的文字，不等 `esc to interrupt`。
+        // 修复线 F35：等流出的文字，不等 `esc stop`。
         ui.wait_for("Once upon a time").await;
         ui.type_text("stop, just say hi");
         ui.press(KeyCode::Enter, KeyModifiers::CONTROL);
-        ui.wait_for("Queued messages will be sent automatically")
+        ui.wait_for("Queued. The agent reads it at its next step.")
             .await;
         // 回合照常写完，排队的输入开下一个回合。
         finish(first, tail);
         finish(second, text_response(&["hi"]));
         ui.wait("the new turn", |s| {
-            s.contains("hi") && s.contains("❯ stop, just say hi") && !s.contains("esc to interrupt")
+            s.contains("hi") && s.contains("› stop, just say hi") && !s.contains("esc stop")
         })
         .await;
     })
@@ -75,7 +75,7 @@ async fn ctrl_s_stashes_and_restores_after_submit() {
         assert!(screen.contains("first draft"), "{screen}");
         assert!(!screen.contains("Stashed (auto-restores"), "{screen}");
         ui.wait("the reply", |s| {
-            s.contains("answer") && !s.contains("esc to interrupt")
+            s.contains("answer") && !s.contains("esc stop")
         })
         .await;
     })
@@ -88,17 +88,20 @@ async fn meta_p_opens_the_model_picker_and_help_lists_shortcuts() {
     with_ui(model, Setup::default(), |mut ui| async move {
         ui.wait_for("Ask before changes").await;
         ui.press(KeyCode::Char('p'), KeyModifiers::ALT);
-        ui.wait_for("Select model").await;
+        // 选择器没有头一行（Puffin）；开着时草稿是 `/model `，esc 关上、草稿留着（tui-kit.md §4.0「板」）。
+        ui.wait_for("other-model").await;
         ui.key(KeyCode::Esc);
-        ui.wait("the picker closed", |s| !s.contains("Select model"))
+        let closed = ui
+            .wait("the picker closed", |s| !s.contains("other-model"))
             .await;
+        assert!(closed.contains("› /model"), "{closed}");
+        ui.clear();
+        // `/help` 是 `/keys` 的别名：草稿换成 `?`，板上是 Puffin 的按键表（以前是一整页的命令与快捷键）。
         ui.submit("/help");
-        ui.wait_for("Slash commands").await;
-        for _ in 0..80 {
-            ui.key(KeyCode::Down);
+        let screen = ui.wait_for("Anywhere").await;
+        for key in ["^X ^S", "send now", "⌥P"] {
+            assert!(screen.contains(key), "{key}: {screen}");
         }
-        let screen = ui.wait_for("Shortcuts").await;
-        assert!(screen.contains("ctrl+x enter"), "{screen}");
     })
     .await;
 }

@@ -27,6 +27,33 @@ pub struct SessionCatalog {
     pub skills: Vec<String>,
 }
 
+/// 工作区的一个 agent 类型（[`crate::session_api::Kernel::agent_definitions`]，docs/specs/rust-cli/agents.md §8 的
+/// PT 增量）：前端在还没有会话时列出子代理（`@` 面板、设置页）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentInfo {
+    /// agent 类型名；插件的是 `插件:…:名字`。
+    pub name: String,
+    /// 清单里的描述。
+    pub description: String,
+    pub origin: AgentOrigin,
+    /// None：全部工具。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<String>>,
+    /// None：继承会话的模型（含 `inherit`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+/// agent 定义从哪里来。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentOrigin {
+    BuiltIn,
+    Plugin,
+    User,
+    Project,
+}
+
 #[cfg(test)]
 #[path = "catalog_tests.rs"]
 mod tests;

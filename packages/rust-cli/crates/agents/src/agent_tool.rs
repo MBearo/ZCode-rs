@@ -243,6 +243,7 @@ impl Tool for AgentTool {
                 .map(crate::child::Asks),
             state: AgentState::Finished(Ending::Completed),
             shown: crate::live::Shown::default(),
+            delivered: Vec::new(),
             fork_prefix: inherited.map(Arc::new),
         };
         let first = if fork {
@@ -277,7 +278,7 @@ impl Tool for AgentTool {
             Some(context.cancel.clone()),
         )
         .await;
-        let settled = routing::settle(core, &entry.agent, &finished);
+        let settled = routing::settle(core, &entry.agent, &finished).await;
         routing::wake(core, settled.wakes).await;
         if settled.parked {
             // 还有在跑的后台子代理（交互模式）：转成后台、停放，父调用回“已启动”（`async_launched`）。

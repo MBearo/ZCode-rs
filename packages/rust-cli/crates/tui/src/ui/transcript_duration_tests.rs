@@ -1,5 +1,5 @@
 //! transcript 里的回合结束那一行（docs/specs/rust-cli/tui-display.md §2.7，修复线 F118）：` · <pill> still running` 每次画时
-//! 取 footer 的 pill（同一份快照，排版缓存跟着失效）；等后台子代理的行不接它；相同的等待行在普通视图里只显示第一行。
+//! 取在跑的命令（任务行的同一个函数、同一份快照，排版缓存跟着失效）；等后台子代理的行不接它；相同的等待行在普通视图里只显示第一行。
 use std::time::Duration;
 
 use rust_cli_kernel_api::env_shell::BackgroundStatus;
@@ -13,7 +13,6 @@ use super::{Cache, lines};
 use crate::ui::app::App;
 use crate::ui::cells::Ctx;
 use crate::ui::test_support::app;
-use crate::ui::text::plain;
 
 /// 按顺序喂给视图：`seq` 是已经喂过的个数（视图丢掉不大于已收到的 seq 的事件），时刻是 seq 秒。
 fn feed(app: &mut App, seq: &mut u64, events: Vec<KernelEvent>) {
@@ -76,10 +75,10 @@ fn running(id: &str, kind: BackgroundKind) -> BackgroundEntry {
     BackgroundEntry::new(id, kind, id, BackgroundStatus::Running)
 }
 
-/// transcript 里 `✻ ` 开头的行。
+/// transcript 里 ` ✻ ` 开头的行。
 fn shown(app: &App, cache: &mut Cache, expanded: bool) -> Vec<String> {
     let ctx = Ctx {
-        palette: &app.palette,
+        ink: &app.ink,
         lang: app.lang,
         width: 80,
         expanded,
@@ -90,12 +89,13 @@ fn shown(app: &App, cache: &mut Cache, expanded: bool) -> Vec<String> {
         version: "0.1.0",
         mcp_machines: &[],
         machines: &[],
+        skills: &[],
         markdown: None,
     };
     let layout = lines(app, cache, &ctx);
     (0..layout.len())
-        .map(|index| plain(layout.line(index)))
-        .filter(|line| line.starts_with("✻ "))
+        .map(|index| layout.styled(index).plain())
+        .filter(|line| line.starts_with(" ✻ "))
         .collect()
 }
 
@@ -109,8 +109,8 @@ fn the_still_running_segment_follows_the_current_pill() {
     assert_eq!(
         shown(&app, &mut cache, false),
         [
-            "✻ Worked for 2s · done 12:00 AM",
-            "✻ Baked for 2s · done 12:00 AM"
+            " ✻ Worked for 2s · done 12:00 AM",
+            " ✻ Baked for 2s · done 12:00 AM"
         ]
     );
     // 两个回合都在命令运行时结束：每一行都带。
@@ -118,8 +118,8 @@ fn the_still_running_segment_follows_the_current_pill() {
     assert_eq!(
         shown(&app, &mut cache, false),
         [
-            "✻ Worked for 2s · done 12:00 AM · 1 monitor still running",
-            "✻ Baked for 2s · done 12:00 AM · 1 monitor still running"
+            " ✻ Worked for 2s · done 12:00 AM · 1 monitor still running",
+            " ✻ Baked for 2s · done 12:00 AM · 1 monitor still running"
         ]
     );
     app.snapshots
@@ -154,7 +154,7 @@ fn the_waiting_line_takes_no_still_running_segment() {
     app.snapshots.background = vec![running("b1", BackgroundKind::Shell)];
     assert_eq!(
         shown(&app, &mut Cache::default(), false),
-        ["✻ Waiting for 1 background agent to finish"]
+        [" ✻ Waiting for 1 background agent to finish"]
     );
 }
 
@@ -169,9 +169,9 @@ fn a_repeated_waiting_line_shows_once_until_the_user_types() {
     turn(&mut app, &mut seq, "turn_4", 1);
     turn(&mut app, &mut seq, "turn_5", 1);
     turn(&mut app, &mut seq, "turn_6", 0);
-    let two = "✻ Waiting for 2 background agents to finish";
-    let one = "✻ Waiting for 1 background agent to finish";
-    let done = "✻ Cooked for 2s · done 12:00 AM";
+    let two = " ✻ Waiting for 2 background agents to finish";
+    let one = " ✻ Waiting for 1 background agent to finish";
+    let done = " ✻ Cooked for 2s · done 12:00 AM";
     assert_eq!(
         shown(&app, &mut Cache::default(), false),
         [two, two, one, done]

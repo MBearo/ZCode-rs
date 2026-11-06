@@ -50,6 +50,9 @@ pub(crate) struct Template {
     pub provider_name: String,
     /// 团队项目（团队 provider 的模型每个项目一份，工作线 F49）；其他 provider 为 None。
     pub connection: Option<CatalogConnection>,
+    /// 密钥管理页（[`super::resolve::ProviderEntry::key_url`]）：Puffin `/usage` 说当前模型跑在哪个站点的密钥上
+    /// （platform.md §11.2）。
+    pub key_url: Option<String>,
 }
 
 impl Template {
@@ -115,10 +118,21 @@ impl Template {
     }
 }
 
-/// 一次解析的结果：全部可执行模型的模板与默认选择。
+/// provider 列出的一个模型，关着的也在（Settings › Models 的家族页，platform.md §11.4）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ListedModel {
+    pub provider: String,
+    pub model: String,
+    /// 有效配置的 `enabled`。
+    pub enabled: bool,
+    pub context_window: Option<u64>,
+}
+
+/// 一次解析的结果：全部可执行模型的模板与默认选择；`listed` 是每个 provider 列出的全部模型（不论能不能用）。
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Snapshot {
     pub templates: Vec<Template>,
+    pub listed: Vec<ListedModel>,
     pub default: Option<ModelSelection>,
     /// 个人配置 `defaultModelSelection` 的模型 ID 原样（不看目录）：显式覆盖没给模型时用它（model.md §6，F42）。
     pub configured_model: Option<String>,
@@ -210,6 +224,21 @@ pub(crate) fn snapshot(
     resolved: &Resolved,
     connections: &HashMap<String, Vec<CatalogConnection>>,
 ) -> Snapshot {
+    let listed = resolved
+        .providers
+        .iter()
+        .flat_map(|provider| {
+            provider.models.iter().map(|model| ListedModel {
+                provider: provider.provider_id.clone(),
+                model: model.model_id.clone(),
+                enabled: model.effective_config["enabled"] == true,
+                context_window: Some(
+                    capabilities(&model.model_id, &model.effective_config).context_window,
+                )
+                .filter(|w| *w > 0),
+            })
+        })
+        .collect();
     let mut templates = Vec::new();
     for provider in resolved.providers.iter().filter(|p| p.executable) {
         let config = &provider.effective_config;
@@ -259,6 +288,7 @@ pub(crate) fn snapshot(
                     .clone()
                     .unwrap_or_else(|| provider.provider_id.clone()),
                 connection: None,
+                key_url: provider.key_url.clone(),
             });
         }
         // 团队 provider：每个可用的团队项目一组（项目在外、模型在内）；没有可用项目时 overlay 已不授权。
@@ -277,6 +307,7 @@ pub(crate) fn snapshot(
     let default = default_selection(&templates, &resolved.default_selection);
     Snapshot {
         templates,
+        listed,
         default,
         configured_model: configured_model(&resolved.default_selection),
     }

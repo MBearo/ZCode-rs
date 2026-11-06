@@ -1,5 +1,5 @@
 //! 工作区信任（docs/specs/rust-cli/workspace-trust.md §2）：TUI 启动时、启动扩展与建会话
-//! 之前判定一次；没有信任就问（[`rust_cli_tui::trust::ask`]），同意后写记录（home 只本次有效），拒绝就退出。
+//! 之前判定一次；没有信任就问（启动前的信任页 `screens::ask_trust`，tui-kit.md §2.3），同意后写记录（home 只本次有效），拒绝就退出。
 //! `-p` 不经过这里。
 //!
 //! ```text
@@ -25,7 +25,7 @@ use rust_cli_kernel_api::env_files::PathStyle;
 use rust_cli_kernel_api::machine::{EnvInfo, Files};
 use rust_cli_kernel_api::store::LocalSettings;
 use rust_cli_kernel_api::workspace_trust::TrustKey;
-use rust_cli_tui::trust::{Grants, TrustAnswer, TrustPrompt};
+use rust_cli_tui_ports::trust::{Grants, TrustAnswer, TrustPrompt};
 
 pub(crate) use self::grants::grants;
 pub(crate) use self::in_app::InAppTrust;

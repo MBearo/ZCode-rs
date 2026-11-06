@@ -1,6 +1,6 @@
 //! 工作区信任的真实进程（docs/specs/rust-cli/workspace-trust.md §2.1）：临时 home 与工作区、本地假的 Anthropic
 //! 端点。`-p` 在没有信任记录的目录里照常运行、不写记录；TUI 没有终端时与之前相同地失败，也不写记录。
-//! 对话框的画面与按键由 tui 的集成测试覆盖（`crates/tui/tests/suite/trust.rs`）。
+//! 信任页的画面与按键由 `crates/tui/src/screens/screens_tests.rs` 的单测与旧界面的集成测试（`crates/tui/tests/suite/trust.rs`）覆盖。
 #![allow(
     clippy::disallowed_methods,
     clippy::unwrap_used,

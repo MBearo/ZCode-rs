@@ -1,12 +1,7 @@
 //! L28 的管理命令在 runner 里的部分（docs/specs/rust-cli/tui-display.md §1、§3、§4）：问内核、按回执更新界面。
 //! 后台任务与子代理列表是同一份快照（修复线 F34），查询与回执在 `panels.rs`。
 use futures_util::FutureExt;
-use ratatui::backend::Backend;
 use rust_cli_kernel_api::manage::McpServerInfo;
-use rust_cli_kernel_api::permission::{
-    PermissionRulesChange, PermissionRulesQuery, RuleChange, SourcedRule,
-};
-use rust_cli_kernel_api::provider::ModelCatalog;
 use rust_cli_kernel_api::session_api::{Ack, Command, Delivery, KernelError, KernelEvent};
 
 use super::Loop;
@@ -17,30 +12,9 @@ use crate::ui::manage::Manage;
 /// 管理命令的异步结果。
 pub(super) enum ManageDone {
     /// 停止的回执。
-    Stopped {
-        label: String,
-        ack: Ack,
-    },
-    /// `/effort` 要的模型目录。
-    Effort {
-        catalog: ModelCatalog,
-        args: String,
-    },
-    Mcp(Vec<McpServerInfo>),
-    Status(Vec<McpServerInfo>),
-    Hooks(Vec<rust_cli_kernel_api::manage::HookEntry>),
+    Stopped { label: String, ack: Ack },
     /// `/plan 描述`：模式切换的回执到了之后才发输入（两条命令有先后）。
-    Planned {
-        ack: Ack,
-        text: String,
-    },
-    /// `/permissions` 的列表（tui-manage.md §1）。
-    PermissionRules(Result<Vec<SourcedRule>, KernelError>),
-    /// `/permissions` 的修改回执。
-    RuleChanged {
-        change: RuleChange,
-        result: Result<Vec<SourcedRule>, KernelError>,
-    },
+    Planned { ack: Ack, text: String },
     /// `/plan open` 的计划文件（tui-manage.md §8）；`entering` 是这次刚切到 plan。
     PlanFile {
         entering: bool,
@@ -72,16 +46,15 @@ pub(super) enum ManageDone {
     Diff(Result<rust_cli_kernel_api::env_git::GitDiff, KernelError>),
     /// `/export` 的写入回执（tui-manage.md §3）。
     Exported(Result<String, KernelError>),
-    /// `ui.theme` 写回完成（tui-manage.md §2.1）。
+    /// `theme.json` 写完（tui-kit.md §3.4）。
     ThemeSaved {
-        theme: crate::services::UiTheme,
-        result: Result<String, String>,
+        choice: rust_cli_tui_kit::theme::scheme::ThemeChoice,
+        result: Result<(), String>,
     },
-    /// `/effort` 的缺省保存完成（tui-manage.md §2.2）。
-    EffortSaved {
-        level: Option<String>,
-        result: Result<String, String>,
-        args: String,
+    /// `/autocompact` 的写入回执：`Ok(Some(原因))` 存下了但运行的会话不按它（auto_compact.rs）。
+    AutoCompactSaved {
+        at: Option<u64>,
+        result: Result<Option<String>, String>,
     },
 }
 
@@ -95,12 +68,12 @@ pub(super) fn touches_background(event: &KernelEvent) -> bool {
     )
 }
 
-impl<B: Backend> Loop<'_, B> {
+impl Loop<'_> {
     pub(super) fn manage(&mut self, manage: Manage) -> anyhow::Result<()> {
         match manage {
-            // `/tasks`：打开 Background 面板（与 pill 同一个），顺便重取一次快照（tui-panels.md §3.1）。
+            // `/tasks`：打开任务卡，顺便重取一次快照（tui-tasks.md §3.1）。
             Manage::Tasks => {
-                self.app.open_background();
+                self.app.open_tasks();
                 self.refresh_tasks();
             }
             Manage::StopTask { id, label } => {
@@ -116,41 +89,12 @@ impl<B: Backend> Loop<'_, B> {
                     .boxed(),
                 );
             }
-            Manage::Effort(args) => match self.options.models.clone() {
-                Some(models) => self.pending.push(
-                    async move {
-                        let catalog = models.catalog().await;
-                        Done::Manage(ManageDone::Effort { catalog, args })
-                    }
-                    .boxed(),
-                ),
-                None => {
-                    if let Some(action) = self.app.effort(&[], &args) {
-                        self.act(action)?;
-                    }
-                }
-            },
-            Manage::Usage { stats } => self.open_usage(stats),
+            Manage::Usage => self.open_usage(),
             Manage::UsageRange { range, seq } => self.usage_range(range, seq),
-            Manage::Mcp | Manage::Status => {
-                let kernel = self.kernel.clone();
-                let status = manage == Manage::Status;
-                self.pending.push(
-                    async move {
-                        let servers = kernel.mcp_servers().await;
-                        Done::Manage(if status {
-                            ManageDone::Status(servers)
-                        } else {
-                            ManageDone::Mcp(servers)
-                        })
-                    }
-                    .boxed(),
-                );
-            }
             // 先改名，再离开（tui-display.md §4.6）。改名的命令先进 actor 的队列。
             Manage::ClearNamed(name) => {
                 let name_args = name.clone();
-                self.send(Sent::ClearRename, Command::Rename { title: name });
+                self.send(Sent::QuietRename, Command::Rename { title: name });
                 self.clear_as(&name_args)?;
             }
             Manage::PlanPrompt(text) => match self.outbox.session().cloned() {
@@ -169,50 +113,15 @@ impl<B: Backend> Loop<'_, B> {
                     let selection = self.app.view.selection().clone();
                     let execution = self.app.view.execution().with_plan(true);
                     self.app.view.set_draft(selection, execution);
-                    self.create(Command::Submit {
+                    // 修 bug（F140）：以前直接建会话，没有模型或缺省模型还没定下时也建（回合因为没有模型失败）；现在同
+                    // 输入框的发送走 `submit`，该留下时留下。
+                    self.submit(Command::Submit {
                         text,
                         attachments: Vec::new(),
                         delivery: Delivery::Queue,
                     });
                 }
             },
-            Manage::Hooks => {
-                let kernel = self.kernel.clone();
-                self.pending.push(
-                    async move { Done::Manage(ManageDone::Hooks(kernel.hooks().await)) }.boxed(),
-                );
-            }
-            Manage::Permissions => {
-                let kernel = self.kernel.clone();
-                let query = PermissionRulesQuery {
-                    workspace: self.app.view.workspace().clone(),
-                    session: self.outbox.session().map(|session| session.id().clone()),
-                };
-                self.pending.push(
-                    async move {
-                        Done::Manage(ManageDone::PermissionRules(
-                            kernel.permission_rules(query).await,
-                        ))
-                    }
-                    .boxed(),
-                );
-            }
-            // 页面在回执到之前停在“保存中”，同时只有一次修改在途（tui-manage.md §1.1）。
-            Manage::ChangeRule(change) => {
-                let kernel = self.kernel.clone();
-                let request = PermissionRulesChange {
-                    workspace: self.app.view.workspace().clone(),
-                    session: self.outbox.session().map(|session| session.id().clone()),
-                    change: change.clone(),
-                };
-                self.pending.push(
-                    async move {
-                        let result = kernel.change_permission_rules(request).await;
-                        Done::Manage(ManageDone::RuleChanged { change, result })
-                    }
-                    .boxed(),
-                );
-            }
             // 先切到 plan，再看计划文件；有内容才交给编辑器。
             Manage::PlanOpen => {
                 // 修复线 F20：只打开 plan 开关，权限模式不变。
@@ -235,9 +144,11 @@ impl<B: Backend> Loop<'_, B> {
                             .boxed(),
                         );
                     }
-                    None => self
-                        .app
-                        .info(crate::ui::manage::no_plan(self.app.lang, entering)),
+                    None => {
+                        if let Some(says) = crate::ui::manage::no_plan(self.app.lang, entering) {
+                            self.app.info(says);
+                        }
+                    }
                 }
             }
             Manage::ChangeDirectory(path) => {
@@ -297,55 +208,43 @@ impl<B: Backend> Loop<'_, B> {
                 self.app.open_export_name(now, offset);
             }
             // 与拖选同一个剪贴板入口（`copy_text`：OSC 52 与系统剪贴板，tui-select.md §3.2）。
+            Manage::AutoCompact(at) => self.auto_compact(at),
             Manage::ExportCopy => {
                 let (text, _) = crate::ui::export::conversation_text(&self.app, self.now_ms());
+                // 复制的反馈同拖选（Puffin `copied_says`：`Copied N lines`）。
+                self.app.info(crate::ui::footer::copied_says(
+                    self.app.lang,
+                    text.trim_end_matches('\n'),
+                ));
                 self.copy_text(text);
-                self.app.info(crate::ui::export::copied(self.app.lang));
             }
-            // 先写回，成功后再换调色板（与 `/locale` 相同的顺序）；同时只有一次写入在途。
-            Manage::SetTheme(theme) => {
-                let Some(theme) = self.theme.start(theme) else {
-                    return Ok(());
-                };
-                let saving = self.options.services.preferences.save_theme(theme);
-                self.pending.push(
-                    async move {
-                        let result = saving.await;
-                        Done::Manage(ManageDone::ThemeSaved { theme, result })
+            // 墨色已经换上（同 Puffin：写不成时主题仍然换了），这里重画并写 `theme.json`（tui-kit.md §3.4）；同时只有一次
+            // 写入在途，在途期间又选的只留最后一个（`latest.rs`）。没有存储时只对本次运行有效。
+            Manage::SetTheme(choice) => {
+                self.manage(Manage::Repaint)?;
+                match self.options.services.stores.clone() {
+                    Some(stores) => {
+                        let Some(choice) = self.theme.start(choice) else {
+                            return Ok(());
+                        };
+                        let saving =
+                            stores.write(crate::services::StoreFile::Theme, choice.encode());
+                        self.pending.push(
+                            async move {
+                                let result = saving.await;
+                                Done::Manage(ManageDone::ThemeSaved { choice, result })
+                            }
+                            .boxed(),
+                        );
                     }
-                    .boxed(),
-                );
-            }
-            // 本会话先换档位（以 `ModelChanged` 为准），再存成新会话的缺省（与 Node 的顺序相同）。
-            Manage::EffortChosen {
-                selection,
-                level,
-                args,
-            } => {
-                // 档位的切换不是 `/model`：不写 `/model` 的记录（`/effort` 的记录在 `effort_done`）。
-                self.act(crate::ui::app::Action::SetModel(selection.clone()))?;
-                let saving = self
-                    .options
-                    .services
-                    .preferences
-                    .save_default_model(selection);
-                self.pending.push(
-                    async move {
-                        let result = saving.await;
-                        Done::Manage(ManageDone::EffortSaved {
-                            level,
-                            result,
-                            args,
-                        })
-                    }
-                    .boxed(),
-                );
+                    None => self
+                        .app
+                        .info(crate::ui::slash_theme::theme_set(self.app.lang, choice)),
+                }
             }
             Manage::Repaint => {
                 self.cache.clear();
-                self.terminal
-                    .clear()
-                    .map_err(|error| anyhow::anyhow!("clearing the terminal: {error}"))?;
+                self.renderer.invalidate();
             }
         }
         Ok(())
@@ -398,21 +297,6 @@ impl<B: Backend> Loop<'_, B> {
                 // 面板、footer 与子代理列表随新的快照一起更新（修复线 F34：同一份快照）。
                 self.refresh_tasks();
             }
-            ManageDone::Effort { catalog, args } => {
-                if let Some(action) = self.app.effort(&catalog.models, &args) {
-                    self.act(action)?;
-                }
-            }
-            ManageDone::Mcp(servers) => self.app.open_mcp(&servers),
-            ManageDone::Hooks(entries) => self.app.open_hooks(&entries),
-            ManageDone::Status(servers) => {
-                let summary = crate::ui::manage::mcp_summary(&servers, lang);
-                self.app.status(summary);
-            }
-            ManageDone::PermissionRules(rules) => match rules {
-                Ok(rules) => self.app.open_permissions(rules),
-                Err(error) => self.app.error(i18n::rejected(lang, &error.to_string())),
-            },
             ManageDone::PlanFile { entering, file } => match file {
                 Ok(file) if file.exists => {
                     let editor = self.options.services.editor.clone();
@@ -426,7 +310,11 @@ impl<B: Backend> Loop<'_, B> {
                         .boxed(),
                     );
                 }
-                Ok(_) => self.app.info(crate::ui::manage::no_plan(lang, entering)),
+                Ok(_) => {
+                    if let Some(says) = crate::ui::manage::no_plan(lang, entering) {
+                        self.app.info(says);
+                    }
+                }
                 Err(error) => self.app.error(i18n::rejected(lang, &error.to_string())),
             },
             ManageDone::PlanOpened { path, result } => {
@@ -481,20 +369,20 @@ impl<B: Backend> Loop<'_, B> {
                 .app
                 .diff_loaded(diff.map_err(|error| error.to_string())),
             ManageDone::Exported(result) => match result {
-                Ok(path) => self.app.info(crate::ui::export::exported(lang, &path)),
+                Ok(path) => {
+                    let shown = self.app.tilde(&path);
+                    self.app.info(crate::ui::export::exported(lang, &shown));
+                }
                 Err(error) => self
                     .app
                     .error(crate::ui::export::export_failed(lang, &error.to_string())),
             },
-            ManageDone::ThemeSaved { theme, result } => {
+            ManageDone::ThemeSaved { choice, result } => {
                 let next = self.theme.finish();
                 match result {
-                    Ok(_) => {
-                        self.app.apply_theme(theme);
-                        self.app
-                            .info(crate::ui::slash_theme::theme_set(lang, theme));
-                        self.manage(Manage::Repaint)?;
-                    }
+                    Ok(()) => self
+                        .app
+                        .info(crate::ui::slash_theme::theme_set(lang, choice)),
                     Err(reason) => self
                         .app
                         .error(crate::ui::slash_theme::theme_failed(lang, &reason)),
@@ -503,19 +391,10 @@ impl<B: Backend> Loop<'_, B> {
                     self.manage(Manage::SetTheme(next))?;
                 }
             }
-            ManageDone::EffortSaved {
-                level,
-                result,
-                args,
-            } => {
-                self.app.effort_done(level.as_deref(), result, &args);
-            }
-            ManageDone::RuleChanged { change, result } => self
-                .app
-                .permissions_changed(&change, result.map_err(|error| error.to_string())),
+            ManageDone::AutoCompactSaved { at, result } => self.auto_compact_saved(at, result),
             ManageDone::Planned { ack, text } => match ack {
                 Ack::Accepted { .. } | Ack::Duplicate => self.send(
-                    Sent::Submit,
+                    Sent::Submit(String::new()),
                     Command::Submit {
                         text,
                         attachments: Vec::new(),

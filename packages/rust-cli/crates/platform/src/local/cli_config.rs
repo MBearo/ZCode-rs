@@ -206,6 +206,54 @@ pub async fn write_mcp_enabled(
     .await
 }
 
+/// `compact.autoThresholdTokens` 的写法（Puffin 的 `/autocompact` 与设置页，compact.md §2.3；同 Node 的
+/// `updateJsonObjectFile`）：`Some(n)` 设成 n（已有的键原位，没有时加在末尾），`None` 删掉它，`compact` 空了也删掉；
+/// 其余字段与键序不变。文件不存在时从空对象开始；读不出或不是对象时报错、不写。
+pub fn compact_at_text(
+    bytes: Option<&[u8]>,
+    shown: &str,
+    at: Option<u64>,
+) -> Result<String, ConfigWriteError> {
+    let mut object = match bytes.map(serde_json::from_slice::<Value>) {
+        None => Map::new(),
+        Some(Ok(Value::Object(object))) => object,
+        Some(Ok(_)) => return Err(ConfigWriteError::NotObject(shown.to_owned())),
+        Some(Err(_)) => return Err(ConfigWriteError::Parse(shown.to_owned())),
+    };
+    match at {
+        Some(tokens) => {
+            let compact = object
+                .entry("compact")
+                .or_insert_with(|| Value::Object(Map::new()));
+            if !compact.is_object() {
+                *compact = Value::Object(Map::new());
+            }
+            if let Value::Object(compact) = compact {
+                compact.insert("autoThresholdTokens".to_owned(), Value::from(tokens));
+            }
+        }
+        None => {
+            if let Some(Value::Object(compact)) = object.get_mut("compact") {
+                compact.shift_remove("autoThresholdTokens");
+                if compact.is_empty() {
+                    object.shift_remove("compact");
+                }
+            }
+        }
+    }
+    let mut text = node_pretty(&Value::Object(object));
+    text.push('\n');
+    Ok(text)
+}
+
+/// 用户级配置里的 `compact.autoThresholdTokens`：经 [`update_cli_config`] 读改写，原子写，0600。返回写入的文件。
+pub async fn write_compact_at(
+    paths: &StoragePaths,
+    at: Option<u64>,
+) -> Result<StoragePath, ConfigWriteError> {
+    update_cli_config(paths, |bytes, shown| compact_at_text(bytes, shown, at)).await
+}
+
 /// `JSON.stringify(value, null, 2)`：先按 JS 规则得到紧凑文本（键序、数字写法），再缩进。
 pub(crate) fn node_pretty(value: &Value) -> String {
     let compact = rust_cli_base::js::json::stringify(value);

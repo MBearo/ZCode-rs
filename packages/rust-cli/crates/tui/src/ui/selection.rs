@@ -1,18 +1,24 @@
 // 复制自 apps/zcode-host/crates/tui/src/ui/selection.rs（feat/rs 79b6691c55）；F25 改了词的字符类、
 // 软折行的拼接与选区的底色（docs/specs/rust-cli/tui-select.md §2）。
 //! 鼠标选区的文字处理（docs/specs/rust-tui.md §8.7）：按显示列取文字、找词与网址、换底色、选区范围。
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthChar;
+//!
+//! 行是 kit 的 [`StyledLine`]（tui-kit.md §3.1、§3.8）：改样式经 `StyledLine::restyle_cells`，宽度只从 kit 的
+//! `render::width` 取；软折行的续行看 `cont`。
+use rust_cli_tui_kit::render::width::display_width;
+use rust_cli_tui_kit::render::{Continuation, StyledLine};
 
-use super::mouse::{Point, Selection};
+use super::ink::Ink;
+
+fn width(c: char) -> usize {
+    display_width(c)
+}
 
 /// `text` 里按显示列取 `[from, to)`。
 pub fn columns(text: &str, from: usize, to: usize) -> String {
     let mut used = 0;
     let mut out = String::new();
     for c in text.chars() {
-        let w = c.width().unwrap_or(0);
+        let w = width(c);
         if used >= from && used < to {
             out.push(c);
         }
@@ -45,7 +51,7 @@ pub fn word_at(text: &str, col: usize) -> (usize, usize) {
         .chars()
         .scan(0, |used, c| {
             let at = *used;
-            *used += c.width().unwrap_or(0);
+            *used += width(c);
             Some((at, c))
         })
         .collect();
@@ -62,10 +68,9 @@ pub fn word_at(text: &str, col: usize) -> (usize, usize) {
         .iter()
         .position(|(_, c)| !word(*c))
         .map_or(cells.len(), |i| index + i);
-    let end_col = cells.get(end).map_or_else(
-        || text.chars().map(|c| c.width().unwrap_or(0)).sum(),
-        |(at, _)| *at,
-    );
+    let end_col = cells
+        .get(end)
+        .map_or_else(|| text.chars().map(width).sum(), |(at, _)| *at);
     (cells[start].0, end_col)
 }
 
@@ -73,7 +78,7 @@ pub fn word_at(text: &str, col: usize) -> (usize, usize) {
 pub fn text_at(text: &str, col: usize) -> bool {
     let mut used = 0;
     for c in text.chars() {
-        let w = c.width().unwrap_or(0);
+        let w = width(c);
         if (used..used + w).contains(&col) {
             return !c.is_whitespace();
         }
@@ -82,77 +87,18 @@ pub fn text_at(text: &str, col: usize) -> bool {
     false
 }
 
-/// 把行的 `[from, to)` 列反色（按需拆开片段）。输入框的选区用。
-pub fn reverse(line: &mut Line<'static>, from: usize, to: usize) {
-    restyle(line, from, to, |style| {
-        style.add_modifier(Modifier::REVERSED)
-    });
-}
-
-/// 把行的 `[from, to)` 列叠上 `style`（搜索的高亮，tui-input.md §2.3.5）：`style` 里设了的颜色与修饰键盖过原来的。
-pub fn paint(line: &mut Line<'static>, from: usize, to: usize, style: Style) {
-    restyle(line, from, to, |base| base.patch(style));
-}
-
-/// 把行的 `[from, to)` 列换成选区底色（只换底色，前景不变，tui-select.md §2.2）。
-pub fn highlight(line: &mut Line<'static>, from: usize, to: usize, bg: ratatui::style::Color) {
-    restyle(line, from, to, |style| style.bg(bg));
-}
-
-/// 把行的 `[from, to)` 列的样式按 `change` 改（按需拆开片段）。零宽的片段（软折行的记号）原样保留。
-fn restyle(line: &mut Line<'static>, from: usize, to: usize, change: impl Fn(Style) -> Style) {
-    let mut spans = Vec::new();
-    let mut used = 0;
-    for span in std::mem::take(&mut line.spans) {
-        if span.content.is_empty() {
-            spans.push(span);
-            continue;
-        }
-        let mut current = String::new();
-        let mut current_selected = None;
-        for c in span.content.chars() {
-            let selected = used >= from && used < to;
-            if current_selected.is_some_and(|s| s != selected) {
-                let style = if current_selected == Some(true) {
-                    change(span.style)
-                } else {
-                    span.style
-                };
-                spans.push(Span::styled(std::mem::take(&mut current), style));
-            }
-            current_selected = Some(selected);
-            current.push(c);
-            used += c.width().unwrap_or(0);
-        }
-        if !current.is_empty() {
-            let style = if current_selected == Some(true) {
-                change(span.style)
-            } else {
-                span.style
-            };
-            spans.push(Span::styled(current, style));
-        }
-    }
-    line.spans = spans;
-}
-
-/// 选区在全部行里的范围：（起始行，起始列，结束行，结束列（不含））；端点找不到时为 None。`find` 按
-/// （块的键，块内行）给出行号。
-pub fn range(
-    selection: &Selection,
-    find: impl Fn(&Point) -> Option<usize>,
-) -> Option<(usize, usize, usize, usize)> {
-    let a = (find(&selection.anchor)?, selection.anchor.col);
-    let b = (find(&selection.head)?, selection.head.col);
-    let (start, end) = if a <= b { (a, b) } else { (b, a) };
-    Some((start.0, start.1, end.0, end.1 + 1))
+/// 把行的 `[from, to)` 列标成鼠标选区（tui-select.md §2.2）：rich 时只换底色、前景不变；plain 反显（`Ink::mouse_selection`，
+/// Puffin `view/frame.rs` 的 `highlight`）。
+pub fn mark_line(line: &mut StyledLine, from: usize, to: usize, ink: &Ink) {
+    *line = line.restyle_cells(from, to, |style| ink.mouse_selection(style));
 }
 
 /// 选区里的一行：显示的文字，与它是不是上一行的软折行续行。
+/// `soft` 是 kit 行的 `cont`（续行文字开始的列、折行处吃没吃掉空格）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {
     pub text: String,
-    pub soft: Option<super::text::SoftWrap>,
+    pub soft: Option<Continuation>,
 }
 
 /// 选区的文字（tui-select.md §2.3）：第一行从 `first` 列起，最后一行到 `last` 列（不含）；软折行的
@@ -160,9 +106,16 @@ pub struct Row {
 ///
 /// 缺陷修复（F25）：原来每一屏行都用换行连接、续行的缩进也取，折过行的错误复制出来是断开的几段（长的请求 ID
 /// 被硬断时中间多了换行与空格）。
+///
+/// 照 Puffin 的复制（docs/puffin-tui.md §4.2「选择与复制」，tui-kit.md §4.2，S1）：只有半块字符的行（板的 `▄` `▀` 边）
+/// 不复制；各行共同的前导缩进去掉（正文从第 3 列起，复制出来从行首起）。
 pub fn join(rows: &[Row], first: usize, last: usize) -> String {
     let mut out: Vec<String> = Vec::new();
     for (index, row) in rows.iter().enumerate() {
+        let edge = row.text.trim();
+        if !edge.is_empty() && edge.chars().all(|c| c == '▄' || c == '▀') {
+            continue;
+        }
         let soft = row.soft.filter(|_| index > 0);
         let mut from = if index == 0 { first } else { 0 };
         let to = if index + 1 == rows.len() {
@@ -172,10 +125,10 @@ pub fn join(rows: &[Row], first: usize, last: usize) -> String {
         };
         let mut piece = String::new();
         if let Some(soft) = soft {
-            if soft.space && from <= soft.indent && to >= soft.indent {
+            if soft.space && from <= soft.at && to >= soft.at {
                 piece.push(' ');
             }
-            from = from.max(soft.indent);
+            from = from.max(soft.at);
         }
         piece.push_str(&columns(&row.text, from, to));
         let continued = rows.get(index + 1).is_some_and(|next| next.soft.is_some());
@@ -189,7 +142,16 @@ pub fn join(rows: &[Row], first: usize, last: usize) -> String {
             _ => out.push(piece),
         }
     }
-    out.join("\n")
+    let indent = out
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start_matches(' ').len())
+        .min()
+        .unwrap_or(0);
+    out.iter()
+        .map(|line| line.get(indent..).unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]

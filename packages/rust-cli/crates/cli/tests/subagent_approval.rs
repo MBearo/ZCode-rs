@@ -219,7 +219,7 @@ fn harness(workspace_parent: Option<&Path>, a_stall_at: Option<usize>) -> Harnes
     let kernel = LocalKernel::new(
         ports,
         Defaults {
-            selection: selection(),
+            selection: selection().into(),
             mode: PermissionMode::Default,
             max_turns: None,
             search_tools: false,

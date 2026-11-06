@@ -285,6 +285,7 @@ impl Harness {
                 bigmodel_api: url.to_owned(),
                 bigmodel_team_plans: format!("{url}/coding-plan/team/plans"),
                 client_version: "0.1.0-test".to_owned(),
+                usage_quota_url: None,
             },
         };
         Platform::new(paths, secret, services)

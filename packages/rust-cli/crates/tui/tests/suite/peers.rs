@@ -6,14 +6,14 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use crossterm::event::KeyCode;
 use futures_util::stream::BoxStream;
-use ratatui::style::Color;
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::peers::{
     InboundPeerMessage, ModeClass, PeerAddress, PeerIdentity, PeerMessaging, PeerOutbound,
     PeerRecord, PeerSendError, PeerSignal, PeerStatus, ReceiptStatus, envelope,
 };
 use rust_cli_kernel_api::testing::text_response;
-use rust_cli_tui::{ColorLevel, Palette};
+use rust_cli_tui::{ColorLevel, Colors};
+use rust_cli_tui_kit::render::Color;
 use tokio::sync::mpsc;
 
 use super::support::{GatedModel, Setup, with_ui};
@@ -88,7 +88,7 @@ fn setup(port: &Arc<FakePort>, lang: &'static str, background: (u8, u8, u8)) -> 
     Setup {
         lang,
         height: 32,
-        palette: Palette::new(ColorLevel::TrueColor, Some(background)),
+        colors: Colors::new(ColorLevel::TrueColor, Some(background)),
         peers: rust_cli_runtime::PeerDeps {
             port: port.clone(),
             hold_timeout_ms: 300_000,
@@ -98,9 +98,19 @@ fn setup(port: &Arc<FakePort>, lang: &'static str, background: (u8, u8, u8)) -> 
     }
 }
 
+/// 画面里从以 `first` 开头的那一行起的 `n` 行（去掉行尾空格）。
+fn block(screen: &str, first: &str, n: usize) -> Vec<String> {
+    let lines: Vec<String> = screen.lines().map(|l| l.trim_end().to_owned()).collect();
+    let at = lines
+        .iter()
+        .position(|l| l.starts_with(first))
+        .unwrap_or(lines.len());
+    lines.into_iter().skip(at).take(n).collect()
+}
+
 /// 画面里 `needle` 第一次出现处那一格的前景色。
 fn color_of(ui: &super::support::Ui, needle: &str) -> Option<Color> {
-    let buffer = ui.buffer.lock().unwrap().clone()?;
+    let buffer = ui.shot.lock().unwrap().clone()?;
     let area = buffer.area;
     (area.top()..area.bottom()).find_map(|y| {
         let row: String = (area.left()..area.right())
@@ -112,59 +122,57 @@ fn color_of(ui: &super::support::Ui, needle: &str) -> Option<Color> {
     })
 }
 
+/// 报告了前景的设置：rich 的主题（tui-kit.md §3.4；只报告背景时是 plain，深浅两种地的强调色相同）。
+fn rich(mut setup: Setup, foreground: (u8, u8, u8)) -> Setup {
+    setup.colors = setup.colors.with_foreground(Some(foreground));
+    setup
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_held_message_asks_for_approval_and_is_delivered() {
     let port = FakePort::new();
     let model = GatedModel::scripted(vec![text_response(&["first"]), text_response(&["got it"])]);
-    let found = Arc::new(Mutex::new(None));
-    let seen = found.clone();
     let probe = port.clone();
     with_ui(
         model.clone(),
-        setup(&port, "en_US.UTF-8", (0, 0, 0)),
+        rich(setup(&port, "en_US.UTF-8", (0, 0, 0)), (255, 255, 255)),
         |mut ui| async move {
             ui.submit("start");
             ui.wait_for("first").await;
             probe.push_held();
-            let screen = ui.wait_for("Held message from another session").await;
-            assert!(
-                screen.contains("Another ZCode session sent a message: from"),
+            let screen = ui.wait_for("Deliver this message?").await;
+            // 旧界面的画面（Puffin 没有这一面，tui-kit.md §4.3「同伴消息的批准」）：正文末尾是没有工具行的请求的
+            // `● Peer  名字` 与轨上的发送方、原因与全文；板上是问句的板头与名字、说明两列的回答，投递在前。
+            assert_eq!(
+                block(&screen, " ● Peer  work-b-7f", 7),
+                [
+                    " ● Peer  work-b-7f",
+                    "   │ Another ZCode session sent a message: from",
+                    "   │ uds:/Users/dev/.zcode/rust-cli/peers/9.sock (peer claims name: work-b-7f)",
+                    "   │ The sending session's permission mode class doesn't match this session's,",
+                    "   │ so it wasn't delivered automatically.",
+                    "   │ hello from B",
+                    "   │ second line",
+                ],
                 "{screen}"
             );
-            assert!(
-                screen.contains(
-                    "uds:/Users/dev/.zcode/rust-cli/peers/9.sock (peer claims name: work-b-7f)"
-                ),
+            assert_eq!(
+                block(&screen, "   Deliver this message?", 4),
+                [
+                    "   Deliver this message?",
+                    "   1  Deliver   the agent reads it as a message",
+                    "   2  Deny      drop it and tell the sender",
+                    " ›  Send a message                                         1–2 answer  esc deny",
+                ],
                 "{screen}"
             );
-            assert!(
-                screen.contains(
-                    "The sending session's permission mode class doesn't match this session's"
-                ),
-                "{screen}"
-            );
-            assert!(
-                screen.contains("Message body (this is what will be delivered):"),
-                "{screen}"
-            );
-            assert!(screen.contains("hello from B"), "{screen}");
-            assert!(
-                screen.contains("1. Deny — drop it and tell the sender it was declined"),
-                "{screen}"
-            );
-            assert!(
-                screen.contains("2. Deliver this message to ZCode"),
-                "{screen}"
-            );
-            ui.key(KeyCode::Down);
+            // 回答点亮之后才起作用（12 个 tick，tui.md §5.2）；焦点缺省在第一个回答（投递，同 Puffin 的请求）。
+            ui.settle().await;
             ui.key(KeyCode::Enter);
             let screen = ui.wait_for("got it").await;
-            assert!(screen.contains("@ work-b-7f › hello from B …"), "{screen}");
-            assert!(
-                !screen.contains("Held message from another session"),
-                "{screen}"
-            );
-            *seen.lock().unwrap() = color_of(&ui, "@ work-b-7f");
+            // 投递之后是正文里的同伴消息（画法归 transcript，tui-kit.md §4.2），批准的板走了。
+            assert!(screen.contains("Peer  work-b-7f  says"), "{screen}");
+            assert!(!screen.contains("Deliver this message?"), "{screen}");
         },
     )
     .await;
@@ -180,31 +188,6 @@ async fn a_held_message_asks_for_approval_and_is_delivered() {
         last.contains(r"Another ZCode session sent a message:\n<cross-session-message"),
         "{last}"
     );
-    let dark = found.lock().unwrap().unwrap();
-
-    // 浅色背景：名字的强调色换成浅色主题的那一种。
-    let port = FakePort::new();
-    let model = GatedModel::scripted(vec![text_response(&["first"]), text_response(&["got it"])]);
-    let found = Arc::new(Mutex::new(None));
-    let seen = found.clone();
-    let probe = port.clone();
-    with_ui(
-        model,
-        setup(&port, "en_US.UTF-8", (255, 255, 255)),
-        |mut ui| async move {
-            ui.submit("start");
-            ui.wait_for("first").await;
-            probe.push_held();
-            ui.wait_for("Held message from another session").await;
-            ui.key(KeyCode::Char('2'));
-            ui.key(KeyCode::Enter);
-            ui.wait_for("got it").await;
-            *seen.lock().unwrap() = color_of(&ui, "@ work-b-7f");
-        },
-    )
-    .await;
-    let light = found.lock().unwrap().unwrap();
-    assert_ne!(dark, light, "the name uses the theme accent");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -219,22 +202,21 @@ async fn the_chinese_dialog_denies_with_escape() {
             ui.submit("开始");
             ui.wait_for("第一句").await;
             probe.push_held();
-            let screen = ui.wait_for("来自其他会话的消息已扣住").await;
+            let screen = ui.wait_for("投递这条消息？").await;
             assert!(screen.contains("另一个 ZCode 会话发来消息"), "{screen}");
             assert!(
                 screen.contains("发送方会话的权限模式类别与本会话不同"),
                 "{screen}"
             );
             assert!(
-                screen.contains("1. 拒绝——丢弃，并告诉发送方被拒绝"),
+                screen.contains("1  投递   agent 把它当作一条消息读"),
                 "{screen}"
             );
-            assert!(screen.contains("2. 把这条消息交给 ZCode"), "{screen}");
+            assert!(screen.contains("2  拒绝   丢弃，并告诉发送方"), "{screen}");
+            assert!(screen.contains("1–2 回答  esc 拒绝"), "{screen}");
             ui.key(KeyCode::Esc);
-            ui.wait("the dialog to close", |s| {
-                !s.contains("来自其他会话的消息已扣住")
-            })
-            .await;
+            ui.wait("the dialog to close", |s| !s.contains("投递这条消息？"))
+                .await;
         },
     )
     .await;
@@ -244,46 +226,50 @@ async fn the_chinese_dialog_denies_with_escape() {
     );
 }
 
-/// 批准框的焦点行（tui.md §7.7，工作线 F76，用户决定 2026-10-23）：与提问视图相同，不铺底色条，`❯` 与名字是强调色；
-/// 深浅两种背景。旧代码整行铺底色条。
+/// 批准框的焦点行（tui.md §7.7）。样子照 Puffin 的「请求」（工作线 TK 的阶段 S，tui-kit.md §4.3「同伴消息的批准框」）：
+/// 回答在 panel 底色的板上，焦点行的序号与名字是 brand，其余名字 fg2；深浅两种背景。
 #[tokio::test(flavor = "multi_thread")]
 async fn the_focused_choice_has_no_bar_in_both_themes() {
-    for (background, accent) in [
-        ((0, 0, 0), Color::Rgb(99, 168, 248)),
-        ((255, 255, 255), Color::Rgb(28, 100, 200)),
-    ] {
+    // 报告了前景，主题是 rich（tui-kit.md §3.4）。
+    for (background, foreground) in [((0, 0, 0), (255, 255, 255)), ((255, 255, 255), (0, 0, 0))] {
+        let colors =
+            Colors::new(ColorLevel::TrueColor, Some(background)).with_foreground(Some(foreground));
+        let theme = colors.ink().theme;
         let port = FakePort::new();
         let model = GatedModel::scripted(vec![text_response(&["first"])]);
         let probe = port.clone();
         with_ui(
             model,
-            setup(&port, "en_US.UTF-8", background),
+            rich(setup(&port, "en_US.UTF-8", background), foreground),
             |mut ui| async move {
                 ui.submit("start");
                 ui.wait_for("first").await;
                 probe.push_held();
-                ui.wait("the pointer on deny", |s| s.contains("❯ 1. Deny"))
-                    .await;
-                let buffer = ui.buffer.lock().unwrap().clone().unwrap();
-                let area = buffer.area;
-                let row = |needle: &str| {
-                    (area.top()..area.bottom()).find(|&y| {
-                        let text: String = (area.left()..area.right())
-                            .map(|x| buffer[(x, y)].symbol())
-                            .collect();
-                        text.contains(needle)
-                    })
+                ui.wait_for("1  Deliver").await;
+                // 回答从 line 色淡入（12 个 tick，tui.md §5.2）：等它点亮。焦点缺省在第一个回答（投递）。
+                let lit = async {
+                    while color_of(&ui, "1  Deliver") != Some(theme.brand) {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
                 };
-                let focused = row("❯ 1. Deny").unwrap();
-                let other = row("2. Deliver").unwrap();
-                for y in [focused, other] {
+                tokio::time::timeout(std::time::Duration::from_secs(10), lit)
+                    .await
+                    .unwrap_or_else(|_| panic!("the answers never lit:\n{}", ui.screen()));
+                let buffer = ui.frame();
+                let area = buffer.area;
+                let panel = theme.panel.expect("rich 的主题有板的底色");
+                for needle in ["1  Deliver", "2  Deny"] {
+                    let (_, y) = buffer.find(needle).unwrap();
                     for x in area.left()..area.right() {
-                        assert_eq!(buffer[(x, y)].bg, Color::Reset, "column {x} of row {y}");
+                        assert_eq!(buffer[(x, y)].bg, panel, "column {x} of row {y}");
                     }
                 }
-                assert_eq!(color_of(&ui, "❯ 1. Deny"), Some(accent));
-                assert_eq!(color_of(&ui, "Deny —"), Some(accent));
-                assert_eq!(color_of(&ui, "Deliver this"), Some(Color::Reset));
+                // 焦点行的序号与名字是 brand；其余序号 fg3、名字 fg2、说明 fg3（kit `answer_rows`）。
+                assert_eq!(color_of(&ui, "1  Deliver"), Some(theme.brand));
+                assert_eq!(color_of(&ui, "Deliver   the"), Some(theme.brand));
+                assert_eq!(color_of(&ui, "2  Deny"), Some(theme.fg3.fg_color()));
+                assert_eq!(color_of(&ui, "Deny      drop"), Some(theme.fg2.fg_color()));
+                assert_eq!(color_of(&ui, "drop it and"), Some(theme.fg3.fg_color()));
                 ui.key(KeyCode::Esc);
             },
         )

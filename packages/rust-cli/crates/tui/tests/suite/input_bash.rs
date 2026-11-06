@@ -113,15 +113,15 @@ async fn bang_runs_a_shell_command_and_the_model_sees_both_messages() {
     with_ui(model.clone(), setup, |mut ui| async move {
         ui.wait_for("Ask before changes").await;
         ui.type_text("!");
-        ui.wait_for("! Run a shell command").await;
+        ui.wait_for("!  Run a shell command").await;
         ui.submit("ls -a");
         let screen = ui
             .wait("the reply", |s| {
-                s.contains("listed the files") && !s.contains("esc to interrupt")
+                s.contains("listed the files") && !s.contains("esc stop")
             })
             .await;
         assert!(screen.contains("! ls -a"), "{screen}");
-        assert!(screen.contains("⎿  ran ls -a"), "{screen}");
+        assert!(screen.contains("│ ran ls -a"), "{screen}");
         // 发送后回到普通模式。
         assert!(!screen.contains("Run a shell command"), "{screen}");
     })
@@ -145,13 +145,13 @@ async fn backspace_at_the_start_leaves_bash_mode() {
     with_ui(model, Setup::default(), |mut ui| async move {
         ui.wait_for("Ask before changes").await;
         ui.type_text("!");
-        ui.wait_for("! Run a shell command").await;
+        ui.wait_for("!  Run a shell command").await;
         ui.key(KeyCode::Backspace);
         ui.wait("prompt mode", |s| !s.contains("Run a shell command"))
             .await;
         // 不在开头的 `!` 只是文字。
         ui.type_text("hi!");
-        let screen = ui.wait_for("❯ hi!").await;
+        let screen = ui.wait_for("› hi!").await;
         assert!(!screen.contains("Run a shell command"), "{screen}");
     })
     .await;

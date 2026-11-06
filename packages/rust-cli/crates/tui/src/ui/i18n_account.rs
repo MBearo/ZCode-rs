@@ -1,6 +1,5 @@
 //! 界面语言、登录与退出的文字（docs/specs/rust-cli/tui.md §7.1）。英文取 Node 原文，另配中文。
 use super::Lang;
-use crate::services::{Configured, Family};
 
 const AVAILABLE: &str = "auto, en-US, zh-CN";
 
@@ -41,71 +40,6 @@ pub fn locale_failed(lang: Lang, reason: &str) -> String {
     match lang {
         Lang::En => format!("Unable to switch locale: {reason}"),
         Lang::Zh => format!("无法切换界面语言：{reason}"),
-    }
-}
-
-/// 授权地址（Node `emitLoginAuthorizeMessage`）。
-pub fn login_open_url(lang: Lang, family: Family, url: &str) -> String {
-    let name = family.display_name();
-    match lang {
-        Lang::En => format!(
-            "Open this URL to sign in with {name}:\n\n{url}\n\nAfter authorization, return here and I will finish the login automatically."
-        ),
-        Lang::Zh => format!(
-            "打开这个地址，用 {name} 登录：\n\n{url}\n\n授权完成后回到这里，会自动完成登录。"
-        ),
-    }
-}
-
-/// 登录或手工 key 的结果（Node `formatLoginResult`：Z.AI 浏览器登录；其余 `formatProviderSetupResult`）。
-pub fn configured(lang: Lang, result: &Configured) -> String {
-    let name = result.family.display_name();
-    let model = &result.model;
-    let config = &result.config;
-    let detailed = result.oauth && result.family == Family::Zai;
-    let mut text = match (lang, detailed) {
-        (Lang::En, true) => {
-            let user = result
-                .user
-                .as_deref()
-                .map(|user| format!(" as {user}"))
-                .unwrap_or_default();
-            let credentials = result.credentials.as_deref().unwrap_or_default();
-            format!(
-                "Configured {name} Coding Plan{user}.\nModel: {model}\nCredentials: {credentials}\nModel selection: {config}"
-            )
-        }
-        (Lang::Zh, true) => {
-            let user = result
-                .user
-                .as_deref()
-                .map(|user| format!("，账号 {user}"))
-                .unwrap_or_default();
-            let credentials = result.credentials.as_deref().unwrap_or_default();
-            format!(
-                "已配置 {name} Coding Plan{user}。\n模型：{model}\n凭据：{credentials}\n模型选择：{config}"
-            )
-        }
-        (Lang::En, false) => {
-            format!("Configured {name} Coding Plan.\nModel: {model}\nModel selection: {config}")
-        }
-        (Lang::Zh, false) => {
-            format!("已配置 {name} Coding Plan。\n模型：{model}\n模型选择：{config}")
-        }
-    };
-    if let (true, Some(reason)) = (detailed, &result.browser_failed) {
-        match lang {
-            Lang::En => text.push_str(&format!("\nBrowser open failed: {reason}")),
-            Lang::Zh => text.push_str(&format!("\n打开浏览器失败：{reason}")),
-        }
-    }
-    text
-}
-
-pub fn logged_out(lang: Lang, credentials: &str) -> String {
-    match lang {
-        Lang::En => format!("Logged out from Coding Plan accounts. Credentials: {credentials}"),
-        Lang::Zh => format!("已退出 Coding Plan 账号。凭据：{credentials}"),
     }
 }
 

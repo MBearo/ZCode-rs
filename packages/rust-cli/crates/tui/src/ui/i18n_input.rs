@@ -9,23 +9,9 @@ pub fn stashed(lang: Lang) -> &'static str {
     )
 }
 
-/// 排队的插话下面那一行立即发送的提示（修复线 F104，tui.md §5.1.1）：`key` 是当前终端按得出来的键。整行同一种样式
-/// （F105），不再用按键提示组件的 `{键}` 标记。
-pub fn send_now_hint(lang: Lang, key: &str) -> String {
-    match lang {
-        Lang::En => format!("{key} to send now"),
-        Lang::Zh => format!("{key} 立即发送"),
-    }
-}
-
 /// 发送后放回暂存的提示。
 pub fn draft_restored(lang: Lang) -> &'static str {
     lang.pick("Draft restored", "已放回暂存的输入")
-}
-
-/// `/help` 里快捷键一节的标题。
-pub fn shortcuts_title(lang: Lang) -> &'static str {
-    lang.pick("Shortcuts", "快捷键")
 }
 
 /// bash 模式的输入框提示。
@@ -65,19 +51,27 @@ pub fn editor_failed(lang: Lang, reason: &str) -> String {
     }
 }
 
-/// `/memory` 选择器的标题与说明。
-pub fn memory_title(lang: Lang) -> &'static str {
-    lang.pick("Memory", "记忆")
+/// 排队的消息多于四条时栈最上面一行（docs/puffin-tui.md §4.2「发出的消息」的「栈」）：看不见的条数。
+pub fn earlier(lang: Lang, n: usize) -> String {
+    match lang {
+        Lang::En => format!("{n} earlier"),
+        Lang::Zh => format!("更早的 {n} 条"),
+    }
 }
 
-pub fn memory_subtitle(lang: Lang) -> &'static str {
-    lang.pick(
-        "Select a memory file to open in your editor.",
-        "选择要用编辑器打开的记忆文件。",
-    )
+/// 栈最上面一行在槽的位置的说明（Puffin `STACK_LABEL`）：这些消息等下一轮。
+pub fn next_turn(lang: Lang) -> &'static str {
+    lang.pick("next turn", "下一轮")
 }
 
-/// `/memory` 按 esc（原文）。
-pub fn memory_cancelled(lang: Lang) -> &'static str {
-    lang.pick("Cancelled memory editing", "已取消编辑记忆")
+/// 第一次进 shell 模式时输入框上方的一句（Puffin `shell_view::note`）。
+pub fn shell_note(lang: Lang, shell: &str) -> String {
+    match lang {
+        Lang::En => {
+            format!(
+                "Shell: {shell}, in this folder. The agent sees the output with your next message."
+            )
+        }
+        Lang::Zh => format!("Shell：{shell}，在这个文件夹里。下一条消息时 agent 会看到输出。"),
+    }
 }

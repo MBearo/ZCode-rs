@@ -94,3 +94,26 @@ fn team_manage_pages_follow_the_app() {
         format!("{BIGMODEL_ORIGIN_TEST}/coding-plan/team/plans")
     );
 }
+
+/// 套餐额度的地址覆盖照 App `resolveQuotaUrlFromEnv`（platform.md §11.3）：`ZCODE_` 前缀的优先，原样留着。
+#[test]
+fn the_usage_quota_url_follows_the_app() {
+    assert_eq!(origins(&[]).unwrap().usage_quota_url, None);
+    let both = origins(&[
+        ("BIGMODEL_USAGE_QUOTA_URL", "https://b.example.com/q"),
+        (
+            "ZCODE_BIGMODEL_USAGE_QUOTA_URL",
+            "https://z.example.com/api/monitor/usage/quota/limit",
+        ),
+    ])
+    .unwrap();
+    assert_eq!(
+        both.usage_quota_url.as_deref(),
+        Some("https://z.example.com/api/monitor/usage/quota/limit")
+    );
+    let plain = origins(&[("BIGMODEL_USAGE_QUOTA_URL", "https://b.example.com/q")]).unwrap();
+    assert_eq!(
+        plain.usage_quota_url.as_deref(),
+        Some("https://b.example.com/q")
+    );
+}

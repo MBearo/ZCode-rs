@@ -126,7 +126,7 @@ async fn whole_allowed(context: &ToolUseContext, model: Option<&SideModel>) -> b
         .view()
         .await
         .and_then(|view| view.selection)
-        .unwrap_or_else(|| side.selection.clone());
+        .unwrap_or_else(|| side.selection.current());
     side.model
         .capabilities(&selection)
         .await

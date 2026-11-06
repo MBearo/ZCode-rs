@@ -1,6 +1,6 @@
 // 复制自 apps/zcode-host/crates/tui/src/ui/textarea.rs（feat/rs 79b6691c55），按 400 行上限拆出。
 //! 编辑区按宽度折行后的位置计算：行、光标位置、上下移动、点击定位与按单位选择。
-use unicode_width::UnicodeWidthChar;
+use rust_cli_tui_kit::render::width::display_width;
 
 use super::{Row, TextArea};
 use crate::ui::mouse::{DOUBLE_CLICK, TRIPLE_CLICK};
@@ -18,7 +18,7 @@ impl TextArea {
             let mut last_space: Option<usize> = None;
             for (offset, c) in line.char_indices() {
                 let at = line_start + offset;
-                let w = c.width().unwrap_or(0);
+                let w = display_width(c);
                 if used + w > width && at > row_start {
                     let cut = last_space.filter(|space| *space > row_start).unwrap_or(at);
                     rows.push(Row {
@@ -26,10 +26,7 @@ impl TextArea {
                         end: cut,
                     });
                     row_start = cut;
-                    used = self.text[row_start..at]
-                        .chars()
-                        .map(|c| c.width().unwrap_or(0))
-                        .sum();
+                    used = self.text[row_start..at].chars().map(display_width).sum();
                     last_space = None;
                 }
                 used += w;
@@ -56,7 +53,7 @@ impl TextArea {
         let row = rows[index];
         let column = self.text[row.start..self.cursor]
             .chars()
-            .map(|c| c.width().unwrap_or(0))
+            .map(display_width)
             .sum();
         (index, column)
     }
@@ -78,7 +75,7 @@ impl TextArea {
         let mut used = 0;
         let mut at = row.start;
         for (offset, c) in self.text[row.start..row.end].char_indices() {
-            let w = c.width().unwrap_or(0);
+            let w = display_width(c);
             if used + w > goal {
                 break;
             }
@@ -99,7 +96,7 @@ impl TextArea {
         let mut used = 0;
         let mut at = row.start;
         for (offset, c) in self.text[row.start..row.end].char_indices() {
-            let w = c.width().unwrap_or(0);
+            let w = display_width(c);
             if used + w > column || c == '\n' {
                 break;
             }

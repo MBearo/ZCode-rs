@@ -28,6 +28,8 @@ mod team;
 #[cfg(test)]
 mod test_support;
 mod token;
+/// 套餐用量（Puffin `/usage`，platform.md §11）。
+pub mod usage;
 
 use std::sync::Arc;
 
@@ -52,6 +54,7 @@ pub use token::{AccountOrigins, TokenError};
 use crate::auth::AccountAuth;
 use crate::credentials::CredentialStore;
 use crate::local::Settings;
+pub use crate::providers::catalog::ListedModel;
 use crate::providers::catalog::{Access, Template};
 pub use crate::providers::site::SiteRules;
 use crate::providers::{Plans, Registry};

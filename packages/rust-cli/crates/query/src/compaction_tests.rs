@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::abort::Abort;
+use rust_cli_kernel_api::compaction::CompactProgress;
 use rust_cli_kernel_api::ids::MessageId;
 use rust_cli_kernel_api::message::{
     AttachmentMessage, CompactBoundary, CompactTrigger, ContentBlock, Message, SystemMessage,
@@ -11,22 +12,23 @@ use rust_cli_kernel_api::message::{
 };
 use rust_cli_kernel_api::model::{ApiRole, ModelError, ModelSelection};
 use rust_cli_kernel_api::orchestration::{
-    AutoCompactOutcome, CompactRequest, CompactResult, CompactTracking, Compactor,
-    OrchestrationError, QueryError, QueryStop,
+    AutoCompactOutcome, CompactRequest, CompactResult, CompactTracking, Compactor, Interactions,
+    OrchestrationError, QueryError, QueryStop, RunSink,
 };
-use rust_cli_kernel_api::testing::{ScriptedModel, text_response};
+use rust_cli_kernel_api::testing::{RecordingSink, ScriptedModel, text_response};
 use tokio_util::sync::CancellationToken;
 
 use crate::run::tests::{parts, request, scope};
 
-/// 自动压缩按脚本回答；反应式压缩总是成功。记下收到的触发与初始 token 差。`blocks` 为真时每一步都到了阻塞线，
-/// 记下阻塞线收到的压缩失败说明。
+/// 自动压缩按脚本回答，像真的压缩器一样说进度（压缩了说开始，失败了说开始与失败）；反应式压缩在 `reactive_fails`
+/// 为假时成功。记下收到的触发与初始 token 差。`blocks` 为真时每一步都到了阻塞线，记下阻塞线收到的压缩失败说明。
 struct FakeCompactor {
     auto: Mutex<Vec<AutoCompactOutcome>>,
     calls: Mutex<Vec<CompactTrigger>>,
     gaps: Mutex<Vec<Option<u64>>>,
     blocks: bool,
     failures: Mutex<Vec<Option<String>>>,
+    reactive_fails: bool,
 }
 
 impl FakeCompactor {
@@ -37,6 +39,18 @@ impl FakeCompactor {
             gaps: Mutex::default(),
             blocks: false,
             failures: Mutex::default(),
+            reactive_fails: false,
+        })
+    }
+
+    fn reactive_failing() -> Arc<Self> {
+        Arc::new(Self {
+            auto: Mutex::default(),
+            calls: Mutex::default(),
+            gaps: Mutex::default(),
+            blocks: false,
+            failures: Mutex::default(),
+            reactive_fails: true,
         })
     }
 
@@ -47,6 +61,7 @@ impl FakeCompactor {
             gaps: Mutex::default(),
             blocks: true,
             failures: Mutex::default(),
+            reactive_fails: false,
         })
     }
 }
@@ -93,6 +108,25 @@ impl Compactor for FakeCompactor {
         Ok(auto.pop().unwrap_or(AutoCompactOutcome::NotNeeded))
     }
 
+    async fn auto_compact_with(
+        &self,
+        request: CompactRequest,
+        tracking: &mut CompactTracking,
+        cancel: CancellationToken,
+        progress: &dyn CompactProgress,
+    ) -> Result<AutoCompactOutcome, OrchestrationError> {
+        let outcome = self.auto_compact(request, tracking, cancel).await?;
+        match &outcome {
+            AutoCompactOutcome::Compacted { .. } => progress.started(CompactTrigger::Auto).await,
+            AutoCompactOutcome::Failed { message } => {
+                progress.started(CompactTrigger::Auto).await;
+                progress.failed(CompactTrigger::Auto, message.clone()).await;
+            }
+            AutoCompactOutcome::NotNeeded | AutoCompactOutcome::Thrashing { .. } => {}
+        }
+        Ok(outcome)
+    }
+
     async fn compact(
         &self,
         request: CompactRequest,
@@ -100,6 +134,11 @@ impl Compactor for FakeCompactor {
     ) -> Result<CompactResult, OrchestrationError> {
         self.calls.lock_unpoisoned().push(request.trigger);
         self.gaps.lock_unpoisoned().push(request.initial_token_gap);
+        if self.reactive_fails {
+            return Err(OrchestrationError::Failed {
+                message: "Error during compaction: overloaded".to_owned(),
+            });
+        }
         Ok(result(request.trigger))
     }
 
@@ -285,4 +324,111 @@ async fn each_step_checks_the_blocking_line() {
         QueryStop::Completed
     );
     assert_eq!(*compactor.failures.lock().unwrap(), vec![None]);
+}
+
+/// 记下输出端收到的压缩进度，其余转给 [`RecordingSink`]。
+#[derive(Default)]
+struct ProgressSink {
+    inner: RecordingSink,
+    said: Mutex<Vec<String>>,
+}
+
+impl rust_cli_kernel_api::testing::OpsOverride for ProgressSink {}
+
+/// 询问交给内层的记录输出端。
+impl rust_cli_kernel_api::testing::AskOverride for ProgressSink {
+    fn asks(&self) -> &dyn Interactions {
+        &self.inner
+    }
+}
+
+#[async_trait]
+impl rust_cli_kernel_api::testing::SinkOverride for ProgressSink {
+    fn sink(&self) -> &dyn RunSink {
+        &self.inner
+    }
+
+    async fn compact_started(&self, trigger: CompactTrigger) {
+        let committed = self.inner.messages().len();
+        self.said
+            .lock_unpoisoned()
+            .push(format!("started {trigger:?} with {committed} committed"));
+    }
+
+    async fn compact_failed(&self, trigger: CompactTrigger, message: String) {
+        self.said
+            .lock_unpoisoned()
+            .push(format!("failed {trigger:?}: {message}"));
+    }
+}
+
+async fn said_by(
+    model: Arc<ScriptedModel>,
+    compactor: Arc<FakeCompactor>,
+) -> (Result<QueryStop, QueryError>, Vec<String>) {
+    let mut parts = parts(model, Vec::new());
+    parts.compactor = compactor;
+    let request = request("question");
+    let (scope, _) = scope(parts, &request, Abort::new());
+    let sink = Arc::new(ProgressSink::default());
+    let scope = Arc::new(crate::RunScope {
+        sink: sink.clone(),
+        ..Arc::into_inner(scope).expect("only the test holds the scope")
+    });
+    let stop = crate::run::run(scope, request).await;
+    let said = sink.said.lock_unpoisoned().clone();
+    (stop, said)
+}
+
+/// 缺陷修复（compact.md §4.1）：主循环把压缩器说的进度转给输出端，不再在提交摘要的同一刻自己补一个开始事件。
+#[tokio::test]
+async fn auto_compaction_progress_reaches_the_sink_once_and_before_the_commit() {
+    let model = Arc::new(ScriptedModel::new(vec![text_response(&["done"])]));
+    let compactor = FakeCompactor::new(vec![AutoCompactOutcome::Compacted {
+        result: Box::new(result(CompactTrigger::Auto)),
+    }]);
+    let (stop, said) = said_by(model, compactor).await;
+    assert_eq!(stop, Ok(QueryStop::Completed));
+    assert_eq!(said, ["started Auto with 0 committed"]);
+}
+
+/// 自动压缩失败时输出端收到失败，回合照常继续。
+#[tokio::test]
+async fn a_failed_auto_compaction_is_said_and_the_turn_goes_on() {
+    let model = Arc::new(ScriptedModel::new(vec![text_response(&["done"])]));
+    let compactor = FakeCompactor::new(vec![AutoCompactOutcome::Failed {
+        message: "Error during compaction: overloaded".to_owned(),
+    }]);
+    let (stop, said) = said_by(model.clone(), compactor).await;
+    assert_eq!(stop, Ok(QueryStop::Completed));
+    assert_eq!(
+        said,
+        [
+            "started Auto with 0 committed",
+            "failed Auto: Error during compaction: overloaded"
+        ]
+    );
+    assert_eq!(model.requests().len(), 1);
+}
+
+/// 反应式压缩失败也说失败，回合随后以上下文超限结束。
+#[tokio::test]
+async fn a_failed_reactive_compaction_is_said() {
+    let model = Arc::new(ScriptedModel::new(vec![vec![Err(
+        ModelError::PromptTooLong {
+            message: "prompt is too long".to_owned(),
+        },
+    )]]));
+    let (stop, said) = said_by(model, FakeCompactor::reactive_failing()).await;
+    assert!(matches!(
+        stop,
+        Err(QueryError::Model(ModelError::PromptTooLong { .. }))
+    ));
+    assert_eq!(
+        said,
+        [
+            "started Reactive with 0 committed",
+            "failed Reactive: Error during compaction: overloaded"
+        ]
+    );
 }

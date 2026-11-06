@@ -8,7 +8,7 @@ use std::sync::Arc;
 use rust_cli_base::TaskScope;
 use rust_cli_base::secret::EnvSnapshot;
 use rust_cli_kernel_api::clock::{Clock, Ids};
-use rust_cli_kernel_api::peers::DEFAULT_HOLD_TIMEOUT_MS;
+use rust_cli_kernel_api::peers::{DEFAULT_HOLD_TIMEOUT_MS, TmuxPlace};
 use rust_cli_paths::StoragePaths;
 use rust_cli_peers::{LocalPeers, PeerConfig};
 use rust_cli_runtime::PeerDeps;
@@ -28,6 +28,17 @@ pub(crate) fn hold_timeout(env: &EnvSnapshot) -> u64 {
     env.get(rust_cli_base::names::env::ZCODE_USER_DIALOG_TIMEOUT_MS)
         .and_then(|value| value.trim().parse::<u64>().ok())
         .unwrap_or(DEFAULT_HOLD_TIMEOUT_MS)
+}
+
+/// 进程所在的 tmux 窗格（`$TMUX` 第一个逗号之前是 socket，`$TMUX_PANE` 是窗格，tui-cockpit.md §3.3）。
+pub(crate) fn tmux_place(env: &EnvSnapshot) -> Option<TmuxPlace> {
+    let tmux = env.get(rust_cli_base::names::env::TMUX)?;
+    let pane = env.get(rust_cli_base::names::env::TMUX_PANE)?;
+    let socket = tmux.split(',').next().filter(|socket| !socket.is_empty())?;
+    Some(TmuxPlace {
+        socket: socket.to_owned(),
+        pane: pane.to_owned(),
+    })
 }
 
 pub(crate) struct Startup<'a> {
@@ -57,6 +68,7 @@ pub(crate) async fn start(startup: Startup<'_>, clock: Arc<dyn Clock>, ids: Arc<
         pid: std::process::id(),
         cwd: startup.cwd.to_string_lossy().into_owned(),
         version: startup.version.to_owned(),
+        tmux: tmux_place(startup.env),
         clock,
         ids,
         spawner: scope.spawner(),

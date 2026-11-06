@@ -5,7 +5,9 @@
 //! 门禁：产品代码里 `PoisonError::into_inner` 只许在本文件（`scripts/rust-cli/boundaries/policy.mjs` 的
 //! `SINGLE_DEFINITIONS`，按代码查）。
 
-use std::sync::{Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{
+    Condvar, Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard,
+};
 
 /// `Mutex` 的取用：中毒时取内层。
 pub trait LockUnpoisoned<T: ?Sized> {
@@ -37,6 +39,17 @@ impl<T: ?Sized> RwLockUnpoisoned<T> for RwLock<T> {
 
     fn write_unpoisoned(&self) -> RwLockWriteGuard<'_, T> {
         self.write().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// `Condvar` 的等待：醒来时锁中毒也取回内层（同 [`LockUnpoisoned`]）。
+pub trait CondvarUnpoisoned {
+    fn wait_unpoisoned<'a, T>(&self, guard: MutexGuard<'a, T>) -> MutexGuard<'a, T>;
+}
+
+impl CondvarUnpoisoned for Condvar {
+    fn wait_unpoisoned<'a, T>(&self, guard: MutexGuard<'a, T>) -> MutexGuard<'a, T> {
+        self.wait(guard).unwrap_or_else(PoisonError::into_inner)
     }
 }
 

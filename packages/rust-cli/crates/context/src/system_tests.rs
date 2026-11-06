@@ -34,8 +34,10 @@ fn the_appended_prompt_ends_the_session_block() {
     );
     assert_eq!(blocks[2].cache_control, plain[2].cache_control);
     assert_eq!(
-        sections(&appended).last().map(String::as_str),
-        Some("Always end with DONE.")
+        sections(&appended)
+            .last()
+            .map(|section| (section.name, section.text.as_str())),
+        Some(("Appended prompt", "Always end with DONE."))
     );
 }
 
@@ -66,7 +68,13 @@ fn a_custom_prompt_replaces_the_default_sections() {
     }
     assert_eq!(
         sections(&custom),
-        ["You are a terse test assistant.", "Answer in one sentence."]
+        [
+            PromptSection::new(
+                "Custom prompt",
+                "You are a terse test assistant.".to_owned()
+            ),
+            PromptSection::new("Appended prompt", "Answer in one sentence.".to_owned()),
+        ]
     );
     custom.append = None;
     assert_eq!(
@@ -151,13 +159,60 @@ fn the_session_block_has_no_environment_section() {
         assert!(
             counted
                 .iter()
-                .all(|section| !section.starts_with("# Environment")),
+                .all(|section| !section.text.starts_with("# Environment")),
             "{counted:?}"
         );
         assert!(
             counted
                 .iter()
-                .any(|section| section.starts_with("# Context management"))
+                .any(|section| section.text.starts_with("# Context management"))
         );
     }
+}
+
+/// `/context` 的明细（context-usage.md §3.1）：每段带固定的英文名字，顺序与段落相同；拼起来就是 system 的后两块。
+#[test]
+fn every_section_has_its_name_and_they_join_into_the_system_blocks() {
+    let tools = names(&["Skill"]);
+    let mut facts = facts(&tools, Surface::Interactive);
+    facts.append = Some("Always end with DONE.");
+    let counted = sections(&facts);
+    assert_eq!(
+        counted
+            .iter()
+            .map(|section| section.name)
+            .collect::<Vec<_>>(),
+        [
+            "Core instructions",
+            "Communication",
+            "Pronouns",
+            "Caution",
+            "Session guidance",
+            "Memory",
+            "Context management",
+            "Working style",
+            "Token budget",
+            "Appended prompt",
+        ]
+    );
+    let blocks = system_blocks(&facts);
+    assert_eq!(counted[0].text, blocks[1].text);
+    let session: Vec<&str> = counted[1..]
+        .iter()
+        .map(|section| section.text.as_str())
+        .collect();
+    assert_eq!(session.join("\n\n"), blocks[2].text);
+
+    facts.memory_dir = None;
+    let tools = Vec::new();
+    facts.tool_names = &tools;
+    facts.surface = Surface::Print;
+    let names: Vec<&str> = sections(&facts)
+        .iter()
+        .map(|section| section.name)
+        .collect();
+    assert!(
+        !names.contains(&"Memory") && !names.contains(&"Session guidance"),
+        "{names:?}"
+    );
 }

@@ -54,7 +54,11 @@ impl Compactor for LateCompactor {
         }
     }
 
-    fn context_usage(&self, history: &[Message], selection: &ModelSelection) -> Option<(u64, u64)> {
+    fn context_usage(
+        &self,
+        history: &[Message],
+        selection: &ModelSelection,
+    ) -> Option<rust_cli_kernel_api::compaction::ContextOccupancy> {
         match self.inner() {
             Ok(inner) => inner.context_usage(history, selection),
             Err(error) => {
@@ -86,6 +90,19 @@ impl Compactor for LateCompactor {
         cancel: CancellationToken,
     ) -> Result<AutoCompactOutcome, OrchestrationError> {
         self.inner()?.auto_compact(request, tracking, cancel).await
+    }
+
+    /// 带进度的自动压缩也转发（compact.md §4.1）：不转发时用默认实现，开始事件又回到摘要完成之后。
+    async fn auto_compact_with(
+        &self,
+        request: CompactRequest,
+        tracking: &mut CompactTracking,
+        cancel: CancellationToken,
+        progress: &dyn rust_cli_kernel_api::compaction::CompactProgress,
+    ) -> Result<AutoCompactOutcome, OrchestrationError> {
+        self.inner()?
+            .auto_compact_with(request, tracking, cancel, progress)
+            .await
     }
 
     async fn compact(

@@ -69,12 +69,19 @@ fn the_page_has_the_sections_in_order_and_ends_with_one_newline() {
     let options = page.find("\nOptions:\n").unwrap();
     let commands = page.find("\nCommands:\n").unwrap();
     assert!(options < commands);
-    // 命令按名字排，`update|upgrade`（工作线 F48，update.md §9）排在最后：名字一栏固定，说明见 update.md §9。
+    // 命令按名字排：`update|upgrade`（工作线 F48，update.md §9）名字一栏固定、说明见 update.md §9，排在最后。
+    // `app [folder]`（cli-args.md §16）排在最前。
+    assert!(page.contains(
+        "\nCommands:\n  app [folder]                          Open a folder in the ZCode desktop app\n"
+    ));
     assert!(
         page.contains(
             "  logout                                Log out from Coding Plan accounts\n"
         )
     );
+    assert!(page.contains(
+        "  logout                                Log out from Coding Plan accounts\n  update|upgrade                        Update ZCode to the latest version\n"
+    ));
     assert!(
         page.ends_with(
             "  update|upgrade                        Update ZCode to the latest version\n"

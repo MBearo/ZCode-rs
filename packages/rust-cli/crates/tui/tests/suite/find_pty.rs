@@ -10,8 +10,11 @@ use super::support::GatedModel;
 
 /// 子进程的入口（[`child`]）。
 const CHILD: &str = "suite::find_pty::child";
-/// 16 色终端里当前匹配的黄底（`find_current`；底色是 256 色表的第 3 格）。
-const YELLOW_BG: &str = "48;5;3m";
+/// 16 色终端里当前匹配的黄底：plain 主题的 `find_current` 是 `code`（ANSI 黄，SGR 33）的前景加反显、粗体加下划线，显示为
+/// 黄底（tui-kit.md §3.4、§4.3）。kit 的渲染器每个样式写自含的 SGR（先 `0` 重置）。
+const CURRENT: &str = "\x1b[0;1;4;7;33m";
+/// 其余的匹配：反显。
+const REVERSED: &str = "\x1b[0;7m";
 
 #[test]
 fn typed_slashes_search_in_a_real_terminal() {
@@ -28,11 +31,12 @@ fn typed_slashes_search_in_a_real_terminal() {
     pty.send(b"\x1b[200~alpha\x1b[201~");
     let shown = pty.until_from(mark, "the count", |text| shows(text, "2/2"));
     assert!(shows(&shown, "alpha"), "{shown:?}");
-    assert!(shown.contains(YELLOW_BG), "{shown:?}");
-    // esc：退出搜索，输入框回到 `❯`。
+    assert!(shown.contains(CURRENT), "{shown:?}");
+    assert!(shown.contains(REVERSED), "{shown:?}");
+    // esc：退出搜索，输入行的记号回到 `›`（Puffin 的输入框，tui-kit.md §4.2）。
     let mark = pty.mark();
     pty.send(b"\x1b");
-    let shown = pty.until_from(mark, "the prompt", |text| shows(text, "❯"));
+    let shown = pty.until_from(mark, "the prompt", |text| shows(text, "›"));
     assert!(!shows(&shown, "⌕"), "{shown:?}");
     // 括号粘贴的 `//` 是输入框里的文字。
     let mark = pty.mark();
@@ -42,7 +46,8 @@ fn typed_slashes_search_in_a_real_terminal() {
     // ctrl+c 清掉输入，`/exit` 退出。
     pty.send(b"\x03");
     pty.send(b"/exit");
-    pty.until("the command", |text| shows(text, "Exit the CLI"));
+    // 命令架上 `/exit` 的说明照 Puffin（`Quit ZCode.`；以前是 `Exit the CLI`，等不到它时测试在按 ⏎ 之前就超时了）。
+    pty.until("the command", |text| shows(text, "Quit ZCode"));
     pty.send(b"\r");
     let (status, all) = pty.finish();
     assert!(status.success(), "{all:?}");

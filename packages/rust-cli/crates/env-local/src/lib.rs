@@ -15,6 +15,7 @@ mod cron_file;
 mod cron_lock;
 mod cron_store;
 mod cron_watch;
+pub use cron_watch::json_changes;
 mod files;
 mod git;
 mod hook_http;

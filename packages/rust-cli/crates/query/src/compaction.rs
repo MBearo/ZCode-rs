@@ -2,7 +2,8 @@
 //! 模型返回上下文超限后的反应式压缩。判定与压缩都在压缩器（[`Compactor`]）里，这里只负责调用、
 //! 把边界、摘要与附件在一个事务里提交，并放进本次运行的历史。
 
-use rust_cli_kernel_api::compaction::prompt_too_long_gap;
+use async_trait::async_trait;
+use rust_cli_kernel_api::compaction::{CompactProgress, prompt_too_long_gap};
 use rust_cli_kernel_api::message::{CompactTrigger, Message};
 use rust_cli_kernel_api::model::{ModelSelection, QuerySource};
 use rust_cli_kernel_api::orchestration::{
@@ -12,6 +13,20 @@ use rust_cli_kernel_api::orchestration::{
 
 use crate::RunScope;
 use crate::recovery::quiet;
+
+/// 压缩器的进度转给本次运行的输出端（compact.md §4.1）。
+struct Progress<'a>(&'a RunScope);
+
+#[async_trait]
+impl CompactProgress for Progress<'_> {
+    async fn started(&self, trigger: CompactTrigger) {
+        self.0.sink.compact_started(trigger).await;
+    }
+
+    async fn failed(&self, trigger: CompactTrigger, message: String) {
+        self.0.sink.compact_failed(trigger, message).await;
+    }
+}
 
 /// 一次运行内的压缩状态（自动压缩的跟踪与是否试过反应式压缩）。
 #[derive(Debug, Default)]
@@ -80,10 +95,11 @@ impl Compaction {
         // 先用便宜的同步判定把关：每一步都构造压缩请求要复制整个历史（README §8）。
         if !quiet(source) && compactor.should_auto_compact(history, selection) {
             let outcome = compactor
-                .auto_compact(
+                .auto_compact_with(
                     request(scope, history, selection, CompactTrigger::Auto),
                     &mut self.tracking,
                     scope.abort.token().clone(),
+                    &Progress(scope),
                 )
                 .await
                 .map_err(|error| QueryError::Unsupported {
@@ -97,9 +113,10 @@ impl Compaction {
                     return Ok(Some(QueryStop::ApiError { message }));
                 }
                 // 刚压缩过：这一步不看阻塞线。
+                // 开始事件已由压缩器在摘要请求之前说过（compact.md §4.1）。
+                //
+                // 缺陷修复：以前这里在摘要完成之后才发开始事件，摘要请求期间前端只看到 `Working`。
                 AutoCompactOutcome::Compacted { result } => {
-                    // kernel-api 没有压缩进度回调：自动压缩的开始事件在摘要完成后才发（spec §8）。
-                    scope.sink.compact_started(CompactTrigger::Auto).await;
                     commit(scope, history, *result).await?;
                     return Ok(None);
                 }
@@ -143,8 +160,17 @@ impl Compaction {
                 commit(scope, history, result).await?;
                 Ok(true)
             }
-            // 压缩不了：主循环照旧以上下文超限的错误结束（放出被扣下的 413 错误）。
-            Err(_) => Ok(false),
+            // 压缩不了：主循环照旧以上下文超限的错误结束（放出被扣下的 413 错误）。开始事件已经发过，失败也说
+            // （compact.md §4.1）；中止时回合以中止结束，不说。
+            Err(error) => {
+                if !scope.abort.is_aborted() {
+                    scope
+                        .sink
+                        .compact_failed(CompactTrigger::Reactive, error.to_string())
+                        .await;
+                }
+                Ok(false)
+            }
         }
     }
 }

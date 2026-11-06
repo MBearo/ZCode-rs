@@ -1,4 +1,6 @@
-//! `/permissions`（docs/specs/rust-cli/tui-manage.md §1）：加规则写进本机项目规则集，删除先确认，关闭时提示结果。
+//! `/permissions`（docs/specs/rust-cli/tui-manage.md §1；tui-kit.md §4.2「设置」）：打开设置的 Permissions 段；新规则写进本机
+//! 项目规则集，本项目的规则能删。以前是一个自己的列表（Allow / Ask / Deny 三个标签页、确认框、关闭时的提示），照 Puffin 并进
+//! 设置页。
 use std::sync::Arc;
 
 use crossterm::event::KeyCode;
@@ -22,45 +24,58 @@ async fn rules_are_added_and_deleted_in_the_project_ruleset() {
     let store = Arc::new(MemoryStore::default());
     let setup = Setup {
         store: store.clone(),
+        width: 120,
+        height: 30,
         ..Setup::default()
     };
     let check = store.clone();
     with_ui(model.clone(), setup, |mut ui| async move {
         ui.wait_for("Ask before changes").await;
         ui.submit("/permissions");
-        let page = ui.wait_for("Permissions:").await;
-        assert!(
-            page.contains("ZCode won't ask before using allowed tools."),
-            "{page}"
-        );
-        assert!(page.contains("› Add a new rule…"), "{page}");
+        let page = ui.wait_for("Settings  ›  Permissions").await;
+        assert!(page.contains("+ Add a rule"), "{page}");
+        // `+ Add a rule` 打开新规则的页：Rule 一行改成打的字，下面跟着它存成什么、意味着什么。
         ui.key(KeyCode::Enter);
-        ui.wait_for("Add allow permission rule").await;
+        ui.wait_for("Settings  ›  Permissions  ›  New rule").await;
+        ui.key(KeyCode::Down);
+        ui.key(KeyCode::Enter);
         ui.type_text("Bash(ls *)");
         ui.key(KeyCode::Enter);
-        let destination = ui.wait_for("Where should this rule be saved?").await;
-        assert!(
-            destination.contains("Any Bash command starting with ls"),
-            "{destination}"
-        );
+        ui.wait_for("commands that start with ls").await;
+        ui.key(KeyCode::Down);
         ui.key(KeyCode::Enter);
-        ui.wait("the new rule in the list", |screen| {
-            screen.contains("Permissions:") && screen.contains("    Bash(ls *)")
-        })
-        .await;
+        let list = ui
+            .wait_for("Added. The agent uses it from its next tool call.")
+            .await;
+        assert!(
+            list.contains("Allows any command that starts with ls"),
+            "{list}"
+        );
         let saved = check.project_rules(&workspace()).await.unwrap();
         assert_eq!(saved.allow.len(), 1);
         assert_eq!(saved.allow[0].content.as_deref(), Some("ls *"));
-        // 删除：先确认（焦点在 No），选 Yes 后从规则集里去掉。
-        ui.key(KeyCode::Down);
-        ui.key(KeyCode::Enter);
-        ui.wait_for("Delete allowed tool?").await;
+        // 选中的是新规则：⌫ 在它下面问 Remove / Keep it（Puffin 的就地确认，缺省 Keep it），选 Remove 后从规则集里去掉。
+        assert!(list.contains("⌫ remove"), "{list}");
+        ui.key(KeyCode::Backspace);
+        ui.wait_for("The agent will ask before ls again.").await;
         ui.key(KeyCode::Up);
         ui.key(KeyCode::Enter);
         ui.wait("the rule to go away", |screen| {
-            screen.contains("Permissions:") && !screen.contains("Bash(ls *)")
+            screen.contains("Nothing here yet.") && !screen.contains("Keep it")
         })
         .await;
+        for _ in 0..200 {
+            if check
+                .project_rules(&workspace())
+                .await
+                .unwrap()
+                .allow
+                .is_empty()
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
         assert!(
             check
                 .project_rules(&workspace())
@@ -70,13 +85,8 @@ async fn rules_are_added_and_deleted_in_the_project_ruleset() {
                 .is_empty()
         );
         ui.key(KeyCode::Esc);
-        let screen = ui.wait_for("Deleted allow rule Bash(ls *)").await;
-        assert!(screen.contains("Added allow rule Bash(ls *)"), "{screen}");
-        // 什么都没改就关闭：提示已关闭。
-        ui.submit("/allowed-tools");
-        ui.wait_for("Permissions:").await;
-        ui.key(KeyCode::Esc);
-        ui.wait_for("Permissions dialog dismissed").await;
+        ui.wait("the page to close", |s| !s.contains("Settings  ›"))
+            .await;
     })
     .await;
     assert!(model.requests().is_empty());

@@ -66,6 +66,7 @@ pub(crate) async fn offline_services() -> AccountServices {
             bigmodel_team_plans: format!("{origin}/coding-plan/team/plans"),
             bigmodel_api: origin,
             client_version: "0.0.0-test".to_owned(),
+            usage_quota_url: None,
         },
     }
 }

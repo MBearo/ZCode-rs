@@ -25,21 +25,28 @@ pub(crate) async fn subscription(http: &Http, origin: &str, project_token: &str)
 /// 订阅列表的判定（App `fetchPersonalCodingPlanEntitlement`）：有一项合 schema 且是有效的 Coding 订阅时 available；
 /// 没有时，若有不合 schema 的 Coding 产品是 unknown（疑似 Coding 的坏数据不当作没开通），否则 unavailable。
 pub(crate) fn entitlement(payload: &Value) -> Availability {
+    current(payload).0
+}
+
+/// 同 [`entitlement`]，另给出有效的那一项（套餐用量的订阅摘要读它，platform.md §11.3）。
+pub(crate) fn current(payload: &Value) -> (Availability, Option<&Value>) {
     let Some(Value::Array(items)) = successful_data(payload) else {
-        return Availability::Unknown;
+        return (Availability::Unknown, None);
     };
     let mut malformed = false;
     for item in items {
         match parse(item) {
-            Some(subscription) if subscription.active() => return Availability::Available,
+            Some(subscription) if subscription.active() => {
+                return (Availability::Available, Some(item));
+            }
             Some(_) => {}
             None => malformed |= coding_product(item),
         }
     }
     if malformed {
-        Availability::Unknown
+        (Availability::Unknown, None)
     } else {
-        Availability::Unavailable(Reason::NotEntitled)
+        (Availability::Unavailable(Reason::NotEntitled), None)
     }
 }
 

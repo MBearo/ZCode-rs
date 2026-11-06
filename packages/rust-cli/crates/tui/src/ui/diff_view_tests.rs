@@ -44,3 +44,55 @@ fn limits_cap_files_lines_and_size() {
     };
     assert!(files[0].body.is_empty());
 }
+
+/// 列表照 Puffin 的选择器画（tui-kit.md §4.3）：没有 `›` 指针与选中条，选中的文件名用 `pick::chosen`、其余 fg2，
+/// 提示从第 3 列起在层的下面。
+#[test]
+fn the_list_has_the_picker_look() {
+    use rust_cli_kernel_api::permission::PermissionMode;
+    use rust_cli_kernel_api::testing::selection;
+
+    use crate::ui::pick;
+    use crate::ui::probe::{ColorLevel, Colors};
+    use crate::view::Transcript;
+
+    let app = App::new(
+        Colors::new(ColorLevel::TrueColor, Some((0, 0, 0))),
+        Lang::En,
+        Transcript::new(
+            selection(),
+            PermissionMode::Default,
+            crate::view::test_workspace(),
+        ),
+        Some("/Users/dev".into()),
+        "0.1.0".into(),
+    );
+    let view = DiffView {
+        current: parse("2\t1\ta.txt\n-\t-\tb.bin", PATCH, "new.txt\n"),
+        ..DiffView::new()
+    };
+    let (lines, _) = super::super::diff_view_lines::lines(&app, &view, 80, 20, 0);
+    let text: Vec<String> = lines
+        .iter()
+        .map(rust_cli_tui_kit::render::StyledLine::plain)
+        .collect();
+    assert!(!text.iter().any(|line| line.contains('›')), "{text:#?}");
+    let style_of = |name: &str| {
+        lines
+            .iter()
+            .flat_map(|line| &line.spans)
+            .find(|span| span.text == name)
+            .map(|span| span.style)
+    };
+    assert_eq!(style_of("a.txt"), Some(pick::chosen(&app.ink)), "{text:#?}");
+    assert_eq!(style_of("b.bin"), Some(app.ink.theme.fg2), "{text:#?}");
+    let hint = text
+        .iter()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .expect("the hint");
+    assert!(
+        hint.starts_with("   ") && !hint.starts_with("    "),
+        "{text:#?}"
+    );
+}

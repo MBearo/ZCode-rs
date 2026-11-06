@@ -118,6 +118,9 @@ fn node_round() -> RequestStats {
             duration_ms: Some(5_000),
             first_token_ms: Some(2_000),
         }),
+        output_tokens: 120,
+        measured_output_tokens: 120,
+        generation_ms: 3_000,
     }
 }
 
@@ -217,6 +220,29 @@ fn the_hit_rate_needs_known_usage_and_some_input() {
     };
     assert_eq!(empty.cache_hit_rate(), None);
     assert_eq!(RequestStats::default().cache_hit_rate(), None);
+}
+
+/// 子代理的数字（tui-panels.md §1.3）：token 是输入加输出；平均速度是量到的输出之和 ÷ 生成时长之和；没有请求时都没有值。
+#[test]
+fn subagent_figures_come_from_the_sums() {
+    let stats = RequestStats {
+        requests: 3,
+        input_tokens: 9_000,
+        output_tokens: 600,
+        measured_output_tokens: 500,
+        generation_ms: 10_000,
+        ..RequestStats::default()
+    };
+    assert_eq!(stats.tokens(), Some(9_600));
+    assert_eq!(stats.average_tps(), Some(50.0));
+    let unmeasured = RequestStats {
+        measured_output_tokens: 0,
+        generation_ms: 0,
+        ..stats
+    };
+    assert_eq!(unmeasured.average_tps(), None);
+    assert_eq!(RequestStats::default().tokens(), None);
+    assert_eq!(RequestStats::default().average_tps(), None);
 }
 
 #[test]

@@ -36,6 +36,9 @@ pub(crate) struct ProviderEntry {
     pub executable: bool,
     pub hidden: bool,
     pub models: Vec<ModelEntry>,
+    /// 密钥管理页（usageHost `keyUrlOf`）：生效配置的 `access.apiKeyManagementUrl`，其次模板的（套模板时 `access`
+    /// 整个换成规则的，模板的这一项留不下来）。去空白后非空。
+    pub key_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -166,7 +169,19 @@ pub(crate) fn resolve(
                 }
             })
             .collect();
+        let key_url = |config: &Value| {
+            config["access"]["apiKeyManagementUrl"]
+                .as_str()
+                .map(str::trim)
+                .filter(|url| !url.is_empty())
+                .map(str::to_owned)
+        };
+        let key_url = key_url(config).or_else(|| {
+            template_of(&templates, rule["templateId"].as_str())
+                .and_then(|template| key_url(&template["config"]))
+        });
         providers.push(ProviderEntry {
+            key_url,
             provider_name: rule["providerName"].as_str().map(str::to_owned),
             effective_config: config.clone(),
             hidden: config["visibility"] == "hidden",

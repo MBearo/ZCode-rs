@@ -1,4 +1,4 @@
-//! TUI 的账号服务（docs/specs/rust-cli/tui.md §7.2）：platform 的登录与退出，加上打开浏览器（与 `zcode login`
+//! TUI 的账号服务（docs/specs/rust-cli/tui.md §7.2）：platform 的登录、退出与家族的账号状态，加上打开浏览器（与 `zcode login`
 //! 共用 [`crate::commands::login::open_browser`]）。TUI 不起进程，打开浏览器在这里做。
 use std::sync::Arc;
 
@@ -6,9 +6,13 @@ use futures_util::FutureExt;
 use futures_util::future::BoxFuture;
 use rust_cli_base::account::Family;
 use rust_cli_base::secret::RedactedString;
+use rust_cli_platform::usage::AccountPlan;
 use rust_cli_platform::{LoginError, Platform};
-use rust_cli_tui::services::CancellationToken;
-use rust_cli_tui::{Account, Authorize, Configured, LoginFailure};
+use rust_cli_tui_ports::services::CancellationToken;
+use rust_cli_tui_ports::services::{
+    Account, Authorize, Configured, FamilyModel, FamilyStatus, LoginFailure, PlanConnection,
+    TeamStatus,
+};
 use tokio::sync::oneshot;
 
 pub(crate) struct PlatformAccount {
@@ -85,6 +89,54 @@ impl Account for PlatformAccount {
                 .await
                 .map(|file| file.as_path().display().to_string())
                 .map_err(|error| error.to_string())
+        }
+        .boxed()
+    }
+
+    /// 内置家族的账号状态（platform `family_accounts`）：快照里的团队项目都拿得到密钥（可用）。
+    fn families(&self) -> BoxFuture<'static, Vec<FamilyStatus>> {
+        let platform = self.platform.clone();
+        async move {
+            platform
+                .family_accounts()
+                .await
+                .into_iter()
+                .map(|f| FamilyStatus {
+                    family: f.family,
+                    name: match f.family {
+                        Family::Zai => "Z.ai",
+                        Family::Bigmodel => "BigModel",
+                    }
+                    .to_owned(),
+                    signed_in: f.signed_in,
+                    account: f.account,
+                    connection: match f.plan {
+                        AccountPlan::Start => PlanConnection::Start,
+                        AccountPlan::Individual => PlanConnection::Individual,
+                        AccountPlan::Team(i) => PlanConnection::Team(i),
+                    },
+                    teams: f
+                        .teams
+                        .into_iter()
+                        .map(|t| TeamStatus {
+                            name: t.name,
+                            usable: true,
+                            why: String::new(),
+                        })
+                        .collect(),
+                    teams_error: String::new(),
+                    provider: f.provider,
+                    models: f
+                        .models
+                        .into_iter()
+                        .map(|m| FamilyModel {
+                            id: m.model,
+                            enabled: m.enabled,
+                            context_window: m.context_window,
+                        })
+                        .collect(),
+                })
+                .collect()
         }
         .boxed()
     }

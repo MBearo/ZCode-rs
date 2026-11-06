@@ -1,16 +1,19 @@
 // 复制自 apps/zcode-host/crates/tui/src/ui/transcript.rs（feat/rs 79b6691c55），按 400 行上限拆成两个文件；
 // 组装部分在 `transcript_lines.rs`。
-//! transcript 的排版（rust-tui.md §8.1、§8.2）：会话头、cell、本地 cell 依次排列，cell 之间空一行。
+//! transcript 的排版（rust-tui.md §8.1、§8.2）：会话头、cell、本地 cell 依次排列。块之间空不空行照 Puffin 的间距（Hang，
+//! docs/specs/rust-cli/tui-kit.md §4.2「间距」，`shell/view/entries.rs` 的 `gap_after` 与 `hangs`，规则在
+//! `transcript_lines.rs`）；以前每两个块之间都空一行。
 //! 排版结果按块缓存（行版本、宽度、展开、明暗、类型），布局共享缓存里的行，不复制；还在变化的 cell
 //! 每帧重排。普通视图与详细视图各一份缓存。
+//!
+//! 行是 kit 的 [`StyledLine`]（tui-kit.md §3.1）：读一行是 [`Layout::styled`]，读一段是 [`Layout::styled_lines`]。
 use std::cell::OnceCell;
 use std::ops::Range;
 use std::rc::Rc;
 
-use ratatui::text::Line;
+use rust_cli_tui_kit::render::StyledLine;
 
-use super::find_text::{Folded, fold};
-use super::text::plain;
+use super::find_text::Folded;
 
 /// transcript 里一条用户消息占的行（`[start, end)`），供固定提问与回退浏览使用。
 #[derive(Debug, Clone, PartialEq)]
@@ -24,18 +27,18 @@ pub struct Prompt {
 /// 一个块排好的行；布局与缓存共享它。搜索用的索引（每行转小写的文字与列，tui-input.md §2.3.3）在第一次搜索时算出并随块
 /// 保留。
 pub struct Rendered {
-    pub lines: Vec<Line<'static>>,
+    pub lines: Vec<StyledLine>,
     /// 能不能点击展开（§8.2）。
     pub expandable: bool,
     folded: OnceCell<Vec<Folded>>,
 }
 
 impl Rendered {
-    fn new(lines: Vec<Line<'static>>) -> Rc<Self> {
+    fn new(lines: Vec<StyledLine>) -> Rc<Self> {
         Self::cell(lines, false)
     }
 
-    fn cell(lines: Vec<Line<'static>>, expandable: bool) -> Rc<Self> {
+    fn cell(lines: Vec<StyledLine>, expandable: bool) -> Rc<Self> {
         Rc::new(Self {
             lines,
             expandable,
@@ -47,7 +50,7 @@ impl Rendered {
         self.folded.get_or_init(|| {
             self.lines
                 .iter()
-                .map(|line| Folded::new(&plain(line)))
+                .map(|line| Folded::new(&line.plain()))
                 .collect()
         })
     }
@@ -82,19 +85,34 @@ pub struct Target {
     pub expandable: bool,
 }
 
+/// 挑选回退的点时给切线下面的行变暗（`rewind_pick::dimmer`）。
+pub type Dim = Rc<dyn Fn(StyledLine) -> StyledLine>;
+
 /// 排版结果：按块引用缓存里的行（每帧不复制全部行）与其中的用户消息。每行的归属是（块的键，块内第几行）；
 /// 块之间的空行算前一个块的下一行。鼠标选区按归属定位，新内容追加时选区不漂移。
 #[derive(Default)]
 pub struct Layout {
     pub blocks: Vec<Block>,
     pub prompts: Vec<Prompt>,
+    /// 排头的请求的行（等你回答的工具行，或没有工具行的请求自己的行）的第一行不空的行（Puffin `transcript_frame` 的
+    /// `ask_line`）：请求的行与预览比正文高时，跟随停在这一行在顶上（tui-kit.md §4.0「请求」）。
+    pub ask_line: Option<usize>,
+    /// 挑选回退的点时切线所在的行（Puffin `transcript_frame` 的 `cut_line`）：视图停在它上方留 `ABOVE` 行，下面的部分只截在
+    /// 块的边界上（`draw.rs`）。
+    pub cut_line: Option<usize>,
+    /// 挑选时从这一行起变暗（点和它下面的全部，kit `rewind_rows::dimmer`）：读出可见行时才变，缓存里的行不动。
+    pub dim: Option<(usize, Dim)>,
     len: usize,
-    blank: Line<'static>,
+    blank: StyledLine,
 }
 
 impl Layout {
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     /// 追加一个块（与前一个块之间空 1 行）；返回块的第一行行号。空块不占行。
@@ -109,10 +127,21 @@ impl Layout {
         rendered: Rc<Rendered>,
         full: Option<Rc<Rendered>>,
     ) -> Option<usize> {
+        self.push_spaced(key, rendered, full, true)
+    }
+
+    /// 同 [`Self::push_full`]，`gap` 说与前一个块之间空不空一行（Puffin 的间距，挂着的块不空）。
+    pub fn push_spaced(
+        &mut self,
+        key: u64,
+        rendered: Rc<Rendered>,
+        full: Option<Rc<Rendered>>,
+        gap: bool,
+    ) -> Option<usize> {
         if rendered.lines.is_empty() {
             return None;
         }
-        if let Some(previous) = self.blocks.last_mut() {
+        if gap && let Some(previous) = self.blocks.last_mut() {
             previous.gap = true;
             self.len += 1;
         }
@@ -141,7 +170,8 @@ impl Layout {
         (block, index - block.start)
     }
 
-    pub fn line(&self, index: usize) -> &Line<'static> {
+    /// 第 `index` 行（块之间的空行是空行）。
+    pub fn styled(&self, index: usize) -> &StyledLine {
         let (block, offset) = self.locate(index);
         block.rendered.lines.get(offset).unwrap_or(&self.blank)
     }
@@ -171,21 +201,23 @@ impl Layout {
     }
 
     /// `[start, end)` 的行（复制；超出部分截掉）。只有绘制的可见行与选中的行需要复制。
-    pub fn lines(&self, start: usize, end: usize) -> Vec<Line<'static>> {
+    pub fn styled_lines(&self, start: usize, end: usize) -> Vec<StyledLine> {
         (start..end.min(self.len))
-            .map(|index| self.line(index).clone())
+            .map(|index| {
+                let line = self.styled(index).clone();
+                match &self.dim {
+                    Some((from, dim)) if index >= *from => dim(line),
+                    _ => line,
+                }
+            })
             .collect()
     }
 
-    /// 显示的行里 `query` 的出现：（行号，起始列，结束列）。规则见 `find_text`（不区分大小写、按字素）。
+    /// 显示的 `lines` 行范围里 `needle`（转过小写的查询）的出现：（行号，起始列，结束列）。规则见 `find_text`（不区分
+    /// 大小写、按字素）。
     ///
     /// 缺陷修复（修复线 F114）：以前转小写后长度变了的整行（例如含 `İ`）跳过，这样的行里什么都搜不到；现在每个字素各自
     /// 转小写，列按字素的位置换算。
-    pub fn find(&self, query: &str) -> Vec<(usize, usize, usize)> {
-        self.find_in(&fold(query), 0..self.len)
-    }
-
-    /// 显示的 `lines` 行范围里 `needle`（转过小写的查询）的出现。
     pub fn find_in(&self, needle: &str, lines: Range<usize>) -> Vec<(usize, usize, usize)> {
         let mut out = Vec::new();
         if needle.is_empty() {
@@ -243,8 +275,13 @@ fn local_key(index: usize) -> u64 {
 
 #[path = "transcript_lines.rs"]
 mod compose;
+#[path = "transcript_motion.rs"]
+mod motion;
+#[path = "transcript_tail.rs"]
+mod tail;
 
-pub use compose::{Cache, lines, local_lines, pinned};
+pub use compose::{Cache, lines, pinned};
+pub use tail::outgoing;
 
 #[cfg(test)]
 #[path = "transcript_duration_tests.rs"]

@@ -9,8 +9,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use rust_cli_base::proto::{http, mime};
 use rust_cli_kernel_api::clock::Clock;
+use rust_cli_kernel_api::default_model::DefaultModel;
 use rust_cli_kernel_api::env_web::FetchUrl;
-use rust_cli_kernel_api::model::{ModelPort, ModelSelection};
+use rust_cli_kernel_api::model::ModelPort;
 use rust_cli_kernel_api::tool::{
     PromptContext, Tool, ToolError, ToolOutput, ToolProgress, ToolUseContext, Validation,
 };
@@ -53,7 +54,8 @@ pub(crate) const APPLY_LIMIT: usize = 100_000;
 #[derive(Clone)]
 pub struct SideModel {
     pub model: Arc<dyn ModelPort>,
-    pub selection: ModelSelection,
+    /// 会话没有当前选择时用的新会话缺省模型（工作线 F140：它可能晚到，回合里读到的总是定下的值）。
+    pub selection: DefaultModel,
 }
 
 pub struct WebFetchTool {

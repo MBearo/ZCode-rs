@@ -1,6 +1,7 @@
 //! 子代理的权限询问（docs/specs/rust-cli/agents.md §4.1.1，修复线 F67）：内核是 LocalKernel，子代理由 agents 的
-//! Agent 工具真实地派生。后台子代理的 Bash 在主回合结束之后才问：对话框照样弹出、标出子代理，回答回到子代理。
-//! 模型按请求来源回复；子代理的第一步挂在闸门上，等主回合结束再放行。
+//! Agent 工具真实地派生。后台子代理的 Bash 在主回合结束之后才问：请求照样打开，回答回到子代理。样子照 Puffin 子代理的
+//! 请求（tui.md §5.2，tui-kit.md §4.2）：这个会话里没有它的行，正文里画 `● Bash  命令`（在启动它的 Agent 行下面），预览的
+//! 第一行是 `general-purpose asks`。模型按请求来源回复；子代理的第一步挂在闸门上，等主回合结束再放行。
 use std::sync::{Arc, Mutex};
 
 use crossterm::event::KeyCode;
@@ -91,17 +92,27 @@ fn background_model() -> Arc<Routed> {
     ])
 }
 
-/// 等主回合结束（回复画出、footer 不再有 `esc to interrupt`），再放行子代理的 Bash，等它的询问弹出。
+/// 等主回合结束（回复画出、footer 不再有 `esc stop`），再放行子代理的 Bash，等它的询问弹出。
 async fn ask_after_the_turn(ui: &mut super::support::Ui, model: &Routed) -> String {
     ui.submit("make the file in the background");
     ui.wait("the main turn to end", |s| {
-        s.contains("Launched.") && !s.contains("esc to interrupt")
+        s.contains("Launched.") && !s.contains("esc stop")
     })
     .await;
     model.release();
-    let screen = ui.wait_for("Bash command").await;
+    let screen = ui.wait_for("Run this command?").await;
     ui.settle().await;
     screen
+}
+
+/// 子代理的请求自己的行（`● Bash  命令`）与预览的第一行（谁在问）。
+fn asks_from(screen: &str, who: &str) {
+    assert!(
+        screen.contains("● Bash  touch made-by-child.txt"),
+        "{screen}"
+    );
+    let rail = format!("│ {who}");
+    assert!(screen.lines().any(|l| l.trim() == rail), "{rail}\n{screen}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -110,14 +121,7 @@ async fn a_background_agent_asks_after_the_turn_and_runs_the_allowed_command() {
     let script = model.clone();
     with_ui(model.clone(), Setup::default(), |mut ui| async move {
         let screen = ask_after_the_turn(&mut ui, &script).await;
-        assert!(screen.contains("touch made-by-child.txt"), "{screen}");
-        // 标题后标出发起询问的子代理（agent 类型）。
-        assert!(
-            screen
-                .lines()
-                .any(|l| l.contains("Bash command · from the general-purpose agent")),
-            "{screen}"
-        );
+        asks_from(&screen, "general-purpose asks");
         ui.key(KeyCode::Enter);
         // 子代理跑完，通知开了新回合。
         ui.wait_for("Noted.").await;
@@ -138,13 +142,14 @@ async fn a_background_agent_asks_after_the_turn_and_runs_the_allowed_command() {
     );
 }
 
+/// 选 Deny（没有建议规则时是第 3 个回答）：子代理拿到子代理的拒绝文字。
 #[tokio::test(flavor = "multi_thread")]
-async fn esc_on_a_background_ask_gives_the_subagent_the_denial() {
+async fn denying_a_background_ask_gives_the_subagent_the_denial() {
     let model = background_model();
     let script = model.clone();
     with_ui(model.clone(), Setup::default(), |mut ui| async move {
         ask_after_the_turn(&mut ui, &script).await;
-        ui.key(KeyCode::Esc);
+        ui.key(KeyCode::Char('3'));
         ui.wait_for("Noted.").await;
     })
     .await;
@@ -159,8 +164,8 @@ async fn a_denial_with_feedback_reaches_the_subagent() {
     let script = model.clone();
     with_ui(model.clone(), Setup::default(), |mut ui| async move {
         ask_after_the_turn(&mut ui, &script).await;
-        ui.key(KeyCode::Tab);
         ui.type_text("use make instead");
+        ui.wait_for("deny and send").await;
         ui.key(KeyCode::Enter);
         ui.wait_for("Noted.").await;
     })
@@ -186,15 +191,10 @@ async fn a_foreground_agent_ask_names_the_agent() {
     };
     with_ui(model.clone(), setup, |mut ui| async move {
         ui.submit("make the file");
-        let screen = ui.wait_for("Bash command").await;
-        assert!(
-            screen
-                .lines()
-                .any(|l| l.contains("Bash command · from the general-purpose agent")),
-            "{screen}"
-        );
+        let screen = ui.wait_for("Run this command?").await;
+        asks_from(&screen, "general-purpose asks");
         ui.settle().await;
-        ui.key(KeyCode::Esc);
+        ui.key(KeyCode::Char('3'));
         ui.wait_for("Main done.").await;
     })
     .await;
@@ -214,17 +214,12 @@ async fn chinese_names_the_agent_in_the_title() {
     with_ui(model.clone(), setup, |mut ui| async move {
         ui.submit("在后台建文件");
         ui.wait("the main turn to end", |s| {
-            s.contains("Launched.") && !s.contains("esc 中断") && !s.contains("esc to interrupt")
+            s.contains("Launched.") && !s.contains("esc 停止") && !s.contains("esc stop")
         })
         .await;
         script.release();
-        let screen = ui.wait_for("Bash 命令").await;
-        assert!(
-            screen
-                .lines()
-                .any(|l| l.contains("Bash 命令 · 来自 general-purpose 子代理")),
-            "{screen}"
-        );
+        let screen = ui.wait_for("运行这条命令？").await;
+        asks_from(&screen, "general-purpose 在问");
         ui.settle().await;
         ui.key(KeyCode::Enter);
         ui.wait_for("Noted.").await;
@@ -259,24 +254,22 @@ async fn a_background_agent_of_a_cleared_session_still_asks() {
     with_ui(model.clone(), wide, |mut ui| async move {
         ui.submit("make the file in the background");
         ui.wait("the main turn to end", |s| {
-            s.contains("Launched.") && !s.contains("esc to interrupt")
+            s.contains("Launched.") && !s.contains("esc stop")
         })
         .await;
         ui.submit("/clear");
         ui.wait("the cleared conversation", |s| !s.contains("Launched."))
             .await;
         script.release();
-        let screen = ui.wait_for("Bash command").await;
-        assert!(screen.contains("touch made-by-child.txt"), "{screen}");
-        assert!(
-            screen.lines().any(|l| l.contains(
-                "Bash command · from the general-purpose agent in session \"make the file in the background\""
-            )),
-            "{screen}"
+        let screen = ui.wait_for("Run this command?").await;
+        // 旧会话的请求：正文末尾自己的行，预览的第一行带上会话。
+        asks_from(
+            &screen,
+            "general-purpose asks in session \"make the file in the background\"",
         );
         ui.settle().await;
         ui.key(KeyCode::Enter);
-        ui.wait("the dialog to close", |s| !s.contains("Bash command"))
+        ui.wait("the request to leave", |s| !s.contains("Run this command?"))
             .await;
         child_requests(&script, 2).await;
     })
@@ -289,24 +282,24 @@ async fn a_background_agent_of_a_cleared_session_still_asks() {
     );
 }
 
-/// 旧会话的询问按 esc：子代理拿到子代理的拒绝文字。
+/// 旧会话的询问选 Deny：子代理拿到子代理的拒绝文字。
 #[tokio::test(flavor = "multi_thread")]
-async fn esc_on_an_ask_of_a_cleared_session_denies_it() {
+async fn denying_an_ask_of_a_cleared_session() {
     let model = background_model();
     let script = model.clone();
     with_ui(model.clone(), Setup::default(), |mut ui| async move {
         ui.submit("make the file in the background");
         ui.wait("the main turn to end", |s| {
-            s.contains("Launched.") && !s.contains("esc to interrupt")
+            s.contains("Launched.") && !s.contains("esc stop")
         })
         .await;
         ui.submit("/clear");
         ui.wait("the cleared conversation", |s| !s.contains("Launched."))
             .await;
         script.release();
-        ui.wait_for("Bash command").await;
+        ui.wait_for("Run this command?").await;
         ui.settle().await;
-        ui.key(KeyCode::Esc);
+        ui.key(KeyCode::Char('3'));
         child_requests(&script, 2).await;
     })
     .await;

@@ -3,9 +3,9 @@
 //! 决定删除（§3.2，L33），走未知命令。
 use rust_cli_kernel_api::permission::PermissionMode;
 
-use super::app::{Action, App, Local, Overlay};
+use super::app::{Action, App};
 use super::i18n::Lang;
-use super::list::{Choice, Item, ListView, Shape};
+use super::list::{Choice, Item, ListView, Purpose};
 use super::manage::Manage;
 
 /// 整行是这些词时退出（不在 bash 模式，tui-display.md §4.1）。
@@ -57,48 +57,16 @@ impl App {
         None
     }
 
-    pub(super) fn skills_page(&mut self) -> Option<Action> {
-        let lang = self.lang;
-        let model_only = match lang {
-            Lang::En => "(model only)",
-            Lang::Zh => "（仅模型可调用）",
-        };
-        let rows = self
-            .composer
-            .skills
-            .iter()
-            .map(|skill| {
-                let extra = if skill.hidden {
-                    model_only.to_owned()
-                } else {
-                    String::new()
-                };
-                (format!("/{}", skill.name), skill.description.clone(), extra)
-            })
-            .collect();
-        let (title, empty) = match lang {
-            Lang::En => ("Skills", "No skills found"),
-            Lang::Zh => ("技能", "没有找到技能"),
-        };
-        self.overlay = Some(Overlay::Page {
-            local: Local::Table {
-                title: title.into(),
-                rows,
-                empty: empty.into(),
-            },
-            scroll: 0,
-        });
-        None
-    }
-
-    /// Node `/mode`：不带参数时打开选择器（修复线 F26，用户决定：与 `/model` 同一种列表，当前值打 ✔），带参数时
-    /// 直接切换（以 `ModeChanged` / `PlanChanged` 为准）。工作线 F76：选择器照 App 的菜单只列三个模式，名称与说明是
-    /// App 的原文（名称一行、说明在下一行）；提示里的模式名也用 App 的名称。Node 写的 edit 会话不在选择器里，没有打勾。
+    /// Node `/mode`：不带参数时打开列表，带参数时直接切换（以 `ModeChanged` / `PlanChanged` 为准）。列表照 Puffin（kit
+    /// `modes::MODE_ROWS`）：没有头，四行——三个模式与计划模式，名字与说明是 Puffin 的，在用的模式说 `current`，计划模式说
+    /// `on` / `off`；选中计划模式那一行开关计划模式。以前（工作线 F76）只有三个模式，名字与说明是 App 的，有头与副标题。
+    /// Node 写的 edit 会话不在列表里，谁都不说 `current`。
     pub(super) fn mode_command(&mut self, args: &str) -> Option<Action> {
         let zh = self.lang == Lang::Zh;
         if args.is_empty() {
             let current = self.view.mode();
-            let items = MENU
+            let plan = self.view.plan();
+            let mut items: Vec<Item> = MENU
                 .iter()
                 .map(|mode| Item {
                     label: super::i18n::mode_label(self.lang, *mode).to_owned(),
@@ -108,19 +76,21 @@ impl App {
                     ..Item::default()
                 })
                 .collect();
-            // 副标题写当前模式（App 的名称；Node 写的 edit 会话不在选项里，靠这一行看出来）。
-            let label = super::i18n::mode_label(self.lang, current);
-            let (title, subtitle) = if zh {
-                ("模式", format!("当前模式：{label}。选择要切换的模式。"))
-            } else {
-                (
-                    "Mode",
-                    format!("Current mode: {label}. Choose a mode to switch to."),
-                )
-            };
-            self.overlay = Some(Overlay::List(
-                ListView::new(Shape::Modes, title.into(), items, String::new())
-                    .with_subtitle(subtitle),
+            items.push(Item {
+                label: super::i18n::mode_label(self.lang, PermissionMode::Plan).to_owned(),
+                description: super::i18n::mode_description(self.lang, PermissionMode::Plan)
+                    .to_owned(),
+                // 选中这一行开关计划模式（keys.rs）。输入框上方的一句在视图里的开关变了时说（status_motion.rs，Puffin `asked`）。
+                value: Choice::Mode(PermissionMode::Plan),
+                tag: if plan { "on" } else { "off" }.to_owned(),
+                ..Item::default()
+            });
+            let title = if zh { "模式" } else { "Mode" };
+            self.show_list(ListView::new(
+                Purpose::Permissions,
+                title.into(),
+                items,
+                String::new(),
             ));
             return None;
         }
@@ -132,18 +102,14 @@ impl App {
             });
             return None;
         };
-        // 切到完全访问先弹确认框，确认后才提示与切换（tui.md §7.8，工作线 F87）。
-        self.switch_mode(mode, true)
+        // 切到完全访问先弹确认框，确认后才切换（tui.md §7.8，工作线 F87）。模式的一句在视图里的模式变了时说
+        // （status_motion.rs，Puffin `asked`：不论从哪里变）；以前 `/mode` 在命令发出之前就说了，⇧⇥ 与请求的回答不说。
+        self.switch_mode(mode, false)
     }
 
-    /// `/mode` 切换时的提示（模式名是 App 的名称）。
+    /// `/mode` 切换时输入框上方安静的一句（Puffin `mode_says`；以前是 `Mode switched to …`）。
     pub(super) fn mode_switched(&mut self, mode: PermissionMode) {
-        let label = super::i18n::mode_label(self.lang, mode);
-        self.info(if self.lang == Lang::Zh {
-            format!("模式已切换为 {label}。")
-        } else {
-            format!("Mode switched to {label}.")
-        });
+        self.info(super::i18n::mode_says(self.lang, mode));
     }
 
     /// `/copy [N]`：第 N 新的回复（1 是最后一条）。
@@ -161,7 +127,9 @@ impl App {
             }
         };
         if let Some(reply) = self.view.nth_reply(n) {
-            return Some(Action::Copy(reply.to_owned()));
+            let reply = reply.to_owned();
+            self.info(self.strings.copied);
+            return Some(Action::Copy(reply));
         }
         let count = self.view.reply_count();
         if count == 0 {

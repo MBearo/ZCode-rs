@@ -42,7 +42,7 @@ fn setup(model: Arc<ScriptedModel>) -> LocalKernel {
             ids: Arc::new(SequentialIds::default()),
         },
         Defaults {
-            selection: carded(),
+            selection: carded().into(),
             mode: PermissionMode::Default,
             max_turns: None,
             search_tools: false,
@@ -129,4 +129,42 @@ async fn a_session_with_usage_measures_messages_from_the_anchor() {
     let usage = kernel.context_usage(query(Some(id))).await.unwrap();
     assert!(usage.total_tokens > 0);
     assert!(find(&usage.categories, "Free space").is_some());
+    // 明细（context-usage.md §3.1）：每个列表的和等于它的类别；消息按锚点测得的数分到种类。
+    let tokens = |name: &str| find(&usage.categories, name).map_or(0, |category| category.tokens);
+    let sum = |values: Vec<u64>| values.into_iter().sum::<u64>();
+    assert_eq!(
+        sum(usage
+            .prompt_sections
+            .iter()
+            .map(|section| section.tokens)
+            .collect()),
+        tokens("System prompt")
+    );
+    assert_eq!(usage.prompt_sections[0].name, "Core instructions");
+    assert_eq!(
+        sum(usage.system_tools.iter().map(|tool| tool.tokens).collect()),
+        tokens("System tools")
+    );
+    assert_eq!(
+        sum(usage
+            .deferred_tools
+            .iter()
+            .map(|tool| tool.tokens)
+            .collect()),
+        tokens("System tools (deferred)")
+    );
+    assert!(tokens("Messages") > 0);
+    assert_eq!(
+        sum(usage.messages.iter().map(|kind| kind.tokens).collect()),
+        tokens("Messages")
+    );
+    let kinds: Vec<&str> = usage
+        .messages
+        .iter()
+        .map(|kind| kind.kind.as_str())
+        .collect();
+    assert!(
+        kinds.contains(&"Your messages") && kinds.contains(&"Replies"),
+        "{kinds:?}"
+    );
 }

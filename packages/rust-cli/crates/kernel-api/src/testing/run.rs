@@ -97,6 +97,8 @@ impl RunSink for RecordingSink {
 
     async fn compact_started(&self, _trigger: crate::message::CompactTrigger) {}
 
+    async fn compact_failed(&self, _trigger: crate::message::CompactTrigger, _message: String) {}
+
     /// `steer` 记下的插话（没有 hook 消息），没有通知。
     async fn take_absorbed(&self) -> Vec<Absorbed> {
         let steered = std::mem::take(&mut *self.steering.lock_unpoisoned());

@@ -156,6 +156,25 @@ pub struct ProjectSession {
     /// 会话目录现在的 git 分支（读 `.git/HEAD`）；分离头、不在仓库里或读不到时为 None。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    /// 登记处里活着的进程开着它（本进程或别的进程，tui-cockpit.md §1）；没有时为 None。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence: Option<SessionPresence>,
+}
+
+/// 一个活着的会话在登记处里的样子。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionPresence {
+    /// 开着它的是本进程。
+    pub here: bool,
+    /// 开着它的进程的地址（别的进程时 ⌃x 发到这里）。
+    pub address: crate::peers::PeerAddress,
+    /// 进现在的状态的时刻。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since_ms: Option<u64>,
+    #[serde(default)]
+    pub presence: crate::peers::PeerPresence,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tmux: Option<crate::peers::TmuxPlace>,
 }
 
 /// [`crate::session_api::Kernel::project_sessions`] 的结果。

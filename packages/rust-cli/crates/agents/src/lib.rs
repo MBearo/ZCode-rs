@@ -84,11 +84,32 @@ pub struct AgentsPorts {
     pub operations: rust_cli_kernel_api::env::Operations,
 }
 
+/// Task v2 四个工具开不开（[`task_tools_enabled`]）。
+#[derive(Debug, Clone, Default)]
+pub enum TaskTools {
+    #[default]
+    Off,
+    On,
+    /// 按新会话的缺省模型算（工作线 F140，performance.md §12.3）：缺省模型可能在内核建好之后才定下，所以工具一直在
+    /// 注册表里、按它启用或藏起。内核在缺省模型定下之后才建会话，回合里读到的总是定下的值。
+    ByDefaultModel(rust_cli_kernel_api::default_model::DefaultModel),
+}
+
+impl TaskTools {
+    pub(crate) fn enabled(&self) -> bool {
+        match self {
+            Self::Off => false,
+            Self::On => true,
+            Self::ByDefaultModel(default) => task_tools_enabled(&default.current().model, false),
+        }
+    }
+}
+
 /// 开关。
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct AgentsConfig {
-    /// 注册 Task v2 四个工具（[`task_tools_enabled`]）。
-    pub task_tools: bool,
+    /// Task v2 四个工具。
+    pub task_tools: TaskTools,
     /// 子代理跑完时若还有在跑的后台子代理就停放、等它们的通知后续跑（只在交互模式这样做；
     /// `-p` 不停放，agents.md §5.1）。
     pub keep_alive: bool,
@@ -178,7 +199,8 @@ impl ToolRegistry for AgentRegistry {
             .iter()
             .find(|tool| rust_cli_kernel_api::tool::answers_to(tool.as_ref(), name))
         {
-            Some(tool) if self.base.hides(tool.name()) => None,
+            // 任务工具按缺省模型启用（[`TaskTools::ByDefaultModel`]）：没启用的同没注册一样找不到。本 crate 别的工具都启用。
+            Some(tool) if self.base.hides(tool.name()) || !tool.is_enabled() => None,
             Some(tool) => Some(tool.clone()),
             None => self.base.find(name),
         }
@@ -222,8 +244,8 @@ impl Agents {
             });
             let mut own: Vec<Arc<dyn Tool>> = vec![Arc::new(AgentTool { core: core.clone() })];
             own.extend(messaging::tools(&core));
-            if config.task_tools {
-                own.extend(tasks::tools(&core));
+            if !matches!(config.task_tools, TaskTools::Off) {
+                own.extend(tasks::tools(&core, &config.task_tools));
             }
             AgentRegistry { base, own, core }
         });

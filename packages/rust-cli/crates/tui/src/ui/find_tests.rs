@@ -115,7 +115,7 @@ fn the_query_takes_typing_backspace_and_paste() {
     assert!(app.port.find.as_ref().unwrap().pick.nearest);
     // 输入框不收这些键：草稿还是空的。
     assert!(app.composer.is_empty());
-    // 别的键不生效：`?` 是查询里的字，shift+tab、ctrl+r、ctrl+t 什么都不做。
+    // 别的键不生效：`?` 是查询里的字，shift+tab、ctrl+r、ctrl+t（任务卡）什么都不做。
     typed(&mut app, "?");
     assert_eq!(query(&app), Some("abc d e?"));
     app.on_key(
@@ -124,9 +124,7 @@ fn the_query_takes_typing_backspace_and_paste() {
     );
     ctrl(&mut app, 'r');
     ctrl(&mut app, 't');
-    assert!(
-        app.overlay.is_none() && app.composer.search.is_none() && !app.snapshots.tasks.expanded
-    );
+    assert!(app.overlay.is_none() && app.composer.search.is_none() && !app.no_tasks);
     assert_eq!(query(&app), Some("abc d e?"));
 }
 
@@ -165,14 +163,11 @@ fn esc_ctrl_c_and_backspace_on_an_empty_query_leave_without_interrupting() {
     assert_eq!(query(&app), Some(""));
     key(&mut app, KeyCode::Backspace);
     assert!(app.port.find.is_none());
-    // ctrl+o：退出，打开详细视图。
+    // ctrl+o：退出，transcript 换成详细的样子（Puffin `details_open`）。
     let mut app = app_with("//a");
     ctrl(&mut app, 'o');
     assert!(app.port.find.is_none());
-    assert!(matches!(
-        app.overlay,
-        Some(crate::ui::app::Overlay::Detail(_))
-    ));
+    assert!(app.details_open);
 }
 
 #[test]

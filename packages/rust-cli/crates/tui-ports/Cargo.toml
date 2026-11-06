@@ -1,0 +1,22 @@
+[package]
+name = "rust-cli-tui-ports"
+description = "Ports shared by the terminal interfaces and the cli of rust-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+futures-util.workspace = true
+rust-cli-base.workspace = true
+rust-cli-kernel-api.workspace = true
+# 登录的取消令牌与浏览器地址的交付（tui.md §7.2）。
+tokio = { workspace = true, features = ["sync"] }
+tokio-util.workspace = true

@@ -64,24 +64,24 @@ fn submitted(actions: &[Action]) -> Vec<String> {
         .collect()
 }
 
-/// T1：Windows 上多行粘贴是一串很快的字符键与 enter。合并成一次粘贴：换行不发送，超过 2 行时折叠；之后的 enter
-/// 发送展开后的全文。
+/// T1：Windows 上多行粘贴是一串很快的字符键与 enter。合并成一次粘贴：换行不发送，比五行高时折成帽（Puffin「粘贴」）；之后的
+/// enter 发送展开后的全文。
 #[test]
 fn a_fast_multiline_burst_is_one_paste_that_does_not_submit() {
     let mut app = app(WINDOWS);
     let t0 = Instant::now();
-    let (actions, last) = feed(&mut app, "line one\nline two\nline three", t0, ms(1));
+    let (actions, last) = feed(&mut app, "1\n2\n3\n4\n5\n6", t0, ms(1));
     assert!(actions.is_empty(), "{actions:?}");
     // 交出之前什么都不画（扣住、缓存）。
     assert_eq!(app.composer.area.text(), "");
     assert_eq!(app.burst_deadline(), Some(last + ms(61)));
     assert!(settle(&mut app).is_empty());
-    assert_eq!(app.composer.area.text(), "[Pasted text #1 +3 lines]");
+    assert_eq!(app.composer.area.text(), "[Pasted · 6 lines]");
     let send = app.on_terminal_key(press(KeyCode::Enter), last + ms(300));
     assert_eq!(
         send,
         [Action::Submit {
-            text: "line one\nline two\nline three".to_owned(),
+            text: "1\n2\n3\n4\n5\n6".to_owned(),
             delivery: Delivery::Queue,
         }]
     );
@@ -256,25 +256,32 @@ fn other_platforms_keep_the_old_behavior() {
 
 /// 架构整理 U9（tui-input.md §9.1）：Windows 的 AltGr（crossterm 报成 Ctrl+Alt 加字符）在入口归一成普通字符，之后
 /// 每个面板都只看普通修饰键。修前产品路径上看不出差别（paste burst 把扣住的 ASCII 字符去掉修饰键再交出），但不经
-/// burst 的入口（`on_key`）与 burst 原样放行的键（非 ASCII 字符）带着 Ctrl+Alt 进面板：10 处直接读 `CONTROL` 的地方
-/// 把它当 ctrl（Ctrl+Alt+c 关掉 Background 面板），读 `Typing` 的地方当文字。
+/// burst 的入口（`on_key`）与 burst 原样放行的键（非 ASCII 字符）带着 Ctrl+Alt 进面板：直接读 `CONTROL` 的地方
+/// 把它当 ctrl（Ctrl+Alt+c 关掉打开着的页面），读 `Typing` 的地方当文字。
 #[test]
 fn ctrl_alt_characters_are_text_in_every_panel_on_windows() {
     let altgr = KeyEvent::new(
         KeyCode::Char('c'),
         KeyModifiers::CONTROL | KeyModifiers::ALT,
     );
+    // 本机统计的页（`/usage all`，usage_local.rs）：ctrl+c 关上它（以前用的独立页面 `Overlay::Page` 已删）。
+    let open = |app: &mut App| {
+        app.open_usage(
+            rust_cli_kernel_api::metering::SessionMetering::default(),
+            Err("none".into()),
+        );
+    };
     let mut app = app(WINDOWS);
-    app.open_background();
+    open(&mut app);
     app.on_key(altgr, Instant::now());
     assert!(
-        matches!(app.overlay, Some(Overlay::Background(_))),
+        matches!(app.overlay, Some(Overlay::Usage(_))),
         "AltGr+c is a character, not ctrl+c"
     );
     // 经 paste burst 的入口结果相同。
     app.on_terminal_key(altgr, Instant::now());
     settle(&mut app);
-    assert!(matches!(app.overlay, Some(Overlay::Background(_))));
+    assert!(matches!(app.overlay, Some(Overlay::Usage(_))));
     // 真的 ctrl+c 照旧关闭。
     app.on_key(
         KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
@@ -283,7 +290,7 @@ fn ctrl_alt_characters_are_text_in_every_panel_on_windows() {
     assert!(app.overlay.is_none());
     // 其他平台：Ctrl+Alt+c 仍是 ctrl 组合，照旧关闭。
     let mut unix = self::app(Os::Unix);
-    unix.open_background();
+    open(&mut unix);
     unix.on_key(altgr, Instant::now());
     assert!(unix.overlay.is_none());
 }

@@ -1,10 +1,9 @@
-//! `/fork` 的选择器（session-lifecycle.md §6.5.3）：每条一行、带序号、焦点在最新的一条；选中即分叉。
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+//! `/fork` 的点列表（fork.rs）：同 `/rewind` 那一层，最新的在上、跟着草稿过滤、⏎ 在那条输入之后分叉、esc 关上。
+use crossterm::event::KeyCode;
 use rust_cli_kernel_api::ids::MessageId;
 
 use super::*;
-use crate::ui::app::Action;
-use crate::ui::test_support::app_in;
+use crate::ui::test_support::{app_in, key};
 
 fn entries() -> Vec<Entry> {
     ["first", "second\n  line", "third"]
@@ -18,52 +17,65 @@ fn entries() -> Vec<Entry> {
 }
 
 fn rows(app: &App) -> Vec<String> {
-    let Some(Overlay::List(list)) = &app.overlay else {
-        panic!("the picker is not open")
-    };
-    let (lines, _) = list.lines(80, 24, app.lang, &app.palette);
-    lines
+    super::super::pick::lay(&app.forks_rows(0), 80)
         .iter()
-        .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
+        .map(|l| l.plain().trim_end().to_owned())
         .collect()
 }
 
+/// 照 Puffin 的 `/rewind` 列表（tui-kit.md §4.3「`/fork`」）：没有标题，最新的在上，消息的第一行，选中的下面一行说分叉做什么。
 #[test]
-fn the_inputs_are_numbered_with_the_newest_focused() {
+fn the_inputs_are_listed_newest_first_like_the_rewind_list() {
     let mut app = app_in(Lang::En);
     app.open_fork(entries());
+    assert_eq!(app.composer.area.text(), DRAFT);
     let rows = rows(&app);
-    assert_eq!(rows[1], "  Fork");
-    assert!(rows.contains(&"    1. first".to_owned()), "{rows:?}");
-    // 多行输入压成一行。
-    assert!(rows.contains(&"    2. second line".to_owned()), "{rows:?}");
+    let names: Vec<&str> = rows.iter().map(|r| r.trim_start()).collect();
+    assert!(names[0].ends_with("third"), "{rows:?}");
+    assert!(names[1].ends_with("second"), "{rows:?}");
+    assert!(names[2].ends_with("first"), "{rows:?}");
     assert!(
-        rows.iter().any(|row| row.starts_with("  › 3. third")),
-        "{rows:?}"
-    );
-    let mut zh = self::app_in(Lang::Zh);
-    zh.open_fork(Vec::new());
-    let rows = self::rows(&zh);
-    assert_eq!(rows[1], "  分叉");
-    assert!(
-        rows.iter()
-            .any(|row| row.contains("还没有可以分叉的输入。")),
+        rows[3].contains("a new session after this turn  ·  files are not changed"),
         "{rows:?}"
     );
 }
 
 #[test]
-fn a_digit_forks_after_that_input() {
+fn nothing_to_fork_says_so_and_opens_nothing() {
+    let mut app = app_in(Lang::Zh);
+    app.open_fork(Vec::new());
+    assert!(app.overlay.is_none());
+    assert!(app.composer.is_empty());
+}
+
+#[test]
+fn enter_forks_after_the_chosen_input_and_words_filter() {
     let mut app = app_in(Lang::En);
     app.open_fork(entries());
-    assert!(matches!(app.overlay, Some(Overlay::List(_))));
-    let key = KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE);
-    let action = app.on_key(key, std::time::Instant::now());
-    assert!(app.overlay.is_none(), "a digit chooses directly");
+    // ↓ 到 `second`，⏎ 在它之后分叉，列表关上、草稿清空。
+    assert_eq!(app.forks_key(key(KeyCode::Down)), Some(None));
+    let action = app.forks_key(key(KeyCode::Enter));
     assert!(
-        matches!(&action, Some(Action::Fork { input }) if input.as_str() == "msg_2"),
+        matches!(&action, Some(Some(Action::Fork { input })) if input.as_str() == "msg_2"),
         "{action:?}"
     );
+    assert!(app.overlay.is_none());
+    assert!(app.composer.is_empty());
+    // 词过滤；别的键去编辑草稿；esc 关上、草稿留着；草稿不再以 `/fork ` 开头时关上。
+    app.open_fork(entries());
+    app.composer.set_text("/fork fir");
+    app.settle_forks("/fork fir");
+    let Some(Overlay::Forks(list)) = &app.overlay else {
+        panic!("the list is not open")
+    };
+    assert_eq!(app.fork_matches(list), [0]);
+    assert_eq!(app.forks_key(key(KeyCode::Char('s'))), None);
+    assert_eq!(app.forks_key(key(KeyCode::Esc)), Some(None));
+    assert!(app.overlay.is_none());
+    assert_eq!(app.composer.area.text(), "/fork fir");
+    app.open_fork(entries());
+    app.settle_forks("/for");
+    assert!(app.overlay.is_none());
 }
 
 /// 带参数时忽略参数（工作线 F78）：与不带参数相同，打开选择器，不显示错误。

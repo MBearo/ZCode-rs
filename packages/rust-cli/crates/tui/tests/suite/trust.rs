@@ -1,17 +1,14 @@
 // 工作区信任对话框（docs/specs/rust-cli/workspace-trust.md §2.4、§2.5）：画面、
-// 焦点、按键与退出码、后备询问、项目授权的列表、中文。终端是 `TestBackend`，按键经通道送进对话框的循环。
-use std::time::Duration;
+// 焦点、按键与退出码、后备询问、项目授权的列表、中文。启动前的信任页是 Puffin 的（tui-kit.md §2.3）；这里测会话里切项目
+// 时的同一个对话框（`trust_view::Dialog`）：每个按键之前画一屏（100 × 30 的 kit 格子网），按键送进它，直到给出回答。
+use crossterm::event::{Event, KeyCode, KeyEventKind};
+use rust_cli_tui::trust::{Grants, TrustAnswer, TrustPrompt};
+use rust_cli_tui::{ColorLevel, Ink, Lang, TrustDialog as Dialog};
+use rust_cli_tui_kit::render::attr;
 
-use crossterm::event::{Event, KeyCode};
-use futures_util::stream::{self, BoxStream, StreamExt};
-use ratatui::Terminal;
-use ratatui::backend::TestBackend;
-use ratatui::style::Color;
-use rust_cli_tui::Lang;
-use rust_cli_tui::trust::{Grants, TrustAnswer, TrustPrompt, drive};
-use rust_cli_tui::{ColorLevel, Palette};
-
-use super::support::{ctrl_event as ctrl, key_event as key, release_event as release, text_of};
+use super::support::{
+    Shot, ctrl_event as ctrl, key_event as key, release_event as release, shot_of,
+};
 
 fn prompt() -> TrustPrompt {
     TrustPrompt {
@@ -36,38 +33,34 @@ fn grants() -> Grants {
     }
 }
 
-/// 跑对话框直到给出回答；返回回答与最后一帧（回答之后不再重画）。
-async fn run(
+/// 跑对话框直到给出回答；返回回答与最后一帧（回答之后不再重画）。按键用完（终端关掉）当作 `Exit(1)`。
+fn run_with(
     prompt: &TrustPrompt,
+    ink: &Ink,
     lang: Lang,
     keys: Vec<Event>,
-) -> (TrustAnswer, String, Terminal<TestBackend>) {
-    run_input(prompt, lang, stream::iter(keys).boxed()).await
+) -> (TrustAnswer, String, Shot) {
+    let mut dialog = Dialog::new(prompt.clone());
+    let mut keys = keys.into_iter();
+    loop {
+        let shot = shot_of(&dialog.lines(ink, lang, 100), 100, 30);
+        let Some(event) = keys.next() else {
+            let screen = shot.text();
+            return (TrustAnswer::Exit(1), screen, shot);
+        };
+        if let Event::Key(key) = event
+            && key.kind != KeyEventKind::Release
+            && let Some(answer) = dialog.key(key, std::time::Instant::now())
+        {
+            let screen = shot.text();
+            return (answer, screen, shot);
+        }
+    }
 }
 
-/// 同 [`run`]，输入是任意的事件流（按键之间可以停顿）。
-async fn run_input(
-    prompt: &TrustPrompt,
-    lang: Lang,
-    input: BoxStream<'static, Event>,
-) -> (TrustAnswer, String, Terminal<TestBackend>) {
-    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-    let palette = Palette::new(ColorLevel::TrueColor, Some((0, 0, 0)));
-    let answer = drive(prompt, palette, lang, &mut terminal, input)
-        .await
-        .unwrap();
-    let screen = text_of(terminal.backend().buffer());
-    (answer, screen, terminal)
-}
-
-/// 停 `pause` 之后给出 `event`（`None`：停顿之后什么都不给）。
-fn after(pause: Duration, event: Option<Event>) -> BoxStream<'static, Event> {
-    stream::once(async move {
-        tokio::time::sleep(pause).await;
-        event
-    })
-    .filter_map(std::future::ready)
-    .boxed()
+async fn run(prompt: &TrustPrompt, lang: Lang, keys: Vec<Event>) -> (TrustAnswer, String, Shot) {
+    let ink = Ink::new(ColorLevel::TrueColor, None, Some((0, 0, 0)));
+    run_with(prompt, &ink, lang, keys)
 }
 
 fn line_of(screen: &str, needle: &str) -> usize {
@@ -79,70 +72,62 @@ fn line_of(screen: &str, needle: &str) -> usize {
 
 #[tokio::test]
 async fn the_dialog_shows_the_folder_and_the_fixed_text() {
-    let (answer, screen, terminal) = run(&prompt(), Lang::En, vec![key(KeyCode::Esc)]).await;
+    let (answer, screen, buffer) = run(&prompt(), Lang::En, vec![key(KeyCode::Esc)]).await;
     assert_eq!(answer, TrustAnswer::Exit(0));
     for text in [
         "Accessing workspace:",
         "/Users/dev/work",
         "Quick safety check: Is this a project you created or one you trust?",
-        // 100 列下在固定的词处换行（workspace-trust.md §2.4）。
-        "well-known open source project, or work from your team). If not, take a moment to review what's in",
-        "this folder first.",
+        // 100 列下按 Puffin 的正文栏（98 列）折行（tui-kit.md §4.2）。
+        "well-known open source project, or work from your team). If not, take a moment to review what's",
+        "   in this folder first.",
         "ZCode'll be able to read, edit, and execute files here.",
-        "› No, exit",
-        "Yes, I trust this folder",
-        "Enter to confirm · Esc to cancel",
+        "   1  No, exit",
+        "   2  Yes, I trust this folder",
+        "⏎ confirm  ·  esc cancel",
     ] {
         assert!(screen.contains(text), "{text}:\n{screen}");
     }
-    // 取消项在前、焦点在取消项；没有序号；没有外部文档的链接（D1）。
+    // 取消项在前、焦点在取消项；没有外部文档的链接（D1）。
     assert!(line_of(&screen, "No, exit") < line_of(&screen, "Yes, I trust this folder"));
-    assert!(!screen.contains("1."), "{screen}");
     assert!(!screen.contains("Security guide"), "{screen}");
     assert!(!screen.contains("pre-approves"), "{screen}");
-    // 顶上整行 `─` 与标题用主题的强调色（修复线 F26，用户决定；原来是黄色），见下一个测试。
-    let buffer = terminal.backend().buffer();
-    assert_eq!(buffer[(0, 0)].symbol(), "─");
-    assert_ne!(buffer[(0, 0)].fg, Color::Yellow);
+    // 照 Puffin 的信任页：顶上空一行，没有整行的线（以前是强调色的 `─`）。
+    assert_eq!(screen.lines().next(), Some(""));
+    assert_eq!(buffer[(0, 0)].symbol(), " ");
 }
 
-/// 修复线 F26（用户决定，workspace-trust.md §2.4、tui.md §7.4）：顶上的线与标题是主题的蓝色强调色（与选中行的
-/// 深色底色同一个常量），深浅两种背景各一种；项目授权的 `⚠` 标题仍是警告色。旧代码两处都是黄色。
+/// 颜色照 Puffin 的信任页（工作线 TK 的阶段 S，tui-kit.md §4.2；以前是修复线 F26 的强调色的线与标题）：路径粗体，项目授权
+/// 的 `⚠` 是 amber（`code`），焦点所在回答的序号与名字是 brand、其余序号 fg3；深浅两种背景的 brand 不同。
 #[tokio::test]
 async fn the_dialog_uses_the_theme_accent_in_both_themes() {
-    for (background, accent) in [
-        ((0, 0, 0), Color::Rgb(99, 168, 248)),
-        ((255, 255, 255), Color::Rgb(28, 100, 200)),
-    ] {
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-        let palette = Palette::new(ColorLevel::TrueColor, Some(background));
-        assert_eq!(palette.accent, accent);
+    let mut brands = Vec::new();
+    for (background, foreground) in [((0, 0, 0), (255, 255, 255)), ((255, 255, 255), (0, 0, 0))] {
+        let ink = Ink::new(ColorLevel::TrueColor, Some(foreground), Some(background));
+        let theme = ink.theme;
+        brands.push(theme.brand);
         let backstop = TrustPrompt {
             backstop: true,
             grants: Some(grants()),
             ..prompt()
         };
-        drive(
-            &backstop,
-            palette,
-            Lang::En,
-            &mut terminal,
-            stream::iter(vec![key(KeyCode::Esc)]),
-        )
-        .await
-        .unwrap();
-        let buffer = terminal.backend().buffer();
-        let screen = text_of(buffer);
-        assert_eq!(buffer[(0, 0)].symbol(), "─");
-        assert_eq!(buffer[(0, 0)].fg, accent, "the rule");
-        assert_eq!(buffer[(99, 0)].fg, accent, "the whole rule");
-        let title = line_of(&screen, "Accessing workspace:") as u16;
-        let cell = &buffer[(2, title)];
-        assert_eq!(cell.fg, accent, "the title");
-        assert!(cell.modifier.contains(ratatui::style::Modifier::BOLD));
-        let warning = line_of(&screen, "⚠") as u16;
-        assert_eq!(buffer[(2, warning)].fg, Color::Yellow, "the grants warning");
+        let (_, screen, buffer) = run_with(&backstop, &ink, Lang::En, vec![key(KeyCode::Esc)]);
+        let path = line_of(&screen, "/Users/dev/work") as u16;
+        assert!(buffer[(3, path)].has(attr::BOLD), "the path");
+        let row = line_of(&screen, "⚠") as u16;
+        assert_eq!(buffer[(3, row)].fg, theme.code, "the grants warning");
+        let first = line_of(&screen, "1  No") as u16;
+        assert_eq!(buffer[(3, first)].fg, theme.brand, "the focused number");
+        assert_eq!(buffer[(6, first)].fg, theme.brand, "the focused answer");
+        let second = line_of(&screen, "2  Yes") as u16;
+        assert_eq!(
+            buffer[(3, second)].fg,
+            theme.fg3.fg_color(),
+            "the other number"
+        );
+        assert_ne!(theme.code, theme.brand);
     }
+    assert_ne!(brands[0], brands[1]);
 }
 
 #[tokio::test]
@@ -176,6 +161,9 @@ async fn the_answers_have_fixed_exit_codes() {
         ),
         // 输入结束（终端关掉）当作拒绝。
         (Vec::new(), TrustAnswer::Exit(1)),
+        // 序号直接回答（Puffin 的回答行，tui-kit.md §4.2）。
+        (vec![key(KeyCode::Char('1'))], TrustAnswer::Exit(1)),
+        (vec![key(KeyCode::Char('2'))], TrustAnswer::Trusted),
     ];
     for (keys, expected) in cases {
         let (answer, _, _) = run(&prompt(), Lang::En, keys.clone()).await;
@@ -187,33 +175,8 @@ async fn the_answers_have_fixed_exit_codes() {
 async fn the_first_ctrl_c_only_changes_the_hint() {
     let (answer, screen, _) = run(&prompt(), Lang::En, vec![ctrl('c'), key(KeyCode::Esc)]).await;
     assert_eq!(answer, TrustAnswer::Exit(0));
-    assert!(screen.contains("Press Ctrl-C again to exit"), "{screen}");
-    assert!(!screen.contains("Enter to confirm"), "{screen}");
-}
-
-/// 连按的提示到期（800 ms）时对话框自己重画，提示行回到按键说明，不等下一个键；到期之后再按 ctrl+c 只重新显示提示，
-/// 不退出。
-#[tokio::test]
-async fn the_hint_expires_on_its_own_and_a_late_ctrl_c_starts_over() {
-    // 比连按的时限长得多：提示的计时总是先到。
-    const LATE: Duration = Duration::from_millis(1500);
-    // 到期之后输入才结束：最后一帧是到期时的重画。
-    let input = stream::iter([ctrl('c')]).chain(after(LATE, None)).boxed();
-    let (answer, screen, _) = run_input(&prompt(), Lang::En, input).await;
-    assert_eq!(answer, TrustAnswer::Exit(1));
-    assert!(
-        screen.contains("Enter to confirm · Esc to cancel"),
-        "{screen}"
-    );
-    assert!(!screen.contains("Press Ctrl-C again"), "{screen}");
-    // 到期之后的第二个 ctrl+c 重新开始计时；esc 照常是退出码 0。
-    let input = stream::iter([ctrl('c')])
-        .chain(after(LATE, Some(ctrl('c'))))
-        .chain(stream::iter([key(KeyCode::Esc)]))
-        .boxed();
-    let (answer, screen, _) = run_input(&prompt(), Lang::En, input).await;
-    assert_eq!(answer, TrustAnswer::Exit(0));
-    assert!(screen.contains("Press Ctrl-C again to exit"), "{screen}");
+    assert!(screen.contains("^C again to exit"), "{screen}");
+    assert!(!screen.contains("⏎ confirm"), "{screen}");
 }
 
 #[tokio::test]
@@ -229,7 +192,7 @@ async fn the_backstop_lists_the_project_grants_and_continues_without_them() {
         "⚠ This folder pre-approves 4 tool permissions in zcode.json:",
         "  mcp__x__y, Bash(ls:*), WebFetch(domain:example.com), and Read",
         "These will apply without asking. Only proceed if you trust this configuration.",
-        "› No, continue without these permissions",
+        "1  No, continue without these permissions",
     ] {
         assert!(screen.contains(text), "{text}:\n{screen}");
     }
@@ -293,9 +256,9 @@ async fn the_dialog_speaks_chinese() {
         "访问工作区：",
         "快速安全检查：这是你自己创建或信任的项目吗？",
         "ZCode 将可以读取、编辑和执行这里的文件。",
-        "› 否，退出",
-        "是，我信任此文件夹",
-        "再按一次 Ctrl-C 退出",
+        "1  否，退出",
+        "2  是，我信任此文件夹",
+        "^C 再按一次退出",
     ] {
         assert!(screen.contains(text), "{text}:\n{screen}");
     }
@@ -303,8 +266,8 @@ async fn the_dialog_speaks_chinese() {
     for text in [
         "⚠ 此文件夹在 zcode.json 中预先批准了 4 项工具权限：",
         "这些权限会直接生效，不再询问。只有信任这份配置时才继续。",
-        "› 否，不带这些权限继续",
-        "Enter 确认 · Esc 取消",
+        "1  否，不带这些权限继续",
+        "⏎ 确认  ·  esc 取消",
     ] {
         assert!(screen.contains(text), "{text}:\n{screen}");
     }

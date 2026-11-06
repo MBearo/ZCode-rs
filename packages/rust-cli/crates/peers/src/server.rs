@@ -100,6 +100,10 @@ async fn receive(frame: Frame, inbox: &Inbox, clock: &dyn Clock) -> Reply {
                 })
             })
         }
+        // 别的进程的驾驶舱按了停止（tui-cockpit.md §1.3）。登记与 socket 都只有这个用户能读写（cross-session.md §2.2）。
+        Frame::Control { action, .. } if action == "stop_turn" => {
+            inbox.push(|seq| PeerSignal::Stop { seq })
+        }
         Frame::Control { .. } => return Reply::Ignored,
     };
     let Some(wait) = wait else {

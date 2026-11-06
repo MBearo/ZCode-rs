@@ -20,30 +20,32 @@ use tokio::sync::mpsc;
 use crate::PeerDeps;
 use crate::test_support::{Setup, envelope as command, finished, until};
 
+/// 测试替身的端口（peer_merged_tests.rs 也用）。
 #[derive(Default)]
-struct FakePort {
+pub(crate) struct FakePort {
     inbound: Mutex<Option<mpsc::UnboundedReceiver<PeerSignal>>>,
     sender: Mutex<Option<mpsc::UnboundedSender<PeerSignal>>>,
     receipts: Mutex<Vec<(String, ReceiptStatus)>>,
-    acked: Mutex<Vec<u64>>,
+    pub(crate) acked: Mutex<Vec<u64>>,
     bound: Mutex<Vec<String>>,
+    statuses: Mutex<Vec<PeerStatus>>,
 }
 
 impl FakePort {
-    fn new() -> Arc<Self> {
+    pub(crate) fn new() -> Arc<Self> {
         let port = Arc::new(Self::default());
         port.reset();
         port
     }
 
     /// 新的入站通道（重开会话时 actor 重新订阅）。
-    fn reset(&self) {
+    pub(crate) fn reset(&self) {
         let (sender, receiver) = mpsc::unbounded_channel();
         *self.sender.lock_unpoisoned() = Some(sender);
         *self.inbound.lock_unpoisoned() = Some(receiver);
     }
 
-    fn push(&self, signal: PeerSignal) {
+    pub(crate) fn push(&self, signal: PeerSignal) {
         self.sender
             .lock_unpoisoned()
             .as_ref()
@@ -52,7 +54,7 @@ impl FakePort {
             .unwrap();
     }
 
-    fn receipts(&self) -> Vec<(String, ReceiptStatus)> {
+    pub(crate) fn receipts(&self) -> Vec<(String, ReceiptStatus)> {
         self.receipts.lock_unpoisoned().clone()
     }
 }
@@ -85,12 +87,14 @@ impl PeerMessaging for FakePort {
     async fn ack(&self, _session: &SessionId, seq: u64) {
         self.acked.lock_unpoisoned().push(seq);
     }
-    async fn set_status(&self, _session: &SessionId, _status: PeerStatus) {}
+    async fn set_status(&self, _session: &SessionId, status: PeerStatus) {
+        self.statuses.lock_unpoisoned().push(status);
+    }
 }
 
-const SENDER: &str = "/peers/9.sock";
+pub(crate) const SENDER: &str = "/peers/9.sock";
 
-fn message(seq: u64, msg_id: &str, mode: ModeClass, received_at_ms: u64) -> PeerSignal {
+pub(crate) fn message(seq: u64, msg_id: &str, mode: ModeClass, received_at_ms: u64) -> PeerSignal {
     let from = PeerAddress::from_socket(SENDER);
     PeerSignal::Message(InboundPeerMessage {
         seq,
@@ -101,7 +105,7 @@ fn message(seq: u64, msg_id: &str, mode: ModeClass, received_at_ms: u64) -> Peer
     })
 }
 
-fn deps(port: &Arc<FakePort>, timeout: u64, wake: bool) -> PeerDeps {
+pub(crate) fn deps(port: &Arc<FakePort>, timeout: u64, wake: bool) -> PeerDeps {
     PeerDeps {
         port: port.clone(),
         hold_timeout_ms: timeout,
@@ -109,7 +113,7 @@ fn deps(port: &Arc<FakePort>, timeout: u64, wake: bool) -> PeerDeps {
     }
 }
 
-fn user_texts(messages: &[Message]) -> Vec<(String, String)> {
+pub(crate) fn user_texts(messages: &[Message]) -> Vec<(String, String)> {
     messages
         .iter()
         .filter_map(|message| match message {
@@ -131,6 +135,59 @@ fn user_texts(messages: &[Message]) -> Vec<(String, String)> {
             _ => None,
         })
         .collect()
+}
+
+/// 别的进程的驾驶舱按了停止（tui-cockpit.md §1.3）：会话照 esc 处理并确认。
+#[tokio::test]
+async fn a_stop_signal_is_acknowledged_by_the_session() {
+    let port = FakePort::new();
+    let mut setup = Setup::new(Arc::new(ScriptedModel::new(Vec::new())));
+    setup.peers = deps(&port, 300_000, true);
+    let built = setup.build().await;
+    port.push(PeerSignal::Stop { seq: 5 });
+    while !port.acked.lock_unpoisoned().contains(&5) {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert_eq!(*port.statuses.lock_unpoisoned(), [PeerStatus::Idle]);
+    drop(built);
+}
+
+/// 有待处理的请求时登记写等你，答完回到空闲（驾驶舱的第一组，tui-cockpit.md §4）。
+#[tokio::test]
+async fn a_pending_question_is_registered_as_waiting() {
+    let port = FakePort::new();
+    let model = Arc::new(ScriptedModel::new(vec![
+        rust_cli_kernel_api::testing::tool_use_response(
+            "toolu_1",
+            "AskUserQuestion",
+            &serde_json::json!({"question": "which?"}),
+        ),
+        text_response(&["thanks"]),
+    ]));
+    let mut setup = Setup::new(model);
+    setup.tools = vec![Arc::new(crate::tests::AskingTool)];
+    setup.peers = deps(&port, 300_000, true);
+    let built = setup.build().await;
+    let mut events = built.session.subscribe(None);
+    built
+        .session
+        .send(crate::test_support::submit("c1", "ask me"))
+        .await;
+    let interaction = crate::tests::asked(&mut events).await;
+    while !port
+        .statuses
+        .lock_unpoisoned()
+        .contains(&PeerStatus::Waiting)
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    built
+        .session
+        .send(crate::tests::answer("c2", interaction))
+        .await;
+    while port.statuses.lock_unpoisoned().last() != Some(&PeerStatus::Idle) {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
 }
 
 #[tokio::test]

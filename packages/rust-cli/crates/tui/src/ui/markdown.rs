@@ -1,433 +1,206 @@
-// 复制自 apps/zcode-host/crates/tui/src/ui/markdown.rs（feat/rs 79b6691c55）。
-//! markdown → 终端行（docs/specs/rust-tui.md §8.2）。标题粗体（一级加下划线、三级起加斜体），
-//! 行内代码与代码块按主题着色，链接下划线，引用前缀 `> `，列表 `• ` / `1. `，任务 ☐ / ☑，
-//! 嵌套列表缩进 4 列。缩进由前缀栈管理：每层有首行前缀与续行前缀。
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
+//! markdown → 终端行，经 kit（docs/specs/rust-cli/tui-kit.md §3.5，工作线 TK 的 C1-A；样子 §4.2，S1）：Puffin 的
+//! `markdown::Document` → `render::answer` → `Element` → `Layout::lay`。回答的样子（标题、列表的圆点、表格、代码面板、行内
+//! 代码、链接）是 Puffin 的（docs/puffin-tui.md §4.2「回答的 Markdown」）。
+//!
+//! - 回答（[`answer`]）照 Puffin 的 `shell/view/entries.rs` 的 `answer`：kit 的回答从第 3 列起，量宽 `min(宽 − 2, 99)`。
+//!   以前首行接旧界面的 `⏺ `、续行缩进 2 列（S1 改）。
+//! - 流式的回答由 transcript 的播放头按词显示（`transcript_lines.rs`，§4.2「流式节奏」「笔」）：排版用的文字是 [`laid_text`]
+//!   （播放头所在的词排版但不画），文档用 [`Memo`] 增量解析（kit 的 `Document::relaid`，加 `AnswerRenderCache`），笔尖
+//!   与落定经 kit 的 `Tail` 与 `pen::settled`。
+use std::cell::RefCell;
 
-use super::highlight;
-use super::palette::Palette;
-use super::text::wrap;
+use rust_cli_tui_kit::app::element::{Element, measure};
+use rust_cli_tui_kit::app::layout::Layout;
+use rust_cli_tui_kit::app::widgets::lattice;
+use rust_cli_tui_kit::app::widgets::pen::{self, Pen};
+use rust_cli_tui_kit::app::widgets::playhead::{self, Playhead};
+use rust_cli_tui_kit::markdown::document::Document;
+use rust_cli_tui_kit::markdown::render::{self as kit, AnswerRenderCache, HIDDEN, Tail};
+use rust_cli_tui_kit::render::StyledLine;
+use rust_cli_tui_kit::theme::ease::Ink as Nib;
 
-#[derive(Clone)]
-struct Level {
-    first: Vec<Span<'static>>,
-    rest: Vec<Span<'static>>,
-    /// 这一层已经输出过一行：之后都用续行前缀。
-    used: bool,
+use super::cells::look::{MEASURE_MARGIN, MEASURE_MAX};
+use super::ink::Ink;
+
+/// 量过宽的回答元素（Puffin `measure(…, MEASURE_MAX, MEASURE_MARGIN)`）。
+pub fn measured(element: Element) -> Element {
+    measure(element, MEASURE_MAX, MEASURE_MARGIN)
 }
 
-struct Renderer<'a> {
-    palette: &'a Palette,
-    width: usize,
-    lines: Vec<Line<'static>>,
-    spans: Vec<Span<'static>>,
-    styles: Vec<Style>,
-    levels: Vec<Level>,
-    /// 每层列表的下一个序号；无序列表为 None。
-    lists: Vec<Option<u64>>,
-    code: Option<(String, String)>,
-    link: Option<String>,
-    /// 下一个块之前要空一行。
-    gap: bool,
-    table: Option<Vec<Vec<String>>>,
-    cell: String,
+/// 完整的回答（Puffin `entries::answer`）：kit 的回答从第 3 列起，量宽 `min(宽 − 2, 99)`，按 `width` 铺。
+pub fn answer(text: &str, width: usize, ink: &Ink) -> Vec<StyledLine> {
+    let element = measured(kit::answer(&Document::parse(text), None, &ink.theme));
+    Layout::lay(&element, width)
 }
 
-fn styled(text: &str, style: Style) -> Span<'static> {
-    Span::styled(text.to_owned(), style)
+/// 一篇流式中的回复的增量文档：放在每帧共用的排版缓存里，经 `Ctx` 交给回复的排版（tui.md §4.1，修复线 F6）。
+///
+/// 文档用 kit 的 `relaid`：文字只在末尾追加时增量解析；播放头的排版文字带 [`HIDDEN`]（不是严格的追加）、换了回复或重试时
+/// 按最终化的语义重建，下一帧回到增量。最终化的块的 `Element` 由 `AnswerRenderCache` 记着（换主题时它自己作废），布局
+/// 按宽度记忆，所以每帧只重排开放的末尾。结果与整篇重排相同（测试逐个前缀核对）。
+#[derive(Default)]
+pub struct Memo(RefCell<Stream>);
+
+#[derive(Default)]
+struct Stream {
+    doc: Document,
+    cache: AnswerRenderCache,
 }
 
-impl<'a> Renderer<'a> {
-    fn style(&self) -> Style {
-        self.styles.last().copied().unwrap_or_default()
+impl Memo {
+    /// 文字是 `text` 时的文档与渲染缓存交给 `f`。
+    pub fn with<R>(&self, text: &str, f: impl FnOnce(&Document, &mut AnswerRenderCache) -> R) -> R {
+        let mut stream = self.0.borrow_mut();
+        stream.doc.relaid(text);
+        let Stream { doc, cache } = &mut *stream;
+        f(doc, cache)
     }
 
-    fn push_style(&mut self, f: impl Fn(Style) -> Style) {
-        let next = f(self.style());
-        self.styles.push(next);
-    }
-
-    /// 当前的（首行，续行）前缀；取用后把各层标记为已使用。
-    fn prefixes(&mut self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
-        let mut first = Vec::new();
-        let mut rest = Vec::new();
-        for level in &self.levels {
-            first.extend(if level.used {
-                level.rest.clone()
-            } else {
-                level.first.clone()
-            });
-            rest.extend(level.rest.clone());
-        }
-        for level in &mut self.levels {
-            level.used = true;
-        }
-        (first, rest)
-    }
-
-    fn blank(&mut self) {
-        if self.gap && !self.lines.is_empty() {
-            let (_, rest) = self.prefixes_peek();
-            self.lines.push(Line::from(rest));
-        }
-        self.gap = false;
-    }
-
-    fn prefixes_peek(&self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
-        let rest: Vec<Span<'static>> = self.levels.iter().flat_map(|l| l.rest.clone()).collect();
-        (rest.clone(), rest)
-    }
-
-    fn flush(&mut self) {
-        if self.spans.is_empty() {
-            return;
-        }
-        self.blank();
-        let spans = std::mem::take(&mut self.spans);
-        let (first, rest) = self.prefixes();
-        self.lines.extend(wrap(&spans, self.width, &first, &rest));
-    }
-
-    fn text(&mut self, text: &str) {
-        if let Some((_, buffer)) = self.code.as_mut() {
-            buffer.push_str(text);
-            return;
-        }
-        if self.table.is_some() {
-            self.cell.push_str(text);
-            return;
-        }
-        let style = self.style();
-        self.spans.push(styled(text, style));
-    }
-
-    fn code_block(&mut self, language: &str, code: &str) {
-        self.blank();
-        let code = code.strip_suffix('\n').unwrap_or(code);
-        let highlighted = highlight::highlight(code, language, self.palette);
-        let fallback = Style::default().fg(self.palette.accent);
-        for (index, raw) in code.split('\n').enumerate() {
-            let spans = highlighted
-                .as_ref()
-                .and_then(|lines| lines.get(index).cloned())
-                .unwrap_or_else(|| vec![styled(raw, fallback)]);
-            let (first, rest) = self.prefixes();
-            self.lines.extend(wrap(&spans, self.width, &first, &rest));
-        }
-        self.gap = true;
-    }
-
-    fn event(&mut self, event: Event<'_>) {
-        match event {
-            Event::Start(tag) => self.start(tag),
-            Event::End(tag) => self.end(tag),
-            Event::Text(text) => self.text(&text),
-            Event::Code(code) => {
-                if self.table.is_some() {
-                    self.cell.push_str(&code);
-                } else {
-                    let style = self.style().fg(self.palette.accent);
-                    self.spans.push(styled(&code, style));
-                }
-            }
-            Event::SoftBreak => self.text(" "),
-            Event::HardBreak => self.flush(),
-            Event::Rule => {
-                self.flush();
-                self.blank();
-                let (first, _) = self.prefixes();
-                /// 分隔线最长 40 列。
-                const MAX_RULE_WIDTH: usize = 40;
-                let room = self
-                    .width
-                    .saturating_sub(super::text::width(&first))
-                    .min(MAX_RULE_WIDTH);
-                let mut line = first;
-                line.push(styled(
-                    &"─".repeat(room),
-                    Style::default().add_modifier(Modifier::DIM),
-                ));
-                self.lines.push(Line::from(line));
-                self.gap = true;
-            }
-            Event::TaskListMarker(done) => {
-                // 任务列表：把列表项的标记换成方框。
-                if let Some(level) = self.levels.last_mut() {
-                    let lead = level.rest.clone();
-                    let mut first: Vec<Span<'static>> =
-                        lead[..lead.len().saturating_sub(1)].to_vec();
-                    first.push(Span::raw(if done { "☑ " } else { "☐ " }));
-                    level.first = first;
-                }
-            }
-            Event::Html(html) | Event::InlineHtml(html) => self.text(&html),
-            Event::InlineMath(math) | Event::DisplayMath(math) => self.text(&math),
-            Event::FootnoteReference(name) => self.text(&format!("[{name}]")),
-        }
-    }
-
-    fn start(&mut self, tag: Tag<'_>) {
-        match tag {
-            Tag::Paragraph => {}
-            Tag::Heading { level, .. } => {
-                self.flush();
-                self.push_style(|s| {
-                    let s = s.add_modifier(Modifier::BOLD);
-                    match level {
-                        HeadingLevel::H1 => s.add_modifier(Modifier::UNDERLINED),
-                        HeadingLevel::H2 => s,
-                        _ => s.add_modifier(Modifier::ITALIC),
-                    }
-                });
-            }
-            Tag::BlockQuote(_) => {
-                self.flush();
-                let quote = Style::default().add_modifier(Modifier::DIM);
-                self.levels.push(Level {
-                    first: vec![styled("▎ ", quote)],
-                    rest: vec![styled("▎ ", quote)],
-                    used: false,
-                });
-                self.push_style(|s| s.add_modifier(Modifier::ITALIC));
-            }
-            Tag::CodeBlock(kind) => {
-                self.flush();
-                let language = match kind {
-                    CodeBlockKind::Fenced(info) => {
-                        info.split_whitespace().next().unwrap_or("").to_owned()
-                    }
-                    CodeBlockKind::Indented => String::new(),
-                };
-                self.code = Some((language, String::new()));
-            }
-            Tag::List(start) => {
-                self.flush();
-                // 嵌套列表与上一层的正文之间不空行。
-                if self.lists.is_empty() {
-                    self.blank();
-                }
-                self.lists.push(start);
-            }
-            Tag::Item => {
-                self.flush();
-                let depth = self.lists.len();
-                let marker = match self.lists.last_mut() {
-                    Some(Some(next)) => {
-                        let marker = format!("{next}. ");
-                        *next += 1;
-                        styled(&marker, Style::default().fg(Color::LightBlue))
-                    }
-                    _ => Span::raw("• "),
-                };
-                // 嵌套层相对上一层缩进 4 列。
-                let indent = if depth > 1 { "  " } else { "" };
-                let pad = " ".repeat(marker.content.width());
-                self.levels.push(Level {
-                    first: vec![Span::raw(indent), marker],
-                    rest: vec![Span::raw(indent), Span::raw(pad)],
-                    used: false,
-                });
-            }
-            Tag::Emphasis => self.push_style(|s| s.add_modifier(Modifier::ITALIC)),
-            Tag::Strong => self.push_style(|s| s.add_modifier(Modifier::BOLD)),
-            Tag::Strikethrough => self.push_style(|s| s.add_modifier(Modifier::CROSSED_OUT)),
-            Tag::Link { dest_url, .. } => {
-                let accent = self.palette.accent;
-                self.link = Some(dest_url.into_string());
-                self.push_style(|s| s.fg(accent).add_modifier(Modifier::UNDERLINED));
-            }
-            Tag::Table(_) => {
-                self.flush();
-                self.table = Some(Vec::new());
-            }
-            Tag::TableHead | Tag::TableRow => {
-                if let Some(rows) = self.table.as_mut() {
-                    rows.push(Vec::new());
-                }
-            }
-            Tag::TableCell => self.cell.clear(),
-            _ => {}
-        }
-    }
-
-    fn end(&mut self, tag: TagEnd) {
-        match tag {
-            TagEnd::Paragraph => {
-                self.flush();
-                self.gap = true;
-            }
-            TagEnd::Heading(_) => {
-                self.flush();
-                self.styles.pop();
-                self.gap = true;
-            }
-            TagEnd::BlockQuote(_) => {
-                self.flush();
-                self.levels.pop();
-                self.styles.pop();
-                self.gap = true;
-            }
-            TagEnd::CodeBlock => {
-                if let Some((language, code)) = self.code.take() {
-                    self.code_block(&language, &code);
-                }
-            }
-            TagEnd::List(_) => {
-                self.flush();
-                self.lists.pop();
-                self.gap = self.lists.is_empty();
-            }
-            TagEnd::Item => {
-                self.flush();
-                self.levels.pop();
-                // 列表项之间不空行（项内段落之间仍空一行）。
-                self.gap = false;
-            }
-            TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough => {
-                self.styles.pop();
-            }
-            TagEnd::Link => {
-                self.styles.pop();
-                if let Some(url) = self.link.take() {
-                    let shown: String = self
-                        .spans
-                        .iter()
-                        .rev()
-                        .take(1)
-                        .map(|s| s.content.to_string())
-                        .collect();
-                    // 文字就是网址、或是工作区里的文件链接时不再重复显示网址。
-                    if url.starts_with("http") && shown != url {
-                        self.spans.push(styled(
-                            &format!(" ({url})"),
-                            Style::default().add_modifier(Modifier::DIM),
-                        ));
-                    }
-                }
-            }
-            TagEnd::TableCell => {
-                let cell = std::mem::take(&mut self.cell);
-                if let Some(row) = self.table.as_mut().and_then(|rows| rows.last_mut()) {
-                    row.push(cell.trim().to_owned());
-                }
-            }
-            TagEnd::Table => {
-                if let Some(rows) = self.table.take() {
-                    self.table(rows);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-/// 排版状态里除已输出的行以外的部分：顶层块之间按它续排（[`memo`]）。
-#[derive(Clone)]
-struct State {
-    spans: Vec<Span<'static>>,
-    styles: Vec<Style>,
-    levels: Vec<Level>,
-    lists: Vec<Option<u64>>,
-    code: Option<(String, String)>,
-    link: Option<String>,
-    gap: bool,
-    table: Option<Vec<Vec<String>>>,
-    cell: String,
-}
-
-impl<'a> Renderer<'a> {
-    fn new(
-        palette: &'a Palette,
+    /// 回答（同 [`answer`]）带上 `tail`：最终化的块不再解析、不再渲染。
+    pub fn answer(
+        &self,
+        text: &str,
+        tail: Option<&Tail>,
         width: usize,
-        (first, rest): (Vec<Span<'static>>, Vec<Span<'static>>),
-        base: Style,
-    ) -> Self {
-        Renderer {
-            palette,
-            width,
-            lines: Vec::new(),
-            spans: Vec::new(),
-            styles: vec![base],
-            levels: vec![Level {
-                first,
-                rest,
-                used: false,
-            }],
-            lists: Vec::new(),
-            code: None,
-            link: None,
-            gap: false,
-            table: None,
-            cell: String::new(),
-        }
+        ink: &Ink,
+    ) -> Vec<StyledLine> {
+        let element = self.with(text, |doc, cache| {
+            measured(kit::answer_cached(doc, tail, cache, &ink.theme))
+        });
+        Layout::lay(&element, width)
     }
 
-    fn state(&self) -> State {
-        State {
-            spans: self.spans.clone(),
-            styles: self.styles.clone(),
-            levels: self.levels.clone(),
-            lists: self.lists.clone(),
-            code: self.code.clone(),
-            link: self.link.clone(),
-            gap: self.gap,
-            table: self.table.clone(),
-            cell: self.cell.clone(),
-        }
-    }
-
-    fn restore(&mut self, state: &State) {
-        let state = state.clone();
-        self.spans = state.spans;
-        self.styles = state.styles;
-        self.levels = state.levels;
-        self.lists = state.lists;
-        self.code = state.code;
-        self.link = state.link;
-        self.gap = state.gap;
-        self.table = state.table;
-        self.cell = state.cell;
-    }
-
-    /// 全部事件之后：流式中未闭合的代码块也显示出来。
-    fn finish(mut self) -> Vec<Line<'static>> {
-        if let Some((language, code)) = self.code.take() {
-            self.code_block(&language, &code);
-        }
-        self.flush();
-        self.lines
+    /// 已经最终化（不再解析）的顶层块数。
+    #[cfg(test)]
+    fn finalized(&self) -> usize {
+        self.0.borrow().doc.finalized_count()
     }
 }
 
-const OPTIONS: Options = Options::ENABLE_TABLES
-    .union(Options::ENABLE_STRIKETHROUGH)
-    .union(Options::ENABLE_TASKLISTS);
-
-/// 渲染 markdown。`first` / `rest` 是 cell 自己的首行与续行前缀（如 `• ` 与两个空格）。
-pub fn render(
+/// 打出中的回答（Puffin `view/tail.rs` 的 `streaming`）：排版用的文字是 [`laid_text`]，词整个落下、最新的在落定；笔骑着时
+/// 笔尖在字后面（字落下时是实的，播放头停了一会儿后在 brand 里呼吸，手停住满 0.5 s 换成点阵；末尾正在到达的表格不画、
+/// 停住的笔尖或点阵在它的位置）。播放头
+/// 走过表格时它整张落定一次。`lifts`（它是会话最后一个条目、回合结束了）时，显示完以后笔尖在 4 个 tick 内抬起（§4.2「笔」
+/// 的「抬笔」）。`stopping`（按了 esc、回合还没结束）时落定中的词立刻是实的。第二个值说笔骑了没有：没骑时光标单独一行（`transcript_tail.rs`）。以前回复 final 后不走播放头、整篇直接
+/// 显示，没有抬笔。
+#[allow(clippy::too_many_arguments)]
+pub fn streaming(
+    memo: &Memo,
     text: &str,
+    p: &Playhead,
+    now: i64,
+    pen: Option<&Pen>,
+    lifts: bool,
+    stopping: bool,
     width: usize,
-    first: Vec<Span<'static>>,
-    rest: Vec<Span<'static>>,
-    base: Style,
-    palette: &Palette,
-) -> Vec<Line<'static>> {
-    let mut renderer = Renderer::new(palette, width, (first, rest), base);
-    for event in Parser::new_ext(text, OPTIONS) {
-        renderer.event(event);
-    }
-    renderer.finish()
+    ink: &Ink,
+) -> (Vec<StyledLine>, bool) {
+    let (laid, _) = laid_text(text, p.shown.min(text.len()));
+    let theme = ink.theme;
+    let mut rode = false;
+    let element = memo.with(&laid, |doc, cache| {
+        let rides = kit::rides_tail(doc);
+        let lift = p
+            .ended_for(now)
+            .filter(|_| lifts && rides)
+            .and_then(|age| pen::lift(&theme, age));
+        let waits = kit::waits(doc);
+        let nib = pen.filter(|_| rides).map(|pen| {
+            // 修复原因：以前回答末尾永远是笔尖。回答的行要到整条消息结束才不再流式，下一个调用要等输入写完才有行，所以 agent
+            // 说完一句之后回答一直是最新的一块，笔骑在它上面，单独一行的等待行也不画：屏幕上没有点阵（docs/puffin-tui.md
+            // §4.2「手停住」）。手的时钟在排完之后才更新，所以词落下的这一帧看播放头（`idle` 是 0），点阵在这一帧离开。
+            match (pen.sign_age().filter(|_| p.idle(now) > 0), waits) {
+                (Some(age), true) => lattice::sign(&theme, age),
+                (Some(age), false) => {
+                    pen::sign_after(&theme, laid.split(HIDDEN).next().unwrap_or_default(), age)
+                }
+                (None, true) => vec![pen.rest(Nib::Answer)],
+                (None, false) => vec![pen.nib(Nib::Answer, p, now)],
+            }
+        });
+        rode = nib.is_some();
+        let mut tail = Tail::marked(nib.or_else(|| lift.map(|l| vec![l])).unwrap_or_default())
+            .with_ended(p.ended.is_some());
+        // 表格完整时整张落定一次：后面的块的第一个字显示时，或它是最后一块而回答显示完时。
+        if doc
+            .blocks()
+            .any(|b| matches!(b, rust_cli_tui_kit::markdown::ast::Block::Table { .. }))
+        {
+            let ends = doc.block_ends();
+            let laid_c = laid.clone();
+            let pc = p.clone();
+            tail = tail.with_landed(move |i| {
+                let at = if i + 1 >= ends.len() {
+                    pc.ended_for(now)
+                } else {
+                    let mut j = ends[i].min(laid_c.len());
+                    while let Some(ch) = laid_c[j..]
+                        .chars()
+                        .next()
+                        .filter(|c| rust_cli_tui_kit::theme::ease::java_space(*c))
+                    {
+                        j += ch.len_utf8();
+                    }
+                    pc.age_of(j, now)
+                };
+                at.unwrap_or(kit::SETTLED)
+            });
+        }
+        let body = kit::answer_cached(doc, Some(&tail), cache, &theme);
+        if stopping {
+            measured(body)
+        } else {
+            measured(pen::settled(&theme, body, text, p, now))
+        }
+    });
+    (Layout::lay(&element, width), rode)
 }
 
-#[path = "markdown_memo.rs"]
-mod memo;
-pub use memo::Memo;
+/// 播放头在 `shown`（字节偏移）时回答按什么文字排版，与它在 `text` 里止于哪里（docs/puffin-tui.md §4.2「流式节奏」的
+/// 「词不移动」）。排到播放头所在的词的末尾；播放头之后的字母跟在 [`HIDDEN`] 后面，排版但不画，一个词从第一个字母起就在它
+/// 最终的那一行上。开启一行的块标记（`-`、`1.`、`#`、`>`、围栏）整个显示，因为标记里的 HIDDEN 会让解析器认不出它；表格行
+/// 等它完整。照抄 Puffin 的壳（`shell/consts.rs` 的 `laid_text`；两套界面不能互相依赖，tui-kit.md §4.4）。
+pub fn laid_text(text: &str, shown: usize) -> (String, usize) {
+    if shown == 0 {
+        return (String::new(), 0);
+    }
+    let line_start = text[..shown].rfind('\n').map_or(0, |i| i + 1);
+    let mut j = line_start;
+    while j < text.len() && text.as_bytes()[j] == b' ' {
+        j += 1;
+    }
+    if j < text.len() && text.as_bytes()[j] == b'|' {
+        return (text[..line_start].to_owned(), line_start);
+    }
+    let word_end = playhead::word_end(text, j);
+    if shown <= word_end && is_marker(&text[j..word_end]) {
+        return (text[..word_end].to_owned(), word_end);
+    }
+    let end = playhead::word_end(text, shown);
+    if end == shown {
+        (text[..shown].to_owned(), shown)
+    } else {
+        (
+            format!("{}{HIDDEN}{}", &text[..shown], &text[shown..end]),
+            end,
+        )
+    }
+}
 
-#[path = "markdown_table.rs"]
-mod table;
+/// 在行首开启一个 Markdown 块的词：`#`…`######`、`-` `*` `+`、`1.` `1)`（至多九位）、`>`、围栏（Puffin
+/// `consts::is_marker`）。
+fn is_marker(word: &str) -> bool {
+    let hashes = word.bytes().all(|b| b == b'#') && (1..=6).contains(&word.len());
+    let bullet = matches!(word, "-" | "*" | "+" | ">");
+    // 修 panic：原来用 `word.split_at(word.len() - 1)` 按字节切下最后一个字符，词的末字是多字节字符（如 `±×÷` 的 `÷`，
+    // 两个字节）时切点落在字符中间，`split_at` panic（孪生门禁 glyphs-ambiguous 流式时撞到）。改成剥掉 ASCII 的 `.` / `)`
+    // 后缀：剥不掉就不是序号，剥得掉时切点在 ASCII 字节之后，必在字符边界上；判断与原来相同。
+    let ordered = word.strip_suffix(['.', ')']).is_some_and(|digits| {
+        (1..=9).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit())
+    });
+    let fence = (word.starts_with("```") || word.starts_with("~~~")) && !word.contains('\n');
+    hashes || bullet || ordered || fence
+}
 
 #[cfg(test)]
 #[path = "markdown_tests.rs"]

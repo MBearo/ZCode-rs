@@ -1,7 +1,6 @@
 //! esc 撤回刚发的输入（修复线 F38，docs/specs/rust-cli/tui-input.md §8、session-lifecycle.md §5.5）
 //! 与运行中的 `/clear`、`/resume` 等回合结束再执行（tui.md §6；排进队列、不中断）。
 use anyhow::Result;
-use ratatui::backend::Backend;
 use rust_cli_kernel_api::message::{ContentBlock, ImageSource, Message};
 use rust_cli_kernel_api::session_api::Command;
 
@@ -21,7 +20,7 @@ fn after_turn_label(action: &Action) -> Option<String> {
     }
 }
 
-impl<B: Backend> Loop<'_, B> {
+impl Loop<'_> {
     /// 回合结束（`TurnFinished`）：这次中断是 esc / ctrl+c 发的（只认 user-cancel）、回合以 `Interrupted` 结束、
     /// 界面一侧的条件都满足时（输入框为空、没有留着的输入与本地命令、视图的队列为空、不在看子代理、没有等着的
     /// `/rewind`、不在退出），请内核撤回；内核一侧的条件（空闲、队列、有没有回答）由 actor 一次判断（§5.5）。

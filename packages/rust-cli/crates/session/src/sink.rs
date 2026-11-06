@@ -31,11 +31,12 @@ pub(crate) enum SinkRequest {
     ClaimSteering {
         reply: oneshot::Sender<Option<crate::steering::Claimed>>,
     },
-    /// 插话的结局（出队或留下）与并入的通知（按顺序）：回复每条通知的 attachment 用的消息 ID。
+    /// 插话的结局（出队或留下）与并入的通知（按顺序）：回复出了队、可以并入的插话，与每条通知的 attachment 用的
+    /// 消息 ID。
     SettleSteering {
         fates: Vec<(rust_cli_kernel_api::ids::CommandId, crate::steering::Fate)>,
         notices: Vec<crate::inbox::NoticeKey>,
-        reply: oneshot::Sender<Vec<rust_cli_kernel_api::ids::MessageId>>,
+        reply: oneshot::Sender<crate::steering::Settled>,
     },
     /// 一条消息（可以没有）与它的计量一个事务（docs/specs/rust-cli/usage.md §2.5）。
     Metered {
@@ -50,6 +51,8 @@ pub(crate) enum SinkRequest {
     },
     /// 主循环开始压缩。
     CompactStarted(CompactTrigger),
+    /// 开始了的压缩失败了（compact.md §4.1）。
+    CompactFailed(CompactTrigger, String),
     /// 工具请求打开或关掉 plan 开关（EnterPlanMode / ExitPlanMode，修复线 F20）。
     SetPlan {
         enabled: bool,
@@ -312,6 +315,13 @@ impl RunSink for ActorSink {
 
     async fn compact_started(&self, trigger: CompactTrigger) {
         let _ = self.sender.send(SinkRequest::CompactStarted(trigger)).await;
+    }
+
+    async fn compact_failed(&self, trigger: CompactTrigger, message: String) {
+        let _ = self
+            .sender
+            .send(SinkRequest::CompactFailed(trigger, message))
+            .await;
     }
 
     async fn emit(&self, event: QueryEvent) -> bool {

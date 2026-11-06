@@ -1,14 +1,18 @@
-//! `/goal` 的面板与对话里的 `goal_status` 行（docs/specs/rust-cli/goal.md §6）。
-//! 文字有中英文；颜色用终端的 ANSI
-//! 色（成功绿、失败红、其余 dim），深浅主题都可读。
-use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span};
-use rust_cli_kernel_api::goal::{GoalStatus, GoalView};
+//! 对话里的 `goal_status` 行（docs/specs/rust-cli/goal.md §6）。文字有中英文。`/goal` 的卡在 `cards.rs`（kit 的
+//! `goal::card`，tui-kit.md §4.2「`/goal`」）。
+//!
+//! 画法（tui-kit.md §3.8）：产出 kit 的 [`StyledLine`]，墨色只经 `Ink` 的 token。检查行照 Puffin 的检查行
+//! （docs/puffin-tui.md §4.2「目标（/goal）」，`shell/goals.rs`）：第 1 列是记号（达成 `✓` ok、无法达成 `✗` err、继续 `◎`
+//! brand），第 3 列起是句子（达成与无法达成 fg2 粗体，继续 fg3）与 fg3 的统计；无法达成的理由在第 3 列 line 色的 `│`
+//! 后面，第 5 列起 fg2 折行。
+use rust_cli_kernel_api::goal::GoalStatus;
+use rust_cli_tui_kit::app::element::{Element, Wrap, measure, single_line, stack, wrap_styled};
+use rust_cli_tui_kit::app::layout::Layout;
+use rust_cli_tui_kit::render::{Span, Style, StyledLine, attr};
 
-use super::cells::{BULLET, Ctx, red};
+use super::cells::Ctx;
 use super::i18n::Lang;
-use super::style::{bold, dim};
-use super::text::{truncate_line, wrap_text};
+use super::pick::{INDENT, MEASURE_MARGIN, MEASURE_MAX};
 
 /// 时长只写最高的一个单位。
 pub fn duration(ms: u64) -> String {
@@ -44,35 +48,50 @@ fn summary(status: &GoalStatus, lang: Lang) -> Vec<String> {
     parts
 }
 
-/// 对话里的 `goal_status`（设定 / 清除的标记不显示，调用方已过滤）。
-pub fn status_lines(status: &GoalStatus, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
+/// 量到正文宽度（`min(宽度 − 2, 99)`）的元素按 `width` 排成行。
+fn lay(element: Element, width: usize) -> Vec<StyledLine> {
+    Layout::lay(&measure(element, MEASURE_MAX, MEASURE_MARGIN), width.max(1))
+}
+
+/// 对话里的 `goal_status`（设定 / 清除的标记不显示，调用方已过滤）：Puffin 的检查行（见模块文档）。
+pub fn status_lines(status: &GoalStatus, ctx: &Ctx<'_>) -> Vec<StyledLine> {
     let zh = ctx.lang == Lang::Zh;
-    let (label, style, dot) = if status.failed {
+    let theme = &ctx.ink.theme;
+    let (label, style, mark) = if status.failed {
         let label = if zh {
             "目标无法达成"
         } else {
             "Goal could not be achieved"
         };
-        (label, red(), red())
+        (
+            label,
+            theme.fg2.with_attr(attr::BOLD),
+            Span::new("✗", Style::fg(theme.err)),
+        )
     } else if status.met {
         let label = if zh {
             "目标已达成"
         } else {
             "Goal achieved"
         };
-        let green = Style::default().fg(Color::Green);
-        (label, Style::default(), green)
+        (
+            label,
+            theme.fg2.with_attr(attr::BOLD),
+            Span::new("✓", Style::fg(theme.ok)),
+        )
     } else {
         let label = if zh {
             "目标尚未达成……继续"
         } else {
             "Goal not yet met\u{2026} continuing"
         };
-        (label, dim(), dim())
+        (label, theme.fg3, Span::new("◎", Style::fg(theme.brand)))
     };
     let mut spans = vec![
-        Span::styled(format!("{BULLET} "), dot),
-        Span::styled(label.to_owned(), style),
+        Span::plain(" "),
+        mark,
+        Span::plain(" "),
+        Span::new(label.to_owned(), style),
     ];
     let parts = if status.met || status.failed {
         summary(status, ctx.lang)
@@ -86,152 +105,24 @@ pub fn status_lines(status: &GoalStatus, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
         } else {
             format!(" ({joined})")
         };
-        spans.push(Span::styled(text, dim()));
+        spans.push(Span::new(text, theme.fg3));
     }
-    let mut lines = vec![truncate_line(Line::from(spans), ctx.width)];
+    let mut rows = vec![single_line(spans, false)];
     if let (true, Some(reason)) = (status.failed, &status.reason) {
-        lines.extend(wrap_text(
-            reason,
-            dim(),
-            ctx.width,
-            &[Span::raw("  ")],
-            &[Span::raw("  ")],
+        // 理由在第 3 列的竖线后面（Puffin「行下面」）。
+        let rail = vec![
+            Span::plain(INDENT),
+            Span::new("│", theme.line),
+            Span::plain(" "),
+        ];
+        rows.push(wrap_styled(
+            rail.clone(),
+            rail,
+            vec![Span::new(reason.replace('\r', ""), theme.fg2)],
+            Wrap::Word,
         ));
     }
-    lines
-}
-
-/// `/goal` 面板（只读，打开时的快照，goal.md D6）。
-#[derive(Debug, Clone, PartialEq)]
-pub struct Panel {
-    pub title: String,
-    pub success: bool,
-    pub subtitle: Option<String>,
-    /// （标签，内容）；没有标签时只写内容（dim）。
-    pub rows: Vec<(Option<String>, String)>,
-    pub hint: String,
-}
-
-pub fn panel(view: &GoalView, lang: Lang, now_ms: u64) -> Panel {
-    let zh = lang == Lang::Zh;
-    let goal_label = || Some(if zh { "目标" } else { "Goal" }.to_owned());
-    if let Some(active) = &view.active {
-        let mut subtitle = vec![if zh {
-            format!(
-                "已运行 {}",
-                duration(now_ms.saturating_sub(active.set_at_ms))
-            )
-        } else {
-            format!(
-                "running {}",
-                duration(now_ms.saturating_sub(active.set_at_ms))
-            )
-        }];
-        if active.iterations > 0 {
-            subtitle.push(turns(lang, active.iterations));
-        }
-        subtitle.push(token_count(lang, active.tokens));
-        let mut rows = vec![(goal_label(), active.condition.clone())];
-        if let Some(reason) = &active.last_reason {
-            let first = reason.trim().split('\n').next().unwrap_or_default();
-            rows.push((
-                Some(if zh { "上次检查" } else { "Last check" }.to_owned()),
-                first.to_owned(),
-            ));
-        }
-        return Panel {
-            title: if zh {
-                "◉ 目标进行中"
-            } else {
-                "◉ Goal active"
-            }
-            .to_owned(),
-            success: false,
-            subtitle: Some(subtitle.join(" \u{b7} ")),
-            rows,
-            hint: if zh {
-                "/goal clear 提前结束"
-            } else {
-                "/goal clear to stop early"
-            }
-            .to_owned(),
-        };
-    }
-    if let Some(achieved) = &view.achieved {
-        let parts = summary(achieved, lang);
-        return Panel {
-            title: if zh {
-                "✓ 目标已达成"
-            } else {
-                "✓ Goal achieved"
-            }
-            .to_owned(),
-            success: true,
-            subtitle: (!parts.is_empty()).then(|| parts.join(" \u{b7} ")),
-            rows: vec![(goal_label(), achieved.condition.clone())],
-            hint: if zh {
-                "/goal <condition> 设定新的目标"
-            } else {
-                "/goal <condition> to set another"
-            }
-            .to_owned(),
-        };
-    }
-    Panel {
-        title: if zh { "目标" } else { "Goal" }.to_owned(),
-        success: false,
-        subtitle: None,
-        rows: vec![(
-            None,
-            if zh {
-                "没有设定目标"
-            } else {
-                "No goal set"
-            }
-            .to_owned(),
-        )],
-        hint: if zh {
-            "/goal <condition> 设定一个目标"
-        } else {
-            "/goal <condition> to set one"
-        }
-        .to_owned(),
-    }
-}
-
-/// 面板的行：第一行是标题（独立页面把它放到页面的标题行）。
-pub fn panel_lines(panel: &Panel, ctx: &Ctx<'_>) -> Vec<Line<'static>> {
-    let title = if panel.success {
-        Style::default().fg(Color::Green)
-    } else {
-        bold()
-    };
-    let mut lines = vec![Line::from(Span::styled(panel.title.clone(), title))];
-    if let Some(subtitle) = &panel.subtitle {
-        lines.push(Line::from(Span::styled(format!("  {subtitle}"), dim())));
-    }
-    lines.push(Line::default());
-    for (label, value) in &panel.rows {
-        let lead = match label {
-            Some(label) => vec![Span::raw("  "), Span::styled(format!("{label}: "), dim())],
-            None => vec![Span::raw("  ")],
-        };
-        let style = if label.is_some() {
-            Style::default()
-        } else {
-            dim()
-        };
-        lines.extend(wrap_text(
-            value,
-            style,
-            ctx.width,
-            &lead,
-            &[Span::raw("    ")],
-        ));
-    }
-    lines.push(Line::default());
-    lines.push(Line::from(Span::styled(format!("  {}", panel.hint), dim())));
-    lines
+    lay(stack(rows), ctx.width)
 }
 
 #[cfg(test)]

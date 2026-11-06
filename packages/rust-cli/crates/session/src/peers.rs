@@ -23,6 +23,14 @@ use crate::lane::Waiting;
 /// 开回合的 meta user 消息的来源。
 pub(crate) const PEER_SOURCE: &str = "cross-session";
 
+/// `peer_message` / `peer_receipt` 的 data 里的这个字段为 true：写它的版本在并入时一定提交 `peer_merged`，冷加载只看
+/// 事实（F139，cross-session.md §2.2）。没有它的是旧会话的 entry。
+pub(crate) const MERGE_TRACKED: &str = "mergeTracked";
+
+/// `peer_merged` 的 id 的前缀：消息与回执分开（cross-session.md §2.2）。
+const MERGED_MESSAGE: &str = "message:";
+const MERGED_RECEIPT: &str = "receipt:";
+
 /// 会话 actor 用到的跨会话能力（cross-session.md §2.4）。
 #[derive(Clone)]
 pub struct PeerDeps {
@@ -49,19 +57,67 @@ impl PeerDeps {
 pub(crate) enum PeerItem {
     /// 接收的消息（信封原文）。
     Message { msg_id: String, envelope: String },
-    /// 回执（全文，已加前缀）；`passive` 时只在工具边界并入，不开回合。
+    /// 同一种状态的回执合成的一条（全文，已加前缀）；`msg_ids` 是其中每条回执的消息；`passive` 时只在工具边界并入，
+    /// 不开回合。
     Receipt {
-        key: String,
+        status: ReceiptStatus,
+        msg_ids: Vec<String>,
         text: String,
         passive: bool,
     },
 }
 
+/// 一条回执在 `peer_receipt` 与已收集合里的键。
+pub(crate) fn receipt_key(msg_id: &str, status: ReceiptStatus) -> String {
+    format!("{msg_id}:{}", status.as_str())
+}
+
+pub(crate) fn merged_message_id(msg_id: &str) -> String {
+    format!("{MERGED_MESSAGE}{msg_id}")
+}
+
+pub(crate) fn merged_receipt_id(msg_id: &str, status: ReceiptStatus) -> String {
+    format!("{MERGED_RECEIPT}{}", receipt_key(msg_id, status))
+}
+
+fn merged_fact(id: String, data: Value) -> Fact {
+    Fact::Entry {
+        kind: entry_kinds::PEER_MERGED.to_owned(),
+        id,
+        data,
+    }
+}
+
+pub(crate) fn merged_message(msg_id: &str) -> Fact {
+    merged_fact(merged_message_id(msg_id), json!({"msgId": msg_id}))
+}
+
+pub(crate) fn merged_receipt(msg_id: &str, status: ReceiptStatus) -> Fact {
+    merged_fact(
+        merged_receipt_id(msg_id, status),
+        json!({"msgId": msg_id, "status": status.as_str()}),
+    )
+}
+
+/// 冷加载用：写这条 entry 的版本在并入时提交 `peer_merged`（[`MERGE_TRACKED`]）。
+pub(crate) fn merge_tracked(data: &Value) -> bool {
+    data.get(MERGE_TRACKED).and_then(Value::as_bool) == Some(true)
+}
+
 impl PeerItem {
-    pub(crate) fn key(&self) -> &str {
+    /// 并入对话时与那条消息同一批提交的事实（cross-session.md §2.4，F139）：消息一条，合成的回执每条一条。
+    ///
+    /// 修 bug（F139）：以前不记，重开会话时按对话里的文字猜是否已并入；冷加载的对话只从最后一个压缩点开始，压缩之前
+    /// 并入的消息每次重开都再投递一次。
+    pub(crate) fn merged_facts(&self) -> Vec<Fact> {
         match self {
-            Self::Message { msg_id, .. } => msg_id,
-            Self::Receipt { key, .. } => key,
+            Self::Message { msg_id, .. } => vec![merged_message(msg_id)],
+            Self::Receipt {
+                status, msg_ids, ..
+            } => msg_ids
+                .iter()
+                .map(|msg_id| merged_receipt(msg_id, *status))
+                .collect(),
         }
     }
 
@@ -160,12 +216,7 @@ impl Actor {
         }
         self.deps.peers.port.bind(&self.meta.id).await;
         crate::peer_restore::restore(self).await;
-        self.peer_status(if self.busy() {
-            PeerStatus::Busy
-        } else {
-            PeerStatus::Idle
-        })
-        .await;
+        self.peer_status(self.status_now()).await;
     }
 
     pub(crate) async fn peers_close(&self) {
@@ -190,6 +241,10 @@ impl Actor {
         match signal {
             PeerSignal::Message(message) => self.on_peer_message(message).await,
             PeerSignal::Receipt(receipt) => self.on_peer_receipt(receipt).await,
+            PeerSignal::Stop { seq } => {
+                let _ = self.interrupt().await;
+                self.deps.peers.port.ack(&self.meta.id, seq).await;
+            }
         }
     }
 
@@ -214,6 +269,7 @@ impl Actor {
             "envelope": message.envelope,
             "receivedAt": message.received_at_ms,
             "held": cause.map(|cause| json!({"cause": cause_name(cause), "expiresAt": expires_at_ms})),
+            MERGE_TRACKED: true,
         });
         let fact = Fact::Entry {
             kind: entry_kinds::PEER_MESSAGE.to_owned(),
@@ -397,4 +453,4 @@ pub(crate) fn address(data: &Value, key: &str) -> Option<PeerAddress> {
 
 #[cfg(test)]
 #[path = "peers_tests.rs"]
-mod tests;
+pub(crate) mod tests;

@@ -119,12 +119,16 @@ pub enum ContextNotice {
     Low { percent: u64, compact_hint: bool },
 }
 
-/// 上下文用量：token 与有效窗口（[`Compactor::context_usage`] 的结果，`KernelEvent::ContextUsage` 是同一对值；
-/// docs/specs/rust-cli/compact.md §2.1、tui-display.md §2.6，修复线 F27）。
+/// 上下文用量：token、有效窗口与自动压缩的位置（[`Compactor::context_usage`] 的结果，`KernelEvent::ContextUsage` 是同一组值；
+/// docs/specs/rust-cli/compact.md §2.1、§2.3，tui-display.md §2.6，修复线 F27）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextOccupancy {
     pub used_tokens: u64,
     pub max_tokens: u64,
+    /// 生效的自动压缩阈值（含 `compact.autoThresholdTokens`，compact.md §2.3）：自动压缩关掉、或交给反应式压缩
+    /// （不会主动压缩）时为 None。serde 缺省 None。
+    #[serde(default)]
+    pub compact_at: Option<u64>,
 }
 
 impl ContextOccupancy {
@@ -152,18 +156,27 @@ pub fn used_percent(used_tokens: u64, window: u64) -> u64 {
     FULL - (left.round().max(0.0) as u64).min(FULL)
 }
 
+/// 压缩的进度（docs/specs/rust-cli/compact.md §4.1）：压缩器真正开始摘要时、开始之后失败时告诉主循环，主循环转给输出端
+/// （`OutputSink::compact_started` / `compact_failed`）。只有压缩器知道这次是不是真的要压缩（熔断、PreCompact hook、分组）。
+#[async_trait]
+pub trait CompactProgress: Send + Sync {
+    async fn started(&self, trigger: CompactTrigger);
+    async fn failed(&self, trigger: CompactTrigger, message: String);
+}
+
 #[async_trait]
 pub trait Compactor: Send + Sync {
     /// 这一步发请求前是否需要自动压缩。
     fn should_auto_compact(&self, history: &[Message], selection: &ModelSelection) -> bool;
 
-    /// 上下文用量 `(token, 有效窗口)`（docs/specs/rust-cli/compact.md §2.1）：会话 actor 在提交带用量的 assistant、
-    /// 压缩结果与换模型之后据此发 `KernelEvent::ContextUsage`，`SessionHandle::view` 也带它（footer 的 ctx，F27）。默认不知道。
+    /// 上下文用量（token、有效窗口、自动压缩的位置；docs/specs/rust-cli/compact.md §2.1、§2.3）：会话 actor 在提交
+    /// 带用量的 assistant、压缩结果与换模型之后据此发 `KernelEvent::ContextUsage`，`SessionHandle::view` 也带它（footer
+    /// 的 ctx，F27）。默认不知道。
     fn context_usage(
         &self,
         _history: &[Message],
         _selection: &ModelSelection,
-    ) -> Option<(u64, u64)> {
+    ) -> Option<ContextOccupancy> {
         None
     }
 
@@ -204,6 +217,23 @@ pub trait Compactor: Send + Sync {
                 })
             }
         }
+    }
+
+    /// 带进度的自动压缩（docs/specs/rust-cli/compact.md §4.1）：同 [`Self::auto_compact`]，另在真正开始摘要时说
+    /// `progress.started`、开始之后失败（不是中止）时说 `progress.failed`。主循环调它。默认实现是旧的样子：压缩成功之后
+    /// 才说开始，失败不说。
+    async fn auto_compact_with(
+        &self,
+        request: CompactRequest,
+        tracking: &mut CompactTracking,
+        cancel: CancellationToken,
+        progress: &dyn CompactProgress,
+    ) -> Result<AutoCompactOutcome, OrchestrationError> {
+        let outcome = self.auto_compact(request, tracking, cancel).await?;
+        if matches!(outcome, AutoCompactOutcome::Compacted { .. }) {
+            progress.started(CompactTrigger::Auto).await;
+        }
+        Ok(outcome)
     }
 
     async fn compact(

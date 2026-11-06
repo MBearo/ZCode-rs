@@ -1,5 +1,5 @@
-//! `/fork` 按用户输入分叉（docs/specs/rust-cli/session-lifecycle.md §6.5，工作线 F75）：选择器列出带序号的输入，
-//! 选中一条后切到新会话，新会话带到这一轮为止；文件不动；带参数时忽略参数（F78）；文字随界面语言（F78）；
+//! `/fork` 按用户输入分叉（docs/specs/rust-cli/session-lifecycle.md §6.5，工作线 F75）：点列表（同 `/rewind` 那一层，
+//! 最新的在上）列出输入，选中一条后切到新会话，新会话带到这一轮为止；文件不动；带参数时忽略参数（F78）；文字随界面语言（F78）；
 //! `/branch` 是未知命令。
 use crossterm::event::KeyCode;
 use rust_cli_kernel_api::ids::SessionId;
@@ -10,7 +10,7 @@ use rust_cli_kernel_api::testing::{environments, text_response};
 use super::support::{GatedModel, Setup, with_ui};
 
 fn idle_with(screen: &str, text: &str) -> bool {
-    screen.contains(text) && !screen.contains("esc to interrupt")
+    screen.contains(text) && !screen.contains("esc stop")
 }
 
 /// 人类输入与回答的文字（工具结果、attachment 不算）。
@@ -31,8 +31,8 @@ fn said(messages: &[Message]) -> Vec<String> {
         .collect()
 }
 
-/// 三轮之后 `/fork`：列表是带序号的三条输入、焦点在最新的一条；上移选第二条，切到新会话，新会话正好到第二轮的
-/// 回答（第三轮不在）。带参数的旧写法（`latest`）忽略参数，照样打开选择器（F78；以前报错、不打开）。
+/// 三轮之后 `/fork`：列表是三条输入、最新的在上并选中；下移选第二条，切到新会话，新会话正好到第二轮的回答（第三轮
+/// 不在）。带参数的旧写法（`latest`）忽略参数，照样打开列表（F78；以前报错、不打开）。
 #[tokio::test(flavor = "multi_thread")]
 async fn fork_lists_the_inputs_and_keeps_the_chosen_turn() {
     let model = GatedModel::scripted(vec![
@@ -45,20 +45,26 @@ async fn fork_lists_the_inputs_and_keeps_the_chosen_turn() {
     let exit = with_ui(model, setup, |mut ui| async move {
         for (prompt, answer) in [("first", "one"), ("second", "two"), ("third", "three")] {
             ui.submit(prompt);
-            let answer = format!("⏺ {answer}");
+            let answer = format!("   {answer}");
             ui.wait("the answer", |s| idle_with(s, &answer)).await;
         }
         ui.submit("/fork latest");
-        let picker = ui
-            .wait_for("Fork the conversation after one of your messages.")
-            .await;
-        for row in ["1. first", "2. second", "› 3. third"] {
-            assert!(picker.contains(row), "{row}: {picker}");
-        }
-        ui.key(KeyCode::Up);
+        let picker = ui.wait_for("a new session after this turn").await;
+        // 照 Puffin 的 `/rewind` 列表（tui-kit.md §4.3「`/fork`」）：每行是年龄与消息，最新的在上。
+        let at = |row: &str| {
+            picker
+                .lines()
+                .position(|l| l.trim_end().ends_with(&format!("now   {row}")))
+        };
+        assert!(at("first").is_some(), "{picker}");
+        assert!(
+            at("third") < at("second") && at("second") < at("first"),
+            "{picker}"
+        );
+        ui.key(KeyCode::Down);
         ui.key(KeyCode::Enter);
         let screen = ui.wait_for("Switched to forked session").await;
-        assert!(screen.contains("⏺ two"), "{screen}");
+        assert!(screen.contains("   two"), "{screen}");
         assert!(!screen.contains("three"), "{screen}");
     })
     .await;
@@ -104,14 +110,20 @@ async fn fork_leaves_the_files_as_they_are() {
     };
     with_ui(model, setup, |mut ui| async move {
         ui.submit("write the notes");
-        // 等权限询问本身（只有对话框里有这句），过了按键保护再允许这一次。
-        ui.wait_for("Do you want to write").await;
+        // 等权限询问本身（板头是 Puffin 的 `Write notes.txt?`），回答点亮之后再允许这一次。
+        ui.wait_for("Write notes.txt?").await;
         ui.settle().await;
         ui.key(KeyCode::Enter);
         ui.wait("the turn to end", |s| idle_with(s, "written"))
             .await;
         ui.submit("/fork");
-        let picker = ui.wait_for("› 1. write the notes").await;
+        let picker = ui.wait_for("a new session after this turn").await;
+        assert!(
+            picker
+                .lines()
+                .any(|l| l.trim_end().ends_with("write the notes")),
+            "{picker}"
+        );
         assert!(!picker.contains("restore files"), "{picker}");
         ui.key(KeyCode::Enter);
         let screen = ui.wait_for("Switched to forked session").await;
@@ -144,7 +156,7 @@ async fn branch_is_an_unknown_command() {
         ui.wait("the answer", |s| idle_with(s, "hello back")).await;
         ui.submit("/branch");
         let screen = ui.wait_for("Unrecognized command '/branch'").await;
-        assert!(screen.contains("❯ /branch"), "{screen}");
+        assert!(screen.contains("› /branch"), "{screen}");
         assert!(!screen.contains("Branched conversation"), "{screen}");
     })
     .await;
@@ -161,12 +173,15 @@ async fn fork_texts_follow_the_interface_language() {
     with_ui(model, setup, |mut ui| async move {
         ui.submit("first");
         ui.wait("the answer", |s| {
-            s.contains("⏺ one") && !s.contains("esc 中断")
+            s.contains("   one") && !s.contains("esc 停止")
         })
         .await;
         ui.submit("/fork");
-        let picker = ui.wait_for("从某条输入之后分出新会话。").await;
-        assert!(picker.contains("› 1. first"), "{picker}");
+        let picker = ui.wait_for("在这一回合之后分出新会话").await;
+        assert!(
+            picker.lines().any(|l| l.trim_end().ends_with("first")),
+            "{picker}"
+        );
         ui.key(KeyCode::Enter);
         let screen = ui.wait_for("已切换到分出的会话").await;
         assert!(screen.contains("分出会话"), "{screen}");

@@ -252,3 +252,16 @@ fn the_node_rename_retry_delays_keep_their_values() {
     let millis: Vec<u128> = NODE_RENAME_RETRY.iter().map(Duration::as_millis).collect();
     assert_eq!(millis, [50, 100, 200, 400, 800]);
 }
+
+#[tokio::test]
+async fn folders_and_files_are_told_apart() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("a.txt");
+    tokio::fs::write(&file, "x").await.unwrap();
+    assert!(is_dir(dir.path()).await);
+    assert!(!is_dir(&file).await);
+    assert!(is_file(&file).await);
+    assert!(!is_file(dir.path()).await);
+    assert!(!is_dir(&dir.path().join("missing")).await);
+    assert!(!is_file(&dir.path().join("missing")).await);
+}

@@ -16,6 +16,7 @@ use rust_cli_prompts::agents as texts;
 use crate::Core;
 use crate::live::{AgentState, Agents, LiveAgent, Mail, Notice};
 use crate::report::{self, Ending, Report};
+use crate::shell_notices::commands_of;
 use crate::signals::Hub;
 use crate::spawn::{self, Finished};
 
@@ -47,6 +48,29 @@ fn has_live_children(agents: &Agents, owner: &AgentId) -> bool {
         .any(|agent| agent.owner.as_ref() == Some(owner) && agent.background && agent.is_live())
 }
 
+/// 推迟的保活（§5.1 第 3 条）：有 owner 是它、在跑或停放的后台子代理，或在跑的 monitor（工作线 F83，§5.3）。只在交互
+/// 模式（agents.md §5.1 第 5 条）；`-p` 没有这种保活。
+fn deferred(core: &Core, agents: &Agents, id: &AgentId) -> bool {
+    core.keep_alive && (has_live_children(agents, id) || core.monitors.owns(id))
+}
+
+/// 命令保活要看的命令（§5.2 第 5 条，两种模式都有）：子会话里还在跑或通知未 ack 的，去掉 monitor 在看的。monitor 的
+/// 命令由 monitor 的保活管（§5.3），不另算，所以 `-p` 不因 monitor 停放。
+async fn commands_held(core: &Core, entry: &LiveAgent) -> Vec<AgentId> {
+    let mut listed = commands_of(core, entry).await;
+    listed.retain(|task| !core.monitors.watches(task.as_str()));
+    listed
+}
+
+/// 命令保活（§5.2 第 5 条）：执行环境列着、还没交给它的命令（交出之后、ack 之前列表里还有它），或邮箱里还没并入的通知
+/// 里有它自己命令的（交出之后可能已经 ack，列表里没有了）。
+fn holds_commands(entry: &LiveAgent, listed: &[AgentId], leftover: &[Notice]) -> bool {
+    listed.iter().any(|task| !entry.delivered.contains(task))
+        || leftover
+            .iter()
+            .any(|notice| entry.delivered.contains(&notice.from))
+}
+
 fn to_root(hub: &Hub, root: &SessionId, notice: Notice) {
     let text = texts::notification_wrap(&notice.envelope);
     hub.notify(root, notice.from, notice.status, text);
@@ -69,7 +93,10 @@ pub(crate) fn deliver(
             mailbox.push(Mail::Notice(notice));
             None
         }
-        AgentState::Parked(_) => {
+        AgentState::Parked { .. } => {
+            // 修正（2026-11-05）：被通知唤醒的续跑不属于派生它的那次 Agent 调用，之后的完成通知不带 `<tool-use-id>`
+            // （agents.md §5）；以前这里留着它，第二次通知多一行。同 SendMessage 留下的消息续跑（`settle` 清掉它）。
+            entry.tool_use = None;
             entry.state = AgentState::Running {
                 abort: Abort::new(),
                 mailbox: Vec::new(),
@@ -86,7 +113,13 @@ pub(crate) fn deliver(
     }
 }
 
-fn notice_of(agent: &LiveAgent, ending: Ending, report: &Report, error: Option<&str>) -> Notice {
+fn notice_of(
+    agent: &LiveAgent,
+    ending: Ending,
+    report: &Report,
+    error: Option<&str>,
+    keepalive: bool,
+) -> Notice {
     Notice {
         from: agent.agent.clone(),
         status: ending.status(),
@@ -97,13 +130,20 @@ fn notice_of(agent: &LiveAgent, ending: Ending, report: &Report, error: Option<&
             ending,
             report,
             error,
+            keepalive,
         ),
     }
 }
 
 /// 一次运行结束（§5.1 第 3、4 条）：停放、带着遗留通知续跑，或结束并送出自己的通知。
-pub(crate) fn settle(core: &Core, id: &AgentId, finished: &Finished) -> Settle {
+pub(crate) async fn settle(core: &Core, id: &AgentId, finished: &Finished) -> Settle {
     let error = finished.error.as_ref().map(ToString::to_string);
+    // 命令保活（§5.2 第 5 条）：锁外先问执行环境，锁里再去掉已经交给它的。命令恰好在收尾时结束也不丢不重：通知在锁里的
+    // 判断之前交出 → 在邮箱里（续跑）或已在工具边界并入（记在 `delivered`，不算）；之后交出 → 它已停放（续跑）。
+    let listed = match core.live.get(id) {
+        Some(entry) if entry.background => commands_held(core, &entry).await,
+        _ => Vec::new(),
+    };
     core.live.with(|agents| {
         let Some(entry) = agents.get(id).cloned() else {
             return Settle {
@@ -123,25 +163,47 @@ pub(crate) fn settle(core: &Core, id: &AgentId, finished: &Finished) -> Settle {
                 }
                 (abort.is_aborted(), notices, messages)
             }
-            AgentState::Parked(_) | AgentState::Finished(_) => (false, Vec::new(), Vec::new()),
+            AgentState::Parked { .. } | AgentState::Finished(_) => (false, Vec::new(), Vec::new()),
         };
         let stopped = aborted || finished.ending == Ending::Killed;
         // 被中止时 SendMessage 留下的消息丢弃（停止时清掉发给它的排队命令）。
         if stopped {
             stranded.clear();
         }
-        // 工作线 F83：在跑的 monitor 同样让子代理停放（agents.md §5.3）。
-        let live_work = has_live_children(agents, id) || core.monitors.owns(id);
-        if !stopped && core.keep_alive && live_work && stranded.is_empty() {
+        // 后台子代理与 monitor 的保活推迟自己的通知（只在交互模式）。
+        let deferred = deferred(core, agents, id);
+        // 修 bug（2026-11-04，7 个子代理的长任务）：后台子代理起了 Docker 构建的后台命令，回复“后台任务结束会唤醒我”后
+        // 停下；以前它就此结束，命令的通知按 §5.2 第 1 条送了顶层会话，子代理再也不醒，直到父代理手动 SendMessage。原因是
+        // 停放只看后台子代理与 monitor，不看子会话的后台命令。现在后台子代理还有没交给它的命令时也停放（命令保活，
+        // §5.2 第 5 条），命令的通知让它续跑；自己的通知不推迟，一直不结束的命令不会挡住父代理。
+        // `-p` 同样这样做（用户决定 2026-11-05，agents.md §5.2 第 5 条）：以前只在交互模式，`-p` 里同样的子代理结束、
+        // 命令的通知送了顶层会话。
+        let commands = entry.background && holds_commands(&entry, &listed, &leftover);
+        if !stopped && (deferred || commands) && stranded.is_empty() {
             let mut wakes = Vec::new();
+            let mut notice = None;
             if let Some(slot) = agents.get_mut(id) {
                 // 前台子代理转成后台，之后的续跑按后台工具集。
                 slot.background = true;
                 if leftover.is_empty() {
-                    slot.state = AgentState::Parked(finished.report.clone());
+                    slot.state = AgentState::Parked {
+                        report: finished.report.clone(),
+                        notified: !deferred,
+                    };
+                    if !deferred {
+                        notice = Some(notice_of(
+                            &entry,
+                            finished.ending,
+                            &finished.report,
+                            error.as_deref(),
+                            true,
+                        ));
+                    }
                 } else {
                     // 停放的子代理有排着的通知就立即续跑（唤醒）。先换上新的运行状态再
                     // 取快照：续跑用快照里的 Abort，TaskStop 中止的是条目里的同一个。
+                    // 续跑不属于派生它的那次 Agent 调用，之后的通知不带 `<tool-use-id>`（同 `deliver`）。
+                    slot.tool_use = None;
                     slot.state = AgentState::Running {
                         abort: Abort::new(),
                         mailbox: Vec::new(),
@@ -153,6 +215,15 @@ pub(crate) fn settle(core: &Core, id: &AgentId, finished: &Finished) -> Settle {
                         ),
                     });
                 }
+            }
+            if let Some(notice) = notice {
+                wakes.extend(deliver(
+                    agents,
+                    &core.hub,
+                    entry.owner.as_ref(),
+                    &entry.root,
+                    notice,
+                ));
             }
             return Settle {
                 parked: true,
@@ -168,7 +239,13 @@ pub(crate) fn settle(core: &Core, id: &AgentId, finished: &Finished) -> Settle {
         }
         let mut wakes = Vec::new();
         if entry.background {
-            let notice = notice_of(&entry, finished.ending, &finished.report, error.as_deref());
+            let notice = notice_of(
+                &entry,
+                finished.ending,
+                &finished.report,
+                error.as_deref(),
+                false,
+            );
             wakes.extend(deliver(
                 agents,
                 &core.hub,
@@ -202,26 +279,39 @@ pub(crate) fn settle(core: &Core, id: &AgentId, finished: &Finished) -> Settle {
     })
 }
 
-/// 最后一个 monitor 结束（agents.md §5.3 第 3 条）：停放着、没有别的后台子代理与 monitor 的子代理就此结束，以最后一次
-/// 运行的报告送出自己的通知。没有要结束的时候为空。
-pub(crate) fn release(core: &Core, id: &AgentId) -> Vec<Wake> {
-    if core.monitors.owns(id) {
+/// 一个保活原因没了（agents.md §5.3 第 3 条：最后一个 monitor 结束；§5.2 第 5 条：TaskStop 停掉了它子会话的命令）：停放着、
+/// 没有别的后台子代理与 monitor 的子代理，还有没交给它的命令时留在停放，否则以最后一次运行的报告结束。推迟的通知这时送出
+/// （留在停放时用 keepalive 的 note）；已经送过的（只为命令停放的）不再送。没有要做的时候为空。
+pub(crate) async fn release(core: &Core, id: &AgentId) -> Vec<Wake> {
+    let Some(entry) = core.live.get(id) else {
         return Vec::new();
-    }
+    };
+    let listed = commands_held(core, &entry).await;
     core.live.with(|agents| {
         let Some(entry) = agents.get(id).cloned() else {
             return Vec::new();
         };
-        let AgentState::Parked(report) = &entry.state else {
+        let AgentState::Parked { report, notified } = &entry.state else {
             return Vec::new();
         };
-        if has_live_children(agents, id) {
+        if deferred(core, agents, id) {
             return Vec::new();
         }
-        let notice = notice_of(&entry, Ending::Completed, report, None);
+        let holds = holds_commands(&entry, &listed, &[]);
         if let Some(slot) = agents.get_mut(id) {
-            slot.state = AgentState::Finished(Ending::Completed);
+            slot.state = if holds {
+                AgentState::Parked {
+                    report: report.clone(),
+                    notified: true,
+                }
+            } else {
+                AgentState::Finished(Ending::Completed)
+            };
         }
+        if *notified {
+            return Vec::new();
+        }
+        let notice = notice_of(&entry, Ending::Completed, report, None, holds);
         deliver(agents, &core.hub, entry.owner.as_ref(), &entry.root, notice)
             .into_iter()
             .collect()
@@ -233,10 +323,10 @@ pub(crate) fn release(core: &Core, id: &AgentId) -> Vec<Wake> {
 pub(crate) fn stop_parked(core: &Core, id: &AgentId) -> Option<Vec<Wake>> {
     core.live.with(|agents| {
         let entry = agents.get(id).cloned()?;
-        let AgentState::Parked(report) = &entry.state else {
+        let AgentState::Parked { report, .. } = &entry.state else {
             return None;
         };
-        let notice = notice_of(&entry, Ending::KilledParked, report, None);
+        let notice = notice_of(&entry, Ending::KilledParked, report, None, false);
         if let Some(slot) = agents.get_mut(id) {
             slot.state = AgentState::Finished(Ending::KilledParked);
         }
@@ -276,7 +366,7 @@ pub(crate) async fn wake(core: &Arc<Core>, wakes: Vec<Wake>) {
                     report: Report::default(),
                     error: Some(QueryError::Store(error)),
                 };
-                let settled = settle(core, &agent.agent, &finished);
+                let settled = settle(core, &agent.agent, &finished).await;
                 Box::pin(wake(core, settled.wakes)).await;
             }
         }

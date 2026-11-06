@@ -158,7 +158,7 @@ mod guarded_hooks {
                 ids: Arc::new(SequentialIds::default()),
             },
             Defaults {
-                selection: selection(),
+                selection: selection().into(),
                 mode: PermissionMode::Guarded,
                 max_turns: None,
                 search_tools: false,

@@ -125,6 +125,7 @@ async fn offline_platform(paths: &StoragePaths) -> Result<Platform> {
             bigmodel_team_plans: format!("{origin}/coding-plan/team/plans"),
             bigmodel_api: origin,
             client_version: "0.0.0-interop".to_owned(),
+            usage_quota_url: None,
         },
     };
     let secret = CredentialSecret {

@@ -563,7 +563,7 @@ fn apply(
     Ok(())
 }
 
-/// 解析命令行。错误是写到 stderr 的全文（退出码 1，commander 与参数校验都是 1）。
+/// 解析命令行（选项与位置参数，cli-args.md §1、§2）。错误是写到 stderr 的全文（退出码 1，commander 与参数校验都是 1）。
 pub(crate) fn parse(args: &[String]) -> Result<Invocation, String> {
     // 入口的快速路径：只有一个参数、是 `--version` / `-v` / `-V` 时直接输出版本（version.md §5）。
     if let [only] = args

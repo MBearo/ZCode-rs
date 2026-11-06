@@ -38,6 +38,8 @@ agent_texts! {
     launched => "launched",
     notification_preamble => "notification_preamble",
     notification => "notification",
+    notification_note => "notification_note",
+    notification_note_keepalive => "notification_note_keepalive",
     notification_result => "notification_result",
     notification_usage => "notification_usage",
     stranded_message => "stranded_message",
@@ -67,6 +69,7 @@ pub fn fork_tool() -> Option<&'static ForkTool> {
 }
 
 /// 后台子代理完成通知的全文（`<system-reminder>` 包装）。`vars` 是 `notification.txt` 的变量；
+/// `note` 是 `notification_note` 或 `notification_note_keepalive`（agents.md §5.2 第 5 条）；
 /// `body` 是按需出现的 `<result>` 与 `<usage>`（各自前面一个换行）。
 pub fn notification_text(vars: &[(&str, &str)]) -> String {
     notification_wrap(&render(notification(), vars))

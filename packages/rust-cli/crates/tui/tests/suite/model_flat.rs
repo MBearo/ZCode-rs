@@ -80,7 +80,7 @@ fn list_lines(screen: &str, title: &str, last: &str) -> Vec<String> {
         .collect()
 }
 
-/// 打开 `/model`，选团队 B（当前是 fixture 的 scripted，在最后一项；往上一项），再打开一次看 ✔ 在哪一项。返回两次
+/// 打开 `/model`，选团队 B（当前是 fixture 的 scripted，在最后一项；往上一项），再打开一次看 `current` 在哪一项。返回两次
 /// 打开时的列表与模型端口。
 async fn pick_second_team(
     lang: &'static str,
@@ -98,7 +98,7 @@ async fn pick_second_team(
     with_ui(model.clone(), setup, |mut ui| async move {
         ui.submit("hello");
         ui.wait("the first reply", |s| {
-            s.contains("⏺ hi") && !s.contains("esc to")
+            s.contains("   hi") && !s.contains("esc to")
         })
         .await;
         ui.submit("/model");
@@ -115,15 +115,17 @@ async fn pick_second_team(
                     .is_some_and(|footer| footer.contains(GLM_5_3_ACCOUNT))
         })
         .await;
-        // 再打开：✔ 只在团队 B（同一 provider 与模型的团队 A 不算当前）。
+        // 再打开：`current` 只在团队 B（同一 provider 与模型的团队 A 不算当前）。
         ui.submit("/model");
         let screen = ui.wait_for(title).await;
         record.lock().unwrap().1 = list_lines(&screen, title, "Fixture");
         ui.key(KeyCode::Esc);
         ui.wait("the list to close", |s| !s.contains(title)).await;
+        // esc 留着草稿 `/model `（tui-kit.md §4.0「板」）：清掉再发下一条。
+        ui.clear();
         ui.submit("again please");
         ui.wait("the second reply", |s| {
-            s.contains("⏺ again") && !s.contains("esc to")
+            s.contains("   again") && !s.contains("esc to")
         })
         .await;
     })
@@ -134,7 +136,7 @@ async fn pick_second_team(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn plans_are_listed_flat_with_their_vendor() {
-    let (first, second, model) = pick_second_team("en_US.UTF-8", "Select model").await;
+    let (first, second, model) = pick_second_team("en_US.UTF-8", FIRST_ROW).await;
     snapshot(&first, EN_FIRST);
     snapshot(&second, EN_CHOSEN);
     // 选中的是团队 B：下一次请求的选择带上它的团队项目。
@@ -148,7 +150,7 @@ async fn plans_are_listed_flat_with_their_vendor() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn team_plans_follow_the_interface_language() {
-    let (first, second, model) = pick_second_team("zh_CN.UTF-8", "选择模型").await;
+    let (first, second, model) = pick_second_team("zh_CN.UTF-8", FIRST_ROW).await;
     snapshot(&first, ZH_FIRST);
     snapshot(&second, ZH_CHOSEN);
     assert_eq!(
@@ -164,46 +166,34 @@ fn snapshot(lines: &[String], expected: &str) {
     assert_eq!(got, expected.trim_matches('\n'), "\n{got}");
 }
 
+// 照 Puffin 的模型选择器（tui-kit.md §4.2）：provider 列在前（宽到能分出各团队，§6）、模型 id、当前的后面 `current`；
+// 没有头一行、指针与搜索行（过滤的词在草稿里，tui-kit.md §4.0「板」；这里只比到 Fixture 那一行）。
+/// 选择器的第一行（没有头一行时从它起比）。
+const FIRST_ROW: &str = "BigModel Individual Coding Plan";
 const EN_FIRST: &str = "
-  Select model
-  Applies to this session and new sessions started here.
-  ⌕ Search…
-
-    <model>      BigModel Individual Coding Plan
-    <model>      BigModel Team Plan · 团队 A
-    <model>      BigModel Team Plan · 团队 B
-  › scripted ✔   Fixture
+   BigModel Individual Coding Plan   <model>
+   BigModel Team Plan · 团队 A       <model>
+   BigModel Team Plan · 团队 B       <model>
+   Fixture                           scripted   current
 ";
 
 const EN_CHOSEN: &str = "
-  Select model
-  Applies to this session and new sessions started here.
-  ⌕ Search…
-
-    <model>     BigModel Individual Coding Plan
-    <model>     BigModel Team Plan · 团队 A
-  › <model> ✔   BigModel Team Plan · 团队 B
-    scripted    Fixture
+   BigModel Individual Coding Plan   <model>
+   BigModel Team Plan · 团队 A       <model>
+   BigModel Team Plan · 团队 B       <model>    current
+   Fixture                           scripted
 ";
 
 const ZH_FIRST: &str = "
-  选择模型
-  用于本会话与之后在这里开始的新会话。
-  ⌕ 搜索…
-
-    <model>      BigModel Individual Coding Plan
-    <model>      BigModel 团队套餐 · 团队 A
-    <model>      BigModel 团队套餐 · 团队 B
-  › scripted ✔   Fixture
+   BigModel Individual Coding Plan   <model>
+   BigModel 团队套餐 · 团队 A        <model>
+   BigModel 团队套餐 · 团队 B        <model>
+   Fixture                           scripted   当前
 ";
 
 const ZH_CHOSEN: &str = "
-  选择模型
-  用于本会话与之后在这里开始的新会话。
-  ⌕ 搜索…
-
-    <model>     BigModel Individual Coding Plan
-    <model>     BigModel 团队套餐 · 团队 A
-  › <model> ✔   BigModel 团队套餐 · 团队 B
-    scripted    Fixture
+   BigModel Individual Coding Plan   <model>
+   BigModel 团队套餐 · 团队 A        <model>
+   BigModel 团队套餐 · 团队 B        <model>    当前
+   Fixture                           scripted
 ";

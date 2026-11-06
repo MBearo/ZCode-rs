@@ -67,7 +67,7 @@ pub struct Projection {
     plan: bool,
     followup: Followup,
     levels: Vec<String>,
-    context: Option<(u64, u64)>,
+    context: Option<rust_cli_kernel_api::compaction::ContextOccupancy>,
     total: Usage,
     queue: Vec<QueuedInput>,
     pending: Vec<Value>,
@@ -127,10 +127,7 @@ impl Projection {
             plan: view.plan,
             followup,
             levels,
-            context: view
-                .context_usage
-                .as_ref()
-                .map(|usage| (usage.used_tokens, usage.max_tokens)),
+            context: view.context_usage,
             total: Usage::default(),
             queue: view.queue.clone(),
             pending: Vec::new(),
@@ -396,8 +393,13 @@ impl Projection {
             KernelEvent::ContextUsage {
                 used_tokens,
                 max_tokens,
+                compact_at,
             } => {
-                self.context = Some((*used_tokens, *max_tokens));
+                self.context = Some(rust_cli_kernel_api::compaction::ContextOccupancy {
+                    used_tokens: *used_tokens,
+                    max_tokens: *max_tokens,
+                    compact_at: *compact_at,
+                });
                 patch.insert("usage".into(), state::usage(self.context, &self.total));
             }
             KernelEvent::TitleChanged { title } => {
@@ -435,6 +437,7 @@ impl Projection {
             | KernelEvent::BackgroundWork { .. }
             | KernelEvent::CompactStarted { .. }
             | KernelEvent::CompactDone { .. }
+            | KernelEvent::CompactFailed { .. }
             | KernelEvent::HistoryRewritten { .. }
             | KernelEvent::ScheduledFire { .. }
             | KernelEvent::SystemNotice { .. }

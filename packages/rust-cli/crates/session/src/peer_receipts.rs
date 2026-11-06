@@ -10,7 +10,7 @@ use serde_json::json;
 
 use crate::actor::Actor;
 use crate::lane::Waiting;
-use crate::peers::PeerItem;
+use crate::peers::{MERGE_TRACKED, PeerItem, receipt_key};
 
 /// 最后一条回执之后等这么久再交出。
 pub(crate) const RECEIPT_WINDOW_MS: u64 = 500;
@@ -35,7 +35,7 @@ fn group_text(status: ReceiptStatus, receipts: &[&PeerReceipt]) -> String {
 
 impl Actor {
     pub(crate) async fn on_peer_receipt(&mut self, receipt: PeerReceipt) {
-        let key = format!("{}:{}", receipt.msg_id, receipt.status.as_str());
+        let key = receipt_key(&receipt.msg_id, receipt.status);
         if self.peers.seen.contains(&key) {
             self.deps.peers.port.ack(&self.meta.id, receipt.seq).await;
             return;
@@ -47,6 +47,7 @@ impl Actor {
                 "msgId": receipt.msg_id,
                 "status": receipt.status.as_str(),
                 "recipient": receipt.recipient.as_str(),
+                MERGE_TRACKED: true,
             }),
         };
         if let Err(reason) = self.commit(None, vec![fact]).await {
@@ -69,10 +70,12 @@ impl Actor {
         let passive = !self.deps.peers.receipts_wake;
         for status in ORDER {
             let group: Vec<&PeerReceipt> = pending.iter().filter(|r| r.status == status).collect();
-            let Some(first) = group.first() else { continue };
-            let key = format!("{}:{}", first.msg_id, status.as_str());
+            if group.is_empty() {
+                continue;
+            }
             self.inbox.push_notice(Waiting::Peer(PeerItem::Receipt {
-                key,
+                status,
+                msg_ids: group.iter().map(|r| r.msg_id.clone()).collect(),
                 text: group_text(status, &group),
                 passive,
             }));

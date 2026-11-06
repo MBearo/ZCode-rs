@@ -1,28 +1,10 @@
-//! 远端机器的文字（docs/specs/rust-cli/remote-exec.md §21.3、§21.4、§21.5）：`/machines` 的列表与回执、连接错误的说明、
-//! 状态行的状态词。中英文同一张表（照 `i18n_*` 的写法）。
+//! 远端机器的文字（docs/specs/rust-cli/remote-exec.md §21.3、§21.4、§21.5）：`/machines` 列表的字（英文是 Puffin 的字，
+//! 中文是译文，tui-kit.md §4.1 第 4 条）与回执、连接错误的说明、坞行的词。中英文同一张表（照 `i18n_*` 的写法）。
 use super::i18n::Lang;
-use crate::machines::{ConnectStep, MachineFailure, MachineProblem, MachineStatus};
+use crate::machines::{ConnectStep, MachineFailure, MachineProblem};
 
 pub fn title(lang: Lang) -> &'static str {
     lang.pick("Machines", "远端机器")
-}
-
-/// 列表的副标题：`2 machines · 1 connected`；没有机器时 `No machines yet`。
-pub fn summary(lang: Lang, total: usize, connected: usize) -> String {
-    match (lang, total) {
-        (Lang::En, 0) => "No machines yet".to_owned(),
-        (Lang::Zh, 0) => "还没有机器".to_owned(),
-        (Lang::En, 1) => format!("1 machine · {connected} connected"),
-        (Lang::En, n) => format!("{n} machines · {connected} connected"),
-        (Lang::Zh, n) => format!("{n} 台机器 · {connected} 台已连接"),
-    }
-}
-
-pub fn empty_hint(lang: Lang) -> &'static str {
-    lang.pick(
-        "Add one with /machines add <name> <ssh target> [working directory]",
-        "用 /machines add <名字> <ssh 目标> [工作目录] 添加",
-    )
 }
 
 /// 没写工作目录（远端的 home）。
@@ -37,69 +19,124 @@ pub fn executor(lang: Lang, version: &str) -> String {
     }
 }
 
-/// 执行器的系统名（`linux` → `Linux`）。
-pub fn os_name(os: &str) -> String {
-    match os {
-        "linux" => "Linux".to_owned(),
-        "macos" => "macOS".to_owned(),
-        "windows" => "Windows".to_owned(),
-        other => other.to_owned(),
-    }
-}
-
-/// 列表里的状态词（就绪写 `connected`）。
-pub fn status_word(lang: Lang, status: &MachineStatus) -> &'static str {
-    match status {
-        MachineStatus::Ready => lang.pick("connected", "已连接"),
-        other => short_word(lang, other).unwrap_or_default(),
-    }
-}
-
-/// “重连中”：状态行的词；Background 面板里重连中的机器上一份的条目也用它（F96，remote-exec.md §23.3）。
+/// “重连中”：状态行的词；任务卡的 Commands 里重连中的机器上一份的命令也用它（F96，remote-exec.md §23.3）。
 pub fn reconnecting(lang: Lang) -> &'static str {
     lang.pick("reconnecting", "重连中")
 }
 
-/// 状态行里名字后面的词；就绪时没有（写延迟）。
-pub fn short_word(lang: Lang, status: &MachineStatus) -> Option<&'static str> {
-    Some(match status {
-        MachineStatus::Ready => return None,
-        MachineStatus::Connecting(_) => lang.pick("connecting", "连接中"),
-        MachineStatus::Reconnecting { .. } => reconnecting(lang),
-        MachineStatus::Failed(_) => lang.pick("failed", "连接失败"),
-        MachineStatus::Disconnected => lang.pick("disconnected", "未连接"),
+/// 连接的这一步（`/machines` 的行尾与坞行，Puffin `step_word`）；中文是旧界面的译文。
+pub fn step_word(lang: Lang, step: ConnectStep) -> &'static str {
+    match step {
+        ConnectStep::Checking => lang.pick("checking", "检查中"),
+        ConnectStep::Downloading => lang.pick("downloading the executor", "下载执行器"),
+        ConnectStep::Uploading { .. } => lang.pick("uploading the executor", "上传执行器"),
+        ConnectStep::Handshaking => lang.pick("handshaking", "握手"),
+    }
+}
+
+/// 上传的大小（Puffin `step_size`）：` (89 MB)`、`（89 MB）`。
+pub fn step_size(lang: Lang, step: ConnectStep) -> Option<String> {
+    match step {
+        ConnectStep::Uploading { bytes } => Some(match lang {
+            Lang::En => format!(" ({} MB)", megabytes(bytes)),
+            Lang::Zh => format!("（{} MB）", megabytes(bytes)),
+        }),
+        _ => None,
+    }
+}
+
+/// 分步里的一步（Puffin `step_done`）：`done` 是走过了。
+pub fn step_done(lang: Lang, step: ConnectStep, done: bool) -> String {
+    let mb = |bytes| megabytes(bytes);
+    match (lang, step, done) {
+        (Lang::En, _, _) => super::settings::machine_words::step_done(step, done),
+        (Lang::Zh, ConnectStep::Checking, true) => "已检查".to_owned(),
+        (Lang::Zh, ConnectStep::Checking, false) => "检查中".to_owned(),
+        (Lang::Zh, ConnectStep::Downloading, true) => "已下载执行器".to_owned(),
+        (Lang::Zh, ConnectStep::Downloading, false) => "下载执行器".to_owned(),
+        (Lang::Zh, ConnectStep::Uploading { bytes }, true) => format!("已上传 {} MB", mb(bytes)),
+        (Lang::Zh, ConnectStep::Uploading { bytes }, false) => format!("上传 {} MB", mb(bytes)),
+        (Lang::Zh, ConnectStep::Handshaking, _) => "握手".to_owned(),
+    }
+}
+
+/// 坞行的重连倒计时（Puffin `next_try`）：`next try in 12s`、`12s后重试`；正在连时没有。
+pub fn next_try(lang: Lang, left_ms: Option<u64>) -> Option<String> {
+    let left = super::retry_status::countdown(left_ms?);
+    Some(match lang {
+        Lang::En => format!("next try in {left}"),
+        Lang::Zh => format!("{left}后重试"),
     })
 }
 
-/// 第一次连接的哪一步（F98，remote-exec.md §25.4.2；F100 加下载，§26.6）：下载、上传与握手接在“连接中”后面；探测时没有。
-pub fn connect_step(lang: Lang, step: ConnectStep) -> Option<String> {
-    match (lang, step) {
-        (_, ConnectStep::Checking) => None,
-        (Lang::En, ConnectStep::Downloading) => Some(" · downloading the executor".to_owned()),
-        (Lang::Zh, ConnectStep::Downloading) => Some(" · 下载执行器".to_owned()),
-        (Lang::En, ConnectStep::Uploading { bytes }) => Some(format!(
-            " · uploading the executor ({} MB)",
-            megabytes(bytes)
-        )),
-        (Lang::Zh, ConnectStep::Uploading { bytes }) => {
-            Some(format!(" · 上传执行器（{} MB）", megabytes(bytes)))
+/// 第几次重连（Puffin `attempt`）。
+pub fn attempt(lang: Lang, n: u32) -> String {
+    match lang {
+        Lang::En => format!("attempt {n}"),
+        Lang::Zh => format!("第 {n} 次"),
+    }
+}
+
+/// 列表里失败的原因（Puffin `cause`）：连不上与断开时是说明成一句，其余是 [`failure_text`]。
+pub fn cause(lang: Lang, name: &str, failure: &MachineFailure) -> String {
+    match (lang, failure) {
+        (Lang::En, _) => super::settings::machine_words::cause(name, failure),
+        (Lang::Zh, MachineFailure::Unreachable(m) | MachineFailure::Lost(m)) => {
+            format!("{}。", explain(lang, m).trim_end_matches('。'))
         }
-        (Lang::En, ConnectStep::Handshaking) => Some(" · handshaking".to_owned()),
-        (Lang::Zh, ConnectStep::Handshaking) => Some(" · 握手".to_owned()),
+        (Lang::Zh, other) => failure_text(lang, name, other),
+    }
+}
+
+/// 原因下面的建议（Puffin `advice`）：`true` 的一段是命令。
+pub fn advice(lang: Lang, failure: &MachineFailure, ssh: &str) -> Vec<(String, bool)> {
+    match (lang, failure) {
+        (Lang::En, _) => super::settings::machine_words::advice(failure, ssh),
+        (Lang::Zh, MachineFailure::Unreachable(_) | MachineFailure::Lost(_)) => vec![
+            ("机器开着吗？在另一个终端里运行 ".to_owned(), false),
+            (format!("ssh {ssh}"), true),
+            (" 看看 ssh 怎么说。".to_owned(), false),
+        ],
+        (Lang::Zh, MachineFailure::Incompatible { busy: true, .. }) => {
+            vec![("等它的工作结束后再连。".to_owned(), false)]
+        }
+        (Lang::Zh, _) => Vec::new(),
+    }
+}
+
+fn connected_of_zh(connected: usize, total: usize) -> String {
+    format!("{total} 台里 {connected} 台已连接")
+}
+
+fn more_zh(above: bool, n: usize) -> String {
+    format!("{} 还有 {n} 台", if above { "↑" } else { "↓" })
+}
+
+/// `/machines` 列表写死的字（kit `machine_rows::ListWords`）：英文是 Puffin 的字。
+pub fn list_words(lang: Lang) -> rust_cli_tui_kit::app::widgets::machine_rows::ListWords {
+    use rust_cli_tui_kit::app::widgets::machine_rows::{LIST_WORDS, ListWords};
+    match lang {
+        Lang::En => LIST_WORDS,
+        Lang::Zh => ListWords {
+            title: title(lang),
+            head_note: "智能体可以在连上的机器上运行工具",
+            none_yet: "还没有",
+            empty_lead: "让智能体经 SSH 在另一台电脑上运行工具。",
+            hosts_note: "这些主机在你的 ~/.ssh/config 里；空格照原样添加一台并连接。",
+            add: "添加机器",
+            env_not_refreshed: env_not_refreshed(lang),
+            could_not_connect: "连接失败",
+            not_connected: "未连接",
+            reconnecting: reconnecting(lang),
+            connected_of: connected_of_zh,
+            more: more_zh,
+        },
     }
 }
 
 /// 字节数按 MiB 四舍五入、至少 1。
 fn megabytes(bytes: u64) -> u64 {
     ((bytes + (1 << 19)) >> 20).max(1)
-}
-
-/// 工具行：调用在重连中的机器上等（F98，remote-exec.md §25.4.1）。
-pub fn waiting_reconnect(lang: Lang, name: &str) -> String {
-    match lang {
-        Lang::En => format!("Waiting for {name} to reconnect…"),
-        Lang::Zh => format!("等待 {name} 重连…"),
-    }
 }
 
 /// “立即重试”的回执（F98）。
@@ -215,29 +252,6 @@ pub fn explain(lang: Lang, reason: &str) -> String {
     }
 }
 
-/// `/mcp` 列表里失败的原因（F98，§25.4.4）：机器没连上的那一种中文写成中文，其余原样。
-pub fn mcp_reason(lang: Lang, reason: &str) -> String {
-    let machine = reason
-        .strip_prefix("Machine \"")
-        .and_then(|rest| rest.strip_suffix("\" is not connected."));
-    match (lang, machine) {
-        (Lang::Zh, Some(name)) => format!("机器 {name} 没有连上。"),
-        _ => reason.to_owned(),
-    }
-}
-
-/// 重连中的进度（F96，remote-exec.md §23.4，写法照模型重试的状态行）：` · retrying in 12s · attempt 3` /
-/// ` · 12s后重试 · 第 3 次`；正在连时没有倒计时。
-pub fn reconnect_progress(lang: Lang, attempt: u32, left_ms: Option<u64>) -> String {
-    let left = left_ms.map(super::retry_status::countdown);
-    match (lang, left) {
-        (Lang::En, Some(left)) => format!(" · retrying in {left} · attempt {attempt}"),
-        (Lang::En, None) => format!(" · attempt {attempt}"),
-        (Lang::Zh, Some(left)) => format!(" · {left}后重试 · 第 {attempt} 次"),
-        (Lang::Zh, None) => format!(" · 第 {attempt} 次"),
-    }
-}
-
 /// 列表里重连中的机器的第三行：最近一次的原因（F96）。
 pub fn last_error(lang: Lang, reason: &str) -> String {
     let reason = explain(lang, reason);
@@ -253,37 +267,6 @@ pub fn env_not_refreshed(lang: Lang) -> &'static str {
         "env not refreshed (older executor)",
         "不能刷新环境（执行器较旧）",
     )
-}
-
-/// 提示行：enter 随焦点的机器写连接或断开（§21.3）；焦点在等重连的机器上时多“立即重试”（F98，§25.4.1）。
-pub fn hint(lang: Lang, focused_live: Option<bool>, retry: bool) -> String {
-    let enter = match (lang, focused_live) {
-        (_, None) => None,
-        (Lang::En, Some(true)) => Some("{enter} to disconnect"),
-        (Lang::En, Some(false)) => Some("{enter} to connect"),
-        (Lang::Zh, Some(true)) => Some("{enter} 断开"),
-        (Lang::Zh, Some(false)) => Some("{enter} 连接"),
-    };
-    let parts: Vec<&str> = match lang {
-        Lang::En => [
-            focused_live.map(|_| "{↑/↓} to select"),
-            enter,
-            retry.then_some("{r} to retry now"),
-            focused_live.map(|_| "{x} to remove"),
-            Some("{esc} to close"),
-        ],
-        Lang::Zh => [
-            focused_live.map(|_| "{↑/↓} 选择"),
-            enter,
-            retry.then_some("{r} 立即重试"),
-            focused_live.map(|_| "{x} 删除"),
-            Some("{esc} 关闭"),
-        ],
-    }
-    .into_iter()
-    .flatten()
-    .collect();
-    parts.join(" · ")
 }
 
 pub fn usage(lang: Lang) -> &'static str {
@@ -377,6 +360,9 @@ pub fn failure_text(lang: Lang, name: &str, failure: &MachineFailure) -> String 
         (Lang::Zh, MachineFailure::Unreachable(m)) => {
             format!("无法经 SSH 连到 {name}：{}", explain(lang, m))
         }
+        // 连接中被断开（remote-exec.md §19.10）。
+        (Lang::En, MachineFailure::Stopped) => format!("Stopped connecting {name}."),
+        (Lang::Zh, MachineFailure::Stopped) => format!("已停止连接 {name}。"),
         (Lang::En, MachineFailure::Unsupported { os, arch }) => {
             format!(
                 "{name} runs {os} {arch}; remote machines must be Linux x86_64 / aarch64 or macOS arm64."
@@ -542,11 +528,6 @@ fn cached_executor(version: &str, target: &str) -> String {
 /// 询问框标题后面的机器（§21.6）：`runs on dev-a` / `在 dev-a 上执行`（前缀、机器名、后缀，机器名用强调色）。
 pub fn runs_on(lang: Lang) -> (&'static str, &'static str) {
     pick2(lang, ("runs on ", ""), ("在 ", " 上执行"))
-}
-
-/// Shell 详情的机器一行（§21.6）。
-pub fn machine_field(lang: Lang) -> &'static str {
-    lang.pick("Machine: ", "机器：")
 }
 
 fn pick2(

@@ -31,11 +31,12 @@ use rust_cli_ext::Ext;
 use rust_cli_hooks::HookEngine;
 use rust_cli_kernel_api::agents::{AgentSignals, TaskListStore};
 use rust_cli_kernel_api::clock::{Clock, Ids};
+use rust_cli_kernel_api::default_model::DefaultModel;
 use rust_cli_kernel_api::env::Operations;
 use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::ids::{OwnerEpoch, SessionId, TraceId};
 use rust_cli_kernel_api::machine::MachineEnv;
-use rust_cli_kernel_api::model::{ModelPort, ModelSelection};
+use rust_cli_kernel_api::model::ModelPort;
 use rust_cli_kernel_api::orchestration::{Compactor, QueryRunner};
 use rust_cli_kernel_api::permission::PermissionMode;
 use rust_cli_kernel_api::session_api::{
@@ -53,7 +54,7 @@ use table::{Closer, OpenSessions};
 use crate::assemble::SurfaceTraits;
 
 pub use ext::{ExtConfig, Extensions};
-pub use rust_cli_compact::{CompactConfig, Thresholds as CompactThresholds};
+pub use rust_cli_compact::{AutoCompactAt, CompactConfig, Thresholds as CompactThresholds};
 pub use rust_cli_context::{Attribution, ContextConfig, OutputStyle, Surface};
 // hooks 快照（`LocalKernel::replace_hooks` 的参数）：前端的测试组装它不必依赖 hooks crate（修复线 F37 的 TUI 测试）。
 pub use rust_cli_hooks::{HookSource, HooksConfig, HooksSettings};
@@ -78,7 +79,8 @@ pub struct Ports {
 /// 冷加载的会话没有记录模型或模式时使用的默认值。
 #[derive(Debug, Clone)]
 pub struct Defaults {
-    pub selection: ModelSelection,
+    /// 新会话的缺省模型。TUI 里它可能在内核建好之后才定下（工作线 F140，performance.md §12.3）：建会话与开会话先等它。
+    pub selection: DefaultModel,
     pub mode: PermissionMode,
     /// 每次提问最多几轮（`--max-turns`）；None 不限制。
     pub max_turns: Option<u32>,

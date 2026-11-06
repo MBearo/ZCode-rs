@@ -114,7 +114,7 @@ impl Sandbox {
             ids,
         };
         let defaults = Defaults {
-            selection: selection.clone(),
+            selection: selection.clone().into(),
             mode: PermissionMode::BypassPermissions,
             max_turns: None,
             search_tools: false,
@@ -186,6 +186,7 @@ async fn services(clock: Arc<dyn Clock>) -> (Arc<Egress>, AccountServices) {
             bigmodel_team_plans: format!("{origin}/coding-plan/team/plans"),
             bigmodel_api: origin,
             client_version: "0.0.0-test".to_owned(),
+            usage_quota_url: None,
         },
     };
     (egress, services)

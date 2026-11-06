@@ -1,39 +1,15 @@
 // 复制自 apps/zcode-host/crates/tui/src/ui/list.rs（feat/rs 79b6691c55）。
 //! 通用选择列表（docs/specs/rust-tui.md §7.3、§8.5）：模型、权限、恢复会话、登录方式等选择器共用。
-//! 第一行是强调色的 `─` 线，标题粗体，可选的副标题 dim；焦点行按选择列表组件画（`› ` 加底色条，
-//! docs/specs/rust-cli/tui.md §7.4，修复线 F26；原来是强调色的 `❯ `），当前值后面绿色的 ` ✔`；
 //! 上下移动到头时循环，数字 1–9 直接选中；滚轮移动焦点、到头停住；最后一行是提示。可输入文字过滤
 //! （模型、恢复会话）。模型列表每个模型一行，←/→ 调焦点模型的推理档位。
+//!
+//! 画法：[`ListView::lines`] 在 `list_draw.rs`（[`draw`]），照 Puffin 输入框的板上的那一层画（tui-kit.md §4.2，工作线 TK
+//! 的 S3）；这里只有条目、焦点与按键（行为不变）。
 use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
-
-use rust_cli_kernel_api::ids::MessageId;
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::permission::PermissionMode;
-use rust_cli_kernel_api::session_api::RewindScope;
 
-use super::i18n::Lang;
-use super::key_hint;
 use super::keyboard;
-use super::layout;
-use super::palette::Palette;
-use super::pick;
-use super::text::truncate_line;
-
-/// 两行的条目（rewind、`/mode`）每条占的行。
-const TWO_LINE_ROWS: usize = 2;
-/// 模型的档位：档位行与下面的空行。
-const EFFORT_ROWS: usize = 2;
-/// 当前项的勾。
-const TICK: &str = " ✔";
-/// 名字列最宽 40；终端至少 24 列时名字后面写说明，中间空 3 列。
-const MAX_LABEL_WIDTH: usize = 40;
-const DESCRIPTION_FROM_WIDTH: usize = 24;
-const DESCRIPTION_GAP: usize = 3;
-/// 序号 `N. ` 的宽。
-const NUMBER_WIDTH: usize = 3;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Item {
@@ -45,52 +21,49 @@ pub struct Item {
     /// 推理档位（从低到高）与当前选中的一档；只有模型列表用。
     pub levels: Vec<String>,
     pub level: usize,
+    /// 行尾 fg3 的标签（`/mode` 计划模式那一行的 `on` / `off`）；空时在用的一项写 `current`。
+    pub tag: String,
 }
 
-/// 选中一项后交给调用方的值（架构整理 U4：以前是用分隔符拼的字符串，模型的团队项目先序列化成 JSON，下标写成数字
-/// 文字，选中后再拆开解析）。
+/// 选中一项后交给调用方的值（架构整理 U4：以前是用分隔符拼的字符串，模型的团队项目先序列化成 JSON，选中后再拆开
+/// 解析）。只有下面几种列表用 `ListView`；rewind、`/fork`、`/memory`、`/effort` 各有自己的界面。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum Choice {
-    /// 只关闭列表（rewind 的 `(current)`）。
+    /// 只关闭列表（只读信息的条目）。
     #[default]
     Close,
-    /// `/model` 的一个模型；档位由列表的 ←/→ 给出（[`Outcome::Chosen`] 的 `level`）。
+    /// `/model` 的一个模型；档位由列表的 ←/→ 给出（[`Outcome::Chosen`] 的 `level`，`auto` 也在其中）。
     Model(ModelSelection),
     /// `/mode` 不带参数的选择器（修复线 F26）：选中后同 `/mode <名>`。
     Mode(PermissionMode),
-    /// `/effort` 不带参数的选择器（修复线 F26）：档位或 `auto`，选中后同 `/effort <档>`。
-    Effort(String),
-    /// rewind 选择器的一条消息。
-    Rewind(MessageId),
-    /// rewind 的确认：回退的范围与目标。
-    RewindTo {
-        scope: RewindScope,
-        target: MessageId,
-    },
-    /// rewind 确认页的 `Never mind`：回到消息列表。
-    RewindBack,
-    /// `/memory` 的一个文件（tui-input.md §4.2）。
-    Memory(crate::services::MemoryFile),
-    /// `/fork` 的一条用户输入（session-lifecycle.md §6.5.3）。
-    Fork(MessageId),
-    /// `/theme`。
-    Theme(crate::services::UiTheme),
+    /// `/theme` 的一个配色（kit 配色的 id）。
+    Theme(String),
+    /// `/export` 的复制到剪贴板。
+    ExportCopy,
+    /// `/export` 的存成文件（草稿变成 `/export <缺省文件名>`）。
+    ExportFile,
 }
 
-/// 列表的排版（以前的 `Purpose` 还决定选中后做什么，现在由 [`Choice`] 决定，这里只剩样式）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Shape {
-    /// 每条一行。
-    OneLine,
-    /// 每条两行：消息与这一回合的改动（rewind）；当前项在第二行写 ` · current`。
-    TwoLines,
-    /// `/mode`（工作线 F76，照 App 的菜单）：每条两行（名称、说明），名称用模式的颜色，✔ 在名称那一行。
-    Modes,
+/// 列表是哪一个：决定画法（`list_draw.rs`）与跟着草稿的前缀（`draft_layer.rs`）；选中后做什么由 [`Choice`] 决定。
+#[derive(Debug, Clone, PartialEq)]
+pub enum Purpose {
+    Model,
+    /// `/mode` 不带参数的选择器（修复线 F26）。工作线 F76：照 App 的菜单每个模式两行（名称、说明），名称用模式的颜色。
+    Permissions,
+    /// 只读信息：enter 与 esc 都关闭。
+    Info,
+    /// `/theme`：配色。
+    Theme,
+    /// `/export` 的两种方式（Puffin `export_rows`）。草稿正好是 `/export ` 时开着。
+    Export,
 }
+
+/// 早已落定的淡入的 tick 数（同 Puffin 的 `LONG_AGO`）。
+const SETTLED: i64 = 1_000_000;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListView {
-    pub shape: Shape,
+    pub purpose: Purpose,
     pub title: String,
     pub subtitle: Option<String>,
     pub items: Vec<Item>,
@@ -98,8 +71,10 @@ pub struct ListView {
     /// 可过滤时的查询；None 表示不可过滤。
     pub filter: Option<String>,
     pub empty: String,
-    /// esc / ctrl+c 关掉列表时插进对话的提示（`/memory`，tui-input.md §4.2）。
-    pub cancelled: Option<String>,
+    /// 模型选择器上一帧显示的档位与它换上的 tick（画之前记，[`ListView::note_level`]；Puffin `Picker::named`）；没画过时
+    /// None。`named_age` 是这一帧离它多少 tick：档位的名字从板上淡入。
+    pub named: Option<(Option<String>, i64)>,
+    pub named_age: i64,
 }
 
 pub enum Outcome {
@@ -112,28 +87,39 @@ pub enum Outcome {
     Closed,
 }
 
-/// 档位的图标：从低到高 `○ ◐ ● ◉`。
-fn effort_glyph(level: usize, count: usize) -> &'static str {
-    const GLYPHS: [&str; 4] = ["○", "◐", "●", "◉"];
-    if count <= 1 {
-        return GLYPHS[2];
-    }
-    GLYPHS[((level * (GLYPHS.len() - 1)) as f64 / (count - 1) as f64).round() as usize]
-}
-
 impl ListView {
-    pub fn new(shape: Shape, title: String, items: Vec<Item>, empty: String) -> Self {
+    pub fn new(purpose: Purpose, title: String, items: Vec<Item>, empty: String) -> Self {
         let selected = items.iter().position(|item| item.current).unwrap_or(0);
         Self {
-            shape,
+            purpose,
             title,
             subtitle: None,
             items,
             selected,
             filter: None,
             empty,
-            cancelled: None,
+            named: None,
+            named_age: SETTLED,
         }
+    }
+
+    /// 画之前（`pane.rs`）：模型选择器显示的档位换了（换了模型或 ← →）时它的名字从这个 tick 淡入；打开时已经落定
+    /// （Puffin `renamed`）。
+    pub fn note_level(&mut self, tick: i64) {
+        if self.purpose != Purpose::Model {
+            return;
+        }
+        let shown = self.visible().get(self.selected).and_then(|item| {
+            let last = item.levels.len().checked_sub(1)?;
+            item.levels.get(item.level.min(last)).cloned()
+        });
+        let named = match self.named.take() {
+            Some((was, at)) if was == shown => (was, at),
+            Some(_) => (shown, tick),
+            None => (shown, tick - SETTLED),
+        };
+        self.named_age = tick - named.1;
+        self.named = Some(named);
     }
 
     pub fn with_subtitle(mut self, subtitle: String) -> Self {
@@ -206,6 +192,9 @@ impl ListView {
                 }
             }
             KeyCode::Enter => {
+                if self.purpose == Purpose::Info {
+                    return Outcome::Closed;
+                }
                 return self
                     .visible()
                     .get(self.selected)
@@ -223,7 +212,9 @@ impl ListView {
                     self.selected = 0;
                 } else if ('1'..='9').contains(&c) {
                     let index = usize::from(c as u8 - b'1');
-                    if let Some(item) = self.visible().get(index) {
+                    if let Some(item) = self.visible().get(index)
+                        && self.purpose != Purpose::Info
+                    {
                         return Self::chosen(item);
                     }
                 }
@@ -240,168 +231,10 @@ impl ListView {
             self.selected = 0;
         }
     }
-
-    /// 视图的行与每个条目所在的行；`height` 是可用高度，列表只显示焦点附近的条目。
-    pub fn lines(
-        &self,
-        width: usize,
-        height: usize,
-        lang: Lang,
-        palette: &Palette,
-    ) -> (Vec<Line<'static>>, Vec<(usize, usize)>) {
-        let accent = palette.accent;
-        let dim = Style::default().add_modifier(Modifier::DIM);
-        let secondary = palette.secondary();
-        let mut rows = Vec::new();
-        let mut lines = vec![
-            crate::ui::style::rule(width, Style::default().fg(accent)),
-            Line::from(Span::styled(
-                format!("  {}", self.title),
-                Style::default().add_modifier(Modifier::BOLD),
-            )),
-        ];
-        // 副标题可以有多行（rewind 的确认页）。
-        for line in self.subtitle.iter().flat_map(|subtitle| subtitle.lines()) {
-            lines.push(truncate_line(
-                Line::from(Span::styled(format!("  {line}"), dim)),
-                width,
-            ));
-        }
-        if let Some(filter) = &self.filter {
-            let search = match lang {
-                Lang::En => "Search…",
-                Lang::Zh => "搜索…",
-            };
-            let shown = if filter.is_empty() {
-                Span::styled(search, dim)
-            } else {
-                Span::raw(filter.clone())
-            };
-            lines.push(Line::from(vec![Span::styled("  ⌕ ", dim), shown]));
-        }
-        lines.push(Line::default());
-        let visible = self.visible();
-        if visible.is_empty() {
-            // 有条目但搜索没有匹配：不用列表为空时的说法（模型的是“去登录”）。
-            let empty = match (self.items.is_empty(), lang) {
-                (true, _) => self.empty.as_str(),
-                (false, Lang::En) => "No matches",
-                (false, Lang::Zh) => "没有匹配",
-            };
-            lines.push(Line::from(Span::styled(format!("  {empty}"), dim)));
-        }
-        // 每条两行：rewind（消息、改动）与 `/mode`（名称、说明，工作线 F76）；`/mode` 的 ✔ 在名称那一行。
-        let modes = self.shape == Shape::Modes;
-        let two_lines = self.shape != Shape::OneLine;
-        let ticked = |item: &Item| item.current && (!two_lines || modes);
-        let per_item = if two_lines { TWO_LINE_ROWS } else { 1 };
-        let focused = visible.get(self.selected).copied();
-        let effort = focused.filter(|item| !item.levels.is_empty());
-        // 列表之外还有：空行、档位行与空行（模型）、提示。
-        let below = layout::FOOTER_ROWS + if effort.is_some() { EFFORT_ROWS } else { 0 };
-        let room =
-            (height.saturating_sub(lines.len() + below) / per_item).max(layout::MIN_LIST_ROWS);
-        let start = self.selected.saturating_sub(room.saturating_sub(1));
-        let end = (start + room).min(visible.len());
-        let label_width = visible
-            .iter()
-            .map(|item| item.label.width() + if ticked(item) { TICK.width() } else { 0 })
-            .max()
-            .unwrap_or(0)
-            .min(MAX_LABEL_WIDTH);
-        let green = Style::default().fg(Color::Green);
-        for (index, item) in visible.iter().enumerate().take(end).skip(start) {
-            let chosen = index == self.selected;
-            // 指针列：焦点行 `›`（选择列表组件）；列表超出时首尾两行写 `↑` / `↓`。
-            let pointer = if chosen {
-                pick::pointer(true)
-            } else if index == start && start > 0 {
-                Span::styled("↑ ", dim)
-            } else if index + 1 == end && end < visible.len() {
-                Span::styled("↓ ", dim)
-            } else {
-                pick::pointer(false)
-            };
-            let mut spans = vec![Span::raw("  "), pointer];
-            if self.filter.is_none() {
-                spans.push(Span::styled(format!("{}. ", index + 1), secondary));
-            }
-            let label = match (&item.value, modes) {
-                (Choice::Mode(mode), true) => super::footer::mode_style(*mode, palette),
-                _ => Style::default(),
-            };
-            spans.push(Span::styled(item.label.clone(), label));
-            let mut used = item.label.width();
-            if ticked(item) {
-                spans.push(Span::styled(TICK, green));
-                used += TICK.width();
-            }
-            if !two_lines && width >= DESCRIPTION_FROM_WIDTH && !item.description.is_empty() {
-                spans.push(Span::raw(
-                    " ".repeat(label_width.saturating_sub(used) + DESCRIPTION_GAP),
-                ));
-                spans.push(Span::styled(item.description.clone(), secondary));
-            }
-            rows.push((lines.len(), index));
-            lines.push(pick::paint(
-                truncate_line(Line::from(spans), width),
-                chosen,
-                palette,
-                width,
-            ));
-            if two_lines {
-                let mut meta = item.description.clone();
-                if item.current && !modes {
-                    meta.push_str(match lang {
-                        Lang::En => " · current",
-                        Lang::Zh => " · 当前",
-                    });
-                }
-                // 与名字对齐：缩进、指针，有序号时再加序号的宽。
-                let indent = layout::INDENT
-                    + pick::POINTER.width()
-                    + if self.filter.is_none() {
-                        NUMBER_WIDTH
-                    } else {
-                        0
-                    };
-                lines.push(pick::paint(
-                    truncate_line(
-                        Line::from(Span::styled(
-                            format!("{}{meta}", " ".repeat(indent)),
-                            secondary,
-                        )),
-                        width,
-                    ),
-                    chosen,
-                    palette,
-                    width,
-                ));
-            }
-        }
-        lines.push(Line::default());
-        if let Some(item) = effort {
-            let level = &item.levels[item.level.min(item.levels.len() - 1)];
-            let glyph = effort_glyph(item.level, item.levels.len());
-            let text = match lang {
-                Lang::En => format!(" {level} effort  ←/→ to adjust"),
-                Lang::Zh => format!(" 推理档位 {level}  ←/→ 调整"),
-            };
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(glyph, Style::default().fg(accent)),
-                Span::styled(text, dim),
-            ]));
-            lines.push(Line::default());
-        }
-        let hint = match lang {
-            Lang::En => "{Enter} to select · {Esc} to cancel",
-            Lang::Zh => "{enter} 选择 · {esc} 取消",
-        };
-        lines.push(key_hint::line(layout::INDENT, hint, palette));
-        (lines, rows)
-    }
 }
+
+#[path = "list_draw.rs"]
+pub mod draw;
 
 #[cfg(test)]
 #[path = "list_tests.rs"]

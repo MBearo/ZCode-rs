@@ -49,3 +49,17 @@ async fn the_board_writes_only_when_something_changed() {
     assert_eq!(store.load(&list).await.unwrap().high_water_mark, 3);
     assert_eq!(board.read(&list).await.unwrap().high_water_mark, 3);
 }
+
+/// 工作线 F140（performance.md §12.3）：按缺省模型的开关跟着晚到的缺省模型走。没定下时是空选择，同没有模型。
+#[test]
+fn the_switch_follows_the_default_model_once_it_settles() {
+    use rust_cli_kernel_api::default_model::DefaultModel;
+    let (settle, default) = DefaultModel::pending();
+    let switch = crate::TaskTools::ByDefaultModel(default);
+    assert!(switch.enabled());
+    settle.settle(rust_cli_kernel_api::model::ModelSelection {
+        model: OPUS_5_5.to_owned(),
+        ..rust_cli_kernel_api::testing::selection()
+    });
+    assert!(!switch.enabled());
+}

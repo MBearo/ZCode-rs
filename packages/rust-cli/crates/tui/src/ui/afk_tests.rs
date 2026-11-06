@@ -67,19 +67,34 @@ fn input_restarts_the_countdown() {
     assert_eq!(afk.tick(at(101)), Some(Tick::Expired(60_000)));
 }
 
-/// 终端报告有焦点时不计；失去焦点后从那时起计。
+/// 见过一次失去焦点之后，终端报告有焦点时不计；再失去焦点后从那时起计（Puffin `kept/afk.rs`）。
 #[test]
 fn a_focused_terminal_does_not_count() {
     let start = Instant::now();
     let mut afk = afk(4_000, None);
     let id = InteractionId::new("i1");
     afk.dialog(Some((&id, &question())), start);
+    afk.focus(false);
     afk.focus(true);
     let at = |seconds| start + Duration::from_secs(seconds);
     assert_eq!(afk.tick(at(10)), Some(Tick::Waiting(Some(4))));
     afk.focus(false);
     assert_eq!(afk.tick(at(13)), Some(Tick::Waiting(Some(1))));
     assert_eq!(afk.tick(at(14)), Some(Tick::Expired(4_000)));
+}
+
+/// 终端只在启动时报告有焦点、从没失去过：照常计时（Puffin 同）。
+#[test]
+fn focus_counts_only_after_a_loss() {
+    let start = Instant::now();
+    let mut afk = afk(4_000, None);
+    let id = InteractionId::new("i1");
+    afk.dialog(Some((&id, &question())), start);
+    afk.focus(true);
+    assert_eq!(
+        afk.tick(start + Duration::from_secs(4)),
+        Some(Tick::Expired(4_000))
+    );
 }
 
 /// 不是提问、没有配置时不计时；换了提问重新计时。

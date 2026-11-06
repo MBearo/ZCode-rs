@@ -244,7 +244,11 @@ fn by_status(status: u16, codes: &[Option<&str>], raw: &str, error: Shape) -> Ve
         retry_after_ms,
     } = error;
     let has = |table: &[&str]| codes.iter().flatten().any(|code| table.contains(code));
-    if status == http::PAYMENT_REQUIRED || has(&vocab::QUOTA_CODES) {
+    let client = http::is_client_error(status);
+    if status == http::PAYMENT_REQUIRED
+        || has(&vocab::QUOTA_CODES)
+        || (client && vocab::quota_exhausted(raw))
+    {
         return Verdict::new(
             Class::QuotaExhausted,
             ModelError::QuotaExhausted { message },
@@ -256,7 +260,6 @@ fn by_status(status: u16, codes: &[Option<&str>], raw: &str, error: Shape) -> Ve
             ModelError::ContentBlocked { message },
         );
     }
-    let client = http::is_client_error(status);
     if status == http::PAYLOAD_TOO_LARGE
         || has(&vocab::TOO_LARGE_CODES)
         || (client && vocab::media_too_large(raw))

@@ -27,6 +27,9 @@ pub fn request_stats(conn: &Connection, session: &str) -> Result<RequestStats, S
         cache_read_tokens: count(totals.cache_read),
         unknown_cache_usage: totals.unknown > 0,
         last,
+        output_tokens: count(totals.output),
+        measured_output_tokens: count(totals.measured_output),
+        generation_ms: count(totals.generation_ms),
     })
 }
 

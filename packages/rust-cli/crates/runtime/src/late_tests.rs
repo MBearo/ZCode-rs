@@ -1,13 +1,16 @@
 //! 先建后接的压缩器（R1-13）：没接上时报错，接上后每个方法都转发。
 
+use std::sync::Mutex;
+
 use rust_cli_base::models::GLM_5_3;
+use rust_cli_kernel_api::compaction::CompactProgress;
 use rust_cli_kernel_api::env::{EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::{EnvironmentId, SessionId};
 use rust_cli_kernel_api::message::CompactTrigger;
 
 use super::*;
 
-/// 只回答用量与“要压缩”的压缩器。
+/// 只回答用量与“要压缩”的压缩器；带进度的自动压缩只说开始。
 struct Fixed;
 
 #[async_trait]
@@ -20,8 +23,8 @@ impl Compactor for Fixed {
         &self,
         _history: &[Message],
         _selection: &ModelSelection,
-    ) -> Option<(u64, u64)> {
-        Some((150_000, 180_000))
+    ) -> Option<rust_cli_kernel_api::compaction::ContextOccupancy> {
+        Some(occupancy())
     }
 
     fn blocking_limit(
@@ -33,6 +36,17 @@ impl Compactor for Fixed {
         Some(format!("blocked {failure:?}"))
     }
 
+    async fn auto_compact_with(
+        &self,
+        _request: CompactRequest,
+        _tracking: &mut CompactTracking,
+        _cancel: CancellationToken,
+        progress: &dyn CompactProgress,
+    ) -> Result<AutoCompactOutcome, OrchestrationError> {
+        progress.started(CompactTrigger::Auto).await;
+        Ok(AutoCompactOutcome::NotNeeded)
+    }
+
     async fn compact(
         &self,
         _request: CompactRequest,
@@ -42,6 +56,19 @@ impl Compactor for Fixed {
             message: "not in this test".to_owned(),
         })
     }
+}
+
+/// 记下说过的开始。
+#[derive(Default)]
+struct Started(Mutex<Vec<CompactTrigger>>);
+
+#[async_trait]
+impl CompactProgress for Started {
+    async fn started(&self, trigger: CompactTrigger) {
+        self.0.lock().unwrap().push(trigger);
+    }
+
+    async fn failed(&self, _trigger: CompactTrigger, _message: String) {}
 }
 
 fn selection() -> ModelSelection {
@@ -90,10 +117,7 @@ fn an_assembled_compactor_forwards_every_method() {
     let late = LateCompactor::default();
     late.bind(Arc::new(Fixed));
     assert!(late.should_auto_compact(&[], &selection()));
-    assert_eq!(
-        late.context_usage(&[], &selection()),
-        Some((150_000, 180_000))
-    );
+    assert_eq!(late.context_usage(&[], &selection()), Some(occupancy()));
     // 阻塞线（compact.md §2.2）同样转发；没有转发时主循环看到的是缺省的“不拦”。
     assert_eq!(
         late.blocking_limit(&[], &selection(), Some("why")),
@@ -103,4 +127,31 @@ fn an_assembled_compactor_forwards_every_method() {
         LateCompactor::default().blocking_limit(&[], &selection(), None),
         None
     );
+}
+
+/// 带进度的自动压缩也转发（compact.md §4.1）：不转发时走默认实现，压缩器说的开始到不了前端。
+#[tokio::test]
+async fn an_assembled_compactor_forwards_the_compaction_progress() {
+    let late = LateCompactor::default();
+    late.bind(Arc::new(Fixed));
+    let progress = Started::default();
+    let outcome = late
+        .auto_compact_with(
+            request(),
+            &mut CompactTracking::default(),
+            CancellationToken::new(),
+            &progress,
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome, AutoCompactOutcome::NotNeeded);
+    assert_eq!(*progress.0.lock().unwrap(), [CompactTrigger::Auto]);
+}
+
+fn occupancy() -> rust_cli_kernel_api::compaction::ContextOccupancy {
+    rust_cli_kernel_api::compaction::ContextOccupancy {
+        used_tokens: 150_000,
+        max_tokens: 180_000,
+        compact_at: Some(160_000),
+    }
 }

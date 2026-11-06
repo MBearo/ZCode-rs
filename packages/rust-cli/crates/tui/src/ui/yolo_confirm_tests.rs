@@ -7,8 +7,8 @@ use rust_cli_kernel_api::permission::PermissionMode;
 use super::*;
 use crate::ui::app::Local;
 use crate::ui::i18n::Lang;
-use crate::ui::palette::{ColorLevel, Palette};
-use crate::ui::text::plain;
+use crate::ui::lines::plain;
+use rust_cli_tui_kit::render::width::string_width;
 
 const FULL: PermissionMode = PermissionMode::BypassPermissions;
 
@@ -17,7 +17,7 @@ fn app(mode: PermissionMode) -> App {
 }
 
 fn press(app: &mut App, code: KeyCode) -> Option<Action> {
-    app.yolo_confirm_key(KeyEvent::new(code, KeyModifiers::NONE))
+    app.yolo_confirm_key(crate::ui::test_support::key(code))
 }
 
 fn dialog(app: &App) -> Option<&YoloConfirm> {
@@ -31,13 +31,20 @@ fn focus(app: &App) -> Focus {
     dialog(app).unwrap().focus
 }
 
+/// 本地的提示：一行的在输入框上方（`App::said`，tui-kit.md §4.0），多行的进 transcript。
 fn infos(app: &App) -> Vec<String> {
+    let said = [&app.said.failed, &app.said.quiet]
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect::<Vec<_>>();
     app.local
         .iter()
         .filter_map(|cell| match &cell.local {
             Local::Info(text) => Some(text.clone()),
             _ => None,
         })
+        .chain(said)
         .collect()
 }
 
@@ -50,19 +57,17 @@ fn only_switching_into_full_access_from_another_mode_asks() {
     ] {
         let mut app = app(from);
         assert_eq!(app.switch_mode(FULL, true), None, "{from:?}");
-        let opened = YoloConfirm {
-            checked: false,
-            focus: Focus::Cancel,
-            announce: true,
-        };
-        assert_eq!(dialog(&app), Some(&opened));
+        assert_eq!(dialog(&app), Some(&YoloConfirm::default()));
         assert!(infos(&app).is_empty());
     }
-    // 已经是完全访问：照旧发命令并提示。
+    // 已经是完全访问：照旧发命令并提示（提示的字是模式那一句，`i18n::mode_says`）。
     let mut full = app(FULL);
     assert_eq!(full.switch_mode(FULL, true), Some(Action::SetMode(FULL)));
     assert!(dialog(&full).is_none());
-    assert_eq!(infos(&full), ["Mode switched to Full access."]);
+    assert_eq!(
+        infos(&full),
+        [crate::ui::i18n::mode_says(Lang::En, FULL).to_owned()]
+    );
     // 别的模式照旧。
     let mut build = app(PermissionMode::Default);
     let guarded = PermissionMode::Guarded;
@@ -78,7 +83,7 @@ fn shift_tab_asks_only_on_the_way_into_full_access() {
     let back_tab = KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT);
     let mut guarded = app(PermissionMode::Guarded);
     assert_eq!(guarded.on_key(back_tab, Instant::now()), None);
-    assert_eq!(dialog(&guarded).map(|d| d.announce), Some(false));
+    assert_eq!(dialog(&guarded), Some(&YoloConfirm::default()));
     // 从完全访问回到变更前确认不问。
     let mut full = app(FULL);
     assert_eq!(
@@ -100,7 +105,7 @@ fn a_second_request_does_not_stack_or_reset() {
     let kept = YoloConfirm {
         checked: true,
         focus: Focus::Acknowledge,
-        announce: false,
+        then: None,
     };
     assert_eq!(dialog(&app), Some(&kept));
     assert!(infos(&app).is_empty());
@@ -143,11 +148,11 @@ fn keys_move_check_and_confirm() {
         assert_eq!(press(&mut app, code), None);
     }
     assert_eq!(dialog(&app).cloned(), before);
-    // 勾上之后确认：关掉框，提示并发命令。
+    // 勾上之后确认：关掉框，发命令；不另说切了模式（Puffin 同，模式行说新的模式）。
     press(&mut app, KeyCode::Up);
     assert_eq!(press(&mut app, KeyCode::Enter), Some(Action::SetMode(FULL)));
     assert!(dialog(&app).is_none());
-    assert_eq!(infos(&app), ["Mode switched to Full access."]);
+    assert!(infos(&app).is_empty());
 }
 
 /// 数字键（工作线 F92）：`1` 同在“取消”上按 Enter、`2` 同在“确认启用”上按 Enter，都不看焦点；没勾选时 `2` 不起作用、
@@ -180,7 +185,7 @@ fn digits_choose_the_numbered_option() {
         let kept = YoloConfirm {
             checked: false,
             focus,
-            announce: true,
+            then: None,
         };
         assert_eq!(dialog(&app), Some(&kept));
     }
@@ -191,13 +196,13 @@ fn digits_choose_the_numbered_option() {
         assert_eq!(press(&mut app, KeyCode::Char(digit)), None, "{digit}");
         assert_eq!(dialog(&app).cloned(), before, "{digit}");
     }
-    // 2 勾选后：焦点在勾选框上也直接确认，提示并发命令。
+    // 2 勾选后：焦点在勾选框上也直接确认，发命令。
     assert_eq!(
         press(&mut app, KeyCode::Char('2')),
         Some(Action::SetMode(FULL))
     );
     assert!(dialog(&app).is_none());
-    assert_eq!(infos(&app), ["Mode switched to Full access."]);
+    assert!(infos(&app).is_empty());
 }
 
 #[test]
@@ -228,67 +233,67 @@ fn leaving_the_session_drops_the_dialog() {
 }
 
 fn render(confirm: &YoloConfirm, lang: Lang, width: usize, height: usize) -> Vec<String> {
-    let palette = Palette::new(ColorLevel::TrueColor, Some((0, 0, 0)));
+    let ink = crate::ui::test_support::palette().ink();
     let view = View {
-        palette: &palette,
+        ink: &ink,
         lang,
         width,
-        height: 24,
-        now_ms: 0,
     };
     lines(confirm, &view, height)
+        .lines
         .iter()
         .map(|line| plain(line).trim_end().to_owned())
         .collect()
 }
 
-/// 空行在哪些行的前面（行的开头几个字）。
-fn blanks_before(lines: &[String]) -> Vec<String> {
-    lines
-        .windows(2)
-        .filter(|pair| pair[0].is_empty())
-        .map(|pair| pair[1].trim_start().chars().take(5).collect())
-        .collect()
-}
-
+/// 照 Puffin 的确认框（tui-kit.md §4.2）：kit 的 `yolo_rows` 在板的顶上，块之间不空行，高度不改排版；槽是框的键。
 #[test]
-fn blank_lines_go_when_the_dialog_does_not_fit() {
+fn the_dialog_is_a_board_without_gaps() {
     let confirm = YoloConfirm::default();
-    // 英文 80 列：不算空行 13 行。
     let roomy = render(&confirm, Lang::En, 80, 40);
-    assert_eq!(roomy.len(), 17, "{roomy:#?}");
-    assert_eq!(blanks_before(&roomy), ["Files", "These", "[ ] I", "↑/↓ t"]);
-    // 80×24 的底部区域是 16 行：先去掉风险段前面的空行。
-    let tight = render(&confirm, Lang::En, 80, 16);
-    assert_eq!(blanks_before(&tight), ["Files", "[ ] I", "↑/↓ t"]);
-    let tighter = render(&confirm, Lang::En, 80, 14);
-    assert_eq!(blanks_before(&tighter), ["[ ] I"]);
-    let none = render(&confirm, Lang::En, 80, 10);
-    assert_eq!(none.len(), 13, "{none:#?}");
-    assert!(none[0].starts_with("────"));
-    assert_eq!(none[1], "  ⚠ Enable full access?");
-    // 中文 80 列：16 行放得下全部空行。
+    assert_eq!(render(&confirm, Lang::En, 80, 10), roomy);
+    assert_eq!(roomy[0], "   ⚠ Enable full access?");
+    assert!(
+        roomy.iter().all(|line| !line.trim().is_empty()),
+        "{roomy:#?}"
+    );
+    assert_eq!(roomy.last().map(String::as_str), Some("   2  Confirm"));
+    let ink = crate::ui::test_support::palette().ink();
+    let view = View {
+        ink: &ink,
+        lang: Lang::En,
+        width: 80,
+    };
+    let slot: String = lines(&confirm, &view, 40)
+        .slot
+        .iter()
+        .map(|span| &*span.text)
+        .collect();
+    // 槽是 Puffin 的 `yolo_slot`：焦点在取消上时 `1–2 answer  esc cancel`。
+    assert_eq!(slot.trim(), "1–2 answer  esc cancel", "{slot:?}");
     let zh = render(&confirm, Lang::Zh, 80, 16);
-    assert_eq!(zh.len(), 16, "{zh:#?}");
-    assert_eq!(blanks_before(&zh).len(), 4, "{zh:#?}");
+    assert_eq!(zh[0], "   ⚠ 要启用完全访问吗？");
 }
 
 #[test]
-fn item_descriptions_line_up_or_move_below() {
+fn item_descriptions_line_up() {
     let confirm = YoloConfirm::default();
-    let wide = render(&confirm, Lang::En, 80, 40);
+    let wide = render(&confirm, Lang::En, 100, 40);
     for (name, description) in words::items(Lang::En) {
         let row = wide.iter().find(|line| line.contains(name)).unwrap();
-        assert_eq!(row.find(description), Some(21), "{row}");
+        assert_eq!(row.find(description), Some(23), "{row}");
     }
-    // 说明那一列超过宽度一半：说明另起一行、缩进 4 列。
+    // 窄时说明以 `…` 截断（Puffin 的回答行不折行），整行不超宽。
     let narrow = render(&confirm, Lang::En, 36, 60);
-    let at = narrow
-        .iter()
-        .position(|line| line == "  Files and folders")
-        .unwrap();
-    assert_eq!(narrow[at + 1], "    Read, create, change, and delete");
-    assert!(narrow.iter().all(|line| line.width() <= 36), "{narrow:#?}");
+    assert!(
+        narrow.iter().all(|line| string_width(line) <= 36),
+        "{narrow:#?}"
+    );
+    assert!(
+        narrow
+            .iter()
+            .any(|line| line.starts_with("   Files and folders") && line.ends_with('…'))
+    );
 }
 
 #[test]
@@ -296,23 +301,90 @@ fn the_choices_follow_the_focus_and_the_checkbox() {
     let mut confirm = YoloConfirm::default();
     let ack = "I understand the risks and take responsibility for my data security.";
     let shown = render(&confirm, Lang::En, 90, 40);
-    assert!(shown.contains(&format!("    [ ] {ack}")), "{shown:#?}");
-    assert!(shown.contains(&"  ❯ 1. Cancel".to_owned()), "{shown:#?}");
-    assert!(shown.contains(&"    2. Confirm".to_owned()), "{shown:#?}");
+    assert!(shown.contains(&format!("   □ {ack}")), "{shown:#?}");
+    assert!(
+        shown.iter().any(|l| l.starts_with("   1  Cancel")),
+        "{shown:#?}"
+    );
+    assert!(
+        shown.iter().any(|l| l.starts_with("   2  Confirm")),
+        "{shown:#?}"
+    );
     confirm.checked = true;
     confirm.focus = Focus::Acknowledge;
     let shown = render(&confirm, Lang::Zh, 90, 40);
     assert!(
-        shown.contains(&"  ❯ [✔] 我已了解风险，并对自己的数据安全负责。".to_owned()),
+        shown.contains(&"   ■ 我已了解风险，并对自己的数据安全负责。".to_owned()),
         "{shown:#?}"
     );
-    assert!(shown.contains(&"    1. 取消".to_owned()), "{shown:#?}");
-    assert!(shown.contains(&"    2. 确认启用".to_owned()), "{shown:#?}");
+    assert!(
+        shown.iter().any(|l| l.starts_with("   1  取消")),
+        "{shown:#?}"
+    );
+    assert!(
+        shown.iter().any(|l| l.starts_with("   2  确认启用")),
+        "{shown:#?}"
+    );
     // 窄时勾选框的文字折行，续行与文字对齐。
     let narrow = render(&confirm, Lang::En, 40, 60);
     let at = narrow
         .iter()
-        .position(|line| line.starts_with("  ❯ [✔] I understand"))
+        .position(|line| line.starts_with("   ■ I understand"))
         .unwrap();
-    assert!(narrow[at + 1].starts_with("        "), "{narrow:#?}");
+    assert!(narrow[at + 1].starts_with("     "), "{narrow:#?}");
+}
+
+/// 权限请求里选了 Full access（Puffin `YoloThen::Answer`）：确认后允许这一次再切模式；取消什么都不发。
+#[test]
+fn confirming_for_an_ask_allows_it_once_then_switches() {
+    use rust_cli_kernel_api::orchestration::InteractionRequest;
+    use rust_cli_kernel_api::session_api::{KernelEvent, SequencedEvent};
+    let ask = rust_cli_kernel_api::ids::InteractionId::new("i1");
+    let mut app = app(PermissionMode::Default);
+    // 那个请求开着（离开了框就作废，`settle_yolo`）。
+    app.view.apply(
+        SequencedEvent {
+            seq: 1,
+            revision: 0,
+            event: KernelEvent::InteractionAsked {
+                interaction: ask.clone(),
+                request: InteractionRequest::Permission {
+                    machine: Default::default(),
+                    rule_seed: None,
+                    tool_use: rust_cli_kernel_api::ids::ToolUseId::new("tu1"),
+                    tool: "Bash".into(),
+                    input: serde_json::json!({"command": "ls"}),
+                    message: String::new(),
+                    suggestions: Vec::new(),
+                    asked_by: None,
+                },
+            },
+        },
+        0,
+    );
+    app.sync_interaction(Instant::now());
+    app.confirm_yolo_for(ask.clone(), "fullAccess".into());
+    assert_eq!(
+        dialog(&app).and_then(|d| d.then.clone()),
+        Some((ask.clone(), "fullAccess".to_owned()))
+    );
+    press(&mut app, KeyCode::Char('1'));
+    assert!(dialog(&app).is_none());
+    app.confirm_yolo_for(ask.clone(), "fullAccess".into());
+    press(&mut app, KeyCode::Up);
+    press(&mut app, KeyCode::Char(' '));
+    assert_eq!(
+        press(&mut app, KeyCode::Char('2')),
+        Some(Action::Many(vec![
+            Action::Resolve {
+                interaction: ask,
+                answer: rust_cli_kernel_api::orchestration::Answer::Permission(
+                    rust_cli_kernel_api::orchestration::PermissionAnswer::Allow {
+                        remember: Vec::new(),
+                    },
+                ),
+            },
+            Action::SetMode(FULL),
+        ]))
+    );
 }

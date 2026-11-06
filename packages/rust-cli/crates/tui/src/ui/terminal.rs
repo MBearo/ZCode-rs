@@ -2,9 +2,12 @@
 //! 终端的进入、恢复与临时交还（docs/specs/rust-tui.md §8.1）：常驻 alternate screen、raw mode、
 //! 鼠标、括号粘贴、焦点事件；能区分 shift+enter 的终端打开键盘增强。退出、出错、导致退出的 panic 都恢复原样；
 //! 被捕获的 panic 不碰终端（修复线 F109，docs/specs/rust-cli/tui.md §7.9）；外部编辑器运行期间把终端临时交还。
-use std::io::{Stdout, Write, stdout};
+//!
+//! 工作线 TK（docs/specs/rust-cli/tui-kit.md §3.3）：只换写的一半。帧由 kit 的渲染器生成，[`Terminal::write`] 写到 stdout；
+//! 模式的进出、尺寸与恢复用 crossterm。
+use std::io::{Write, stdout};
 use std::sync::Once;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -18,44 +21,44 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
     supports_keyboard_enhancement,
 };
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
+use rust_cli_tui_kit::render::ansi;
 
-use super::palette;
-
-pub type Tui = Terminal<CrosstermBackend<Stdout>>;
+use super::probe;
 
 /// 背景探测最多等这么久（不回应 OSC 11 的终端也会回应 DA1，通常远早于此）。
 const PROBE_TIMEOUT: Duration = Duration::from_millis(250);
 
-/// 有没有 [`Guard`]：0 没有，1 有，2 有且推过键盘增强。panic hook 只读它（tui.md §7.9）。
+/// 有没有 [`Terminal`]：0 没有，1 有，2 有且推过键盘增强。panic hook 只读它（tui.md §7.9）。
 static ACTIVE: AtomicU8 = AtomicU8::new(0);
 /// [`ACTIVE`] 的“有且推过键盘增强”。
 const ACTIVE_ENHANCED: u8 = 2;
 
+/// 最近一帧涂了地（主题改了终端的默认色，OSC 10/11）：恢复时请终端回到它的缺省色。正常退出时渲染器的 `exit` 已经还过；
+/// 这一位给异常退出（panic 展开到 [`Terminal`] 的释放）。
+static PAINTED: AtomicBool = AtomicBool::new(false);
+
+/// runner 每帧告诉这里有没有涂地。
+pub fn painted(on: bool) {
+    PAINTED.store(on, Ordering::Release);
+}
+
 /// 持有期间终端处于 TUI 状态；释放时恢复。
-pub struct Guard {
+pub struct Terminal {
     enhanced: bool,
 }
 
-/// 进入 TUI，返回终端、守卫与探测到的前景色与背景色。
-pub fn enter() -> Result<(Tui, Guard, palette::Probed)> {
+/// 进入 TUI，返回终端与探测的结论（前景色、背景色，支不支持程序状态）。
+pub fn enter() -> Result<(Terminal, probe::Probed)> {
     enable_raw_mode()?;
     // 在 crossterm 开始读输入之前探测，回复不会被当作按键。
-    let background = palette::probe_colors(PROBE_TIMEOUT);
+    let probed = probe::probe_colors(PROBE_TIMEOUT);
     let enhanced = supports_keyboard_enhancement().unwrap_or(false);
     // 缺陷修复（F65 的 T9）：以前设模式失败时直接返回，终端停在 raw mode 与备用屏（旧版 Windows 控制台不支持 VT 时
     // `EnableBracketedPaste` 会失败）。现在先恢复再返回错误。
-    let terminal = undo_on_error(
-        || {
-            set_modes(enhanced)?;
-            Ok(Terminal::new(CrosstermBackend::new(stdout()))?)
-        },
-        || restore(enhanced),
-    )?;
+    undo_on_error(|| set_modes(enhanced), || restore(enhanced))?;
     install_panic_log();
     ACTIVE.store(1 + u8::from(enhanced), Ordering::Release);
-    Ok((terminal, Guard { enhanced }, background))
+    Ok((Terminal { enhanced }, probed))
 }
 
 /// 跑 `step`；失败时先跑 `undo` 再返回错误。
@@ -87,6 +90,11 @@ fn set_modes(enhanced: bool) -> Result<()> {
 
 fn restore(enhanced: bool) {
     let mut out = stdout();
+    // 渲染器关过自动换行、可能涂过地（正常退出时它的 `exit` 已经还过，重复一次无害）。
+    let _ = out.write_all(ansi::WRAP_ON.as_bytes());
+    if PAINTED.swap(false, Ordering::AcqRel) {
+        let _ = out.write_all(ansi::RESET_COLORS.as_bytes());
+    }
     if enhanced {
         let _ = execute!(out, PopKeyboardEnhancementFlags);
     }
@@ -102,7 +110,7 @@ fn restore(enhanced: bool) {
 
 /// 修复线 F109（tui.md §7.9）：以前 hook 对任何 panic 都先恢复终端再写 stderr，可工具任务的 panic 被 base 捕获、
 /// 进程继续，TUI 就在普通模式的终端上接着画（屏幕错乱、按键要回车）。现在 hook 只记日志，TUI 运行期间把文字记在
-/// 本线程，不碰终端、不写 stderr；导致退出的 panic 由 `Guard::drop` 恢复终端后写出。hook 里不拿会阻塞的锁。
+/// 本线程，不碰终端、不写 stderr；导致退出的 panic 由 `Terminal::drop` 恢复终端后写出。hook 里不拿会阻塞的锁。
 /// 只装一次（信任对话框、更新屏、会话界面都调 `enter`）。
 fn install_panic_log() {
     static INSTALL: Once = Once::new();
@@ -122,7 +130,7 @@ fn install_panic_log() {
                 std::backtrace::BacktraceStatus::Captured => format!("stack backtrace:\n{backtrace}\n"),
                 _ => String::new(),
             };
-            // 本线程已经记着一条：它还在展开，这次是展开中又 panic，std 随后 abort、等不到 `Guard`，照以前恢复再写。
+            // 本线程已经记着一条：它还在展开，这次是展开中又 panic，std 随后 abort、等不到 `Terminal`，照以前恢复再写。
             if let Some(first) = rust_cli_base::note_panic(format!("panicked at {at}:\n{message}\n{trace}")) {
                 ACTIVE.store(0, Ordering::Release);
                 restore(active == ACTIVE_ENHANCED);
@@ -133,7 +141,19 @@ fn install_panic_log() {
     });
 }
 
-impl Guard {
+impl Terminal {
+    /// 终端的（列，行）。
+    pub fn size(&self) -> std::io::Result<(u16, u16)> {
+        crossterm::terminal::size()
+    }
+
+    /// 写出渲染器的字节（一帧一次写）并 flush。
+    pub fn write(&self, bytes: &str) -> std::io::Result<()> {
+        let mut out = stdout().lock();
+        out.write_all(bytes.as_bytes())?;
+        out.flush()
+    }
+
     /// 终端分辨得出增强按键吗（进入时键盘增强的查询结论，修复线 F104，tui-input.md §11.1.1）：为真时推过
     /// `DISAMBIGUATE_ESCAPE_CODES`，ctrl+enter 才与回车分得开。
     pub fn enhanced(&self) -> bool {
@@ -152,7 +172,7 @@ impl Guard {
     }
 }
 
-impl Drop for Guard {
+impl Drop for Terminal {
     fn drop(&mut self) {
         ACTIVE.store(0, Ordering::Release);
         restore(self.enhanced);

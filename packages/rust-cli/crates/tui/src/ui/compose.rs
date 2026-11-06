@@ -7,13 +7,12 @@ use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use rust_cli_kernel_api::permission::PermissionMode;
+use rust_cli_kernel_api::session_api::Delivery;
 
-use super::app::{Action, App, Overlay};
+use super::app::{Action, App};
 use super::keyboard;
 use super::notice::{self, Armed};
 
-/// 删掉这么多字符以上时提示 ctrl+y 可以粘回。
-const KILL_HINT_CHARS: usize = 3;
 /// 连按 ↑ 这么多次后提示 ctrl+r 搜索历史。
 const HISTORY_HINT_PRESSES: usize = 2;
 
@@ -39,8 +38,8 @@ impl App {
         let alt = keyboard::alt(&key);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let width = self.composer_width;
-        // 翻页：每次可视高度减 1 行。
-        let page = self.viewport.saturating_sub(1).max(1) as isize;
+        // 翻页：每次跟随时的正文高度减 1 行（Puffin）。
+        let page = self.page_rows();
         // 任何键都让等待第二次按下的提示失效（连按的键自己会重新判断）。
         let double =
             key.code == KeyCode::Esc || (ctrl && matches!(key.code, KeyCode::Char('c' | 'd')));
@@ -74,7 +73,6 @@ impl App {
             self.composer.before_typing(c, alt);
         }
         let area = &mut self.composer.area;
-        let mut killed = 0;
         let action = match key.code {
             // 行尾的 `\` 加 enter：换行。
             KeyCode::Enter if area.text()[..area.cursor()].ends_with('\\') => {
@@ -101,6 +99,8 @@ impl App {
             KeyCode::Enter => return self.submit(),
             KeyCode::Esc => return self.escape(now),
             KeyCode::Char('c') if ctrl => return self.ctrl_c(now),
+            // ^Q 退出（Puffin：任何时候、不用按两次；`?` 按键表里有它）。
+            KeyCode::Char('q') if ctrl => return Some(Action::Quit),
             KeyCode::Char('d') if ctrl && area.is_empty() => {
                 return self.second_press(Armed::ExitD, now).then_some(Action::Quit);
             }
@@ -112,9 +112,12 @@ impl App {
                 self.open_detail();
                 return None;
             }
-            // 展开或收起任务清单（tui-display.md §2.2）。
+            // 任务卡（tui-tasks.md §3.1）：草稿为空、没有请求时打开，同 Puffin 工作流卡的 ^T。以前 ctrl+t 收起与展开任务
+            // 清单，后来打开子代理的层（用户决定 2026-10-31：子代理、后台命令与待办合成一张卡）。
             KeyCode::Char('t') if ctrl => {
-                self.snapshots.tasks.expanded = !self.snapshots.tasks.expanded;
+                if self.tasks_key_works() {
+                    self.open_tasks();
+                }
                 return None;
             }
             KeyCode::Char('r') if ctrl => {
@@ -143,15 +146,15 @@ impl App {
                 None
             }
             KeyCode::Char('k') if ctrl => {
-                killed = area.kill_to_end();
+                area.kill_to_end();
                 None
             }
             KeyCode::Char('u') if ctrl => {
-                killed = area.kill_to_start();
+                area.kill_to_start();
                 None
             }
             KeyCode::Char('w') if ctrl => {
-                killed = area.kill_word();
+                area.kill_word();
                 None
             }
             KeyCode::Char('y') if ctrl => {
@@ -159,7 +162,7 @@ impl App {
                 None
             }
             KeyCode::Char('d') if alt => {
-                killed = area.kill_word_forward();
+                area.kill_word_forward();
                 None
             }
             KeyCode::Char('y') if alt => {
@@ -182,21 +185,20 @@ impl App {
                 area.word_right();
                 None
             }
-            KeyCode::Home if ctrl => {
-                let top = self.transcript_lines;
-                return self.scroll_by(top as isize);
-            }
-            KeyCode::End if ctrl => {
+            KeyCode::Home if ctrl => return self.scroll_home(),
+            // 回到末尾：屏幕上写 ^N（tui-kit.md §4.0）；ctrl+End 是不写出来的旧键。挑选回退的点时 ctrl+n 是下一个点，
+            // 在 `picking_key` 里先处理了，到这里的只有 ctrl+End。
+            KeyCode::Char('n') | KeyCode::End if ctrl => {
                 self.port.scroll = 0;
                 self.port.new_activity = false;
+                // 挑选回退的点时 ^End 回到切线（Puffin「回退（/rewind）」）。
+                if let Some(picking) = self.picking.as_mut() {
+                    picking.at_cut = true;
+                }
                 None
             }
             // 循环到完全访问时先弹确认框（tui.md §7.8，工作线 F87）。
             KeyCode::BackTab => return self.switch_mode(next_mode(self.view.mode()), false),
-            KeyCode::Char('?') if area.is_empty() => {
-                self.overlay = Some(Overlay::Shortcuts);
-                return None;
-            }
             KeyCode::Char(c) if text => {
                 area.insert(c);
                 None
@@ -209,8 +211,8 @@ impl App {
                 area.delete();
                 None
             }
-            // 输入框为空时 ← 打开项目页（修复线 F29，tui-panels.md §2；原来是 `← for agents` 的会话面板）。
-            KeyCode::Left if area.is_empty() => return self.open_projects(),
+            // 输入框为空时 ← 打开驾驶舱（tui-cockpit.md §3.1；以前是所有文件夹的会话列表）。
+            KeyCode::Left if area.is_empty() => return self.open_cockpit(),
             KeyCode::Left => {
                 area.left();
                 None
@@ -234,21 +236,18 @@ impl App {
                 if at_last && self.composer.history_next() {
                     return None;
                 }
-                // 输入框为空：先选中后台任务的 pill，没有时进入子代理列表
-                // （tui-panels.md §1.3、§3.1）。
-                if self.composer.is_empty() && (self.focus_pill() || self.focus_agents(now)) {
+                // 输入框为空、有东西可看：打开任务卡（兼容的旧键，tui-tasks.md §3.1）。
+                if self.composer.is_empty() && self.has_tasks() {
+                    self.open_tasks();
                     return None;
                 }
                 self.composer.area.vertical(width, true);
                 None
             }
-            KeyCode::PageUp => return self.scroll_by(page),
-            KeyCode::PageDown => return self.scroll_by(-page),
+            KeyCode::PageUp => return self.scroll_shown(page),
+            KeyCode::PageDown => return self.scroll_shown(-page),
             _ => None,
         };
-        if killed >= KILL_HINT_CHARS {
-            self.notify_keys(notice::yank_hint(self.lang), notice::HINT_FOR);
-        }
         // 删掉了 `[Image #N]` 的图片一起去掉；撤销时找回（tui-input.md §3.1，F26）。
         let undo = ctrl && matches!(key.code, KeyCode::Char('_' | '7'));
         self.composer.sync_images(undo);
@@ -271,10 +270,16 @@ impl App {
         None
     }
 
+    /// 中断这个回合：从现在起回答的光标不再画、不再落定（Puffin `stop_pending`，§4.2「Stopped.」），直到回合结束。
+    pub(crate) fn interrupt(&mut self) -> Action {
+        self.stop_pending = self.view.running_turn();
+        Action::Interrupt
+    }
+
     /// ctrl+c：运行中中断 → 输入框有内容时清空（记入历史）→ 空闲且为空时连按两次退出。
     fn ctrl_c(&mut self, now: Instant) -> Option<Action> {
         if self.running() {
-            return Some(Action::Interrupt);
+            return Some(self.interrupt());
         }
         if !self.composer.is_empty() {
             self.composer.discard();
@@ -283,7 +288,8 @@ impl App {
         self.second_press(Armed::ExitC, now).then_some(Action::Quit)
     }
 
-    /// esc：上滚时回到底部 → 运行中中断 → 输入框有内容时连按两次清空。
+    /// esc：上滚时回到底部 → 运行中中断 → 输入框为空时连按两次挑选回退的点；有草稿时什么也不做（Puffin 的 esc，
+    /// docs/puffin-tui.md「按键」：草稿不会被换掉）。以前有草稿时连按两次清空。
     fn escape(&mut self, now: Instant) -> Option<Action> {
         if self.port.scroll > 0 {
             self.port.scroll = 0;
@@ -291,17 +297,16 @@ impl App {
             return None;
         }
         if self.running() {
-            return Some(Action::Interrupt);
+            return Some(self.interrupt());
         }
-        if !self.composer.is_empty() && self.second_press(Armed::Clear, now) {
-            self.composer.discard();
-        }
-        // 输入为空、空闲、有消息时连按两次 esc 打开 rewind 选择器。
+        // 输入为空、空闲、有消息时：第一次 esc 槽里说 `esc rewind`，第二次在最后一条消息上开始挑选回退的点（Puffin
+        // 「回退（/rewind）」的「进入」；点到了再挑，`App::open_rewind`）。以前第二次打开回退的列表。
         if self.composer.is_empty()
             && self.session.is_some()
             && !self.view.rows().is_empty()
             && self.second_press(Armed::Edit, now)
         {
+            self.picking_wanted = true;
             return Some(Action::OpenRewind);
         }
         None
@@ -313,6 +318,8 @@ impl App {
         &mut self,
         commands: Vec<rust_cli_kernel_api::user_command::UserCommand>,
     ) -> Option<Action> {
+        // `$` 面板的目录取自同一份清单（与 Puffin host 的 `skills_of` 同一条规则，tui-input.md §1.4）。
+        self.composer.mentions.catalog = Some(super::skill_mention::of_commands(&commands));
         self.composer.skills = commands;
         self.composer.skills_loaded = true;
         self.composer.refresh_popup();
@@ -325,10 +332,28 @@ impl App {
 
     /// 发送输入框的内容：斜杠命令在本地执行；其余按投递方式发给内核（enter 与 ctrl+x enter 相同，tui.md §5.1）。
     pub(super) fn submit(&mut self) -> Option<Action> {
-        // R5-9：创建会话期间也发送（runner 先留在 `held` 里，会话打开后按顺序发出），不再忽略。
+        self.submit_in(false)
+    }
+
+    /// 发送草稿；`after` 为真时（⇥）回合进行中排到这个回合结束之后（Puffin 的第二条车道「after this turn」），
+    /// 其他时候同 ⏎。
+    pub(super) fn submit_in(&mut self, after: bool) -> Option<Action> {
+        let delivery = if after {
+            Delivery::Queue
+        } else {
+            self.delivery()
+        };
+        // R5-9：创建会话期间也发送（runner 先留在 `held` 里，会话打开后按顺序发出），不再忽略。草稿是空的、最新的失败块
+        // 说 `⏎ tries again.` 时，⏎ 照原样再发失败回合的消息（Puffin `try_again`，§4.2「再试一次」）。
         if self.composer.is_empty() {
-            return None;
+            return self
+                .try_again()
+                .map(|text| Action::Submit { text, delivery });
         }
+        // 输入框上方的一句到下一次发送为止（Puffin 发送时 `notice = None`，tui-kit.md §4.0「本地命令的结果」）：命令自己说的
+        // 话在这之后再写上。
+        self.said = super::app::Said::default();
+        self.goal_sent();
         // bash 模式：不经斜杠命令，整行交给内核执行（tui-input.md §2）。
         if self.composer.mode == super::composer::InputMode::Bash {
             let command = self.composer.submit();
@@ -336,10 +361,12 @@ impl App {
                 return None;
             }
             self.port.scroll = 0;
-            return Some(Action::Bash {
-                command,
-                delivery: self.delivery(),
-            });
+            // 空闲时内核立即运行它：块在 ⏎ 时就画在末尾（Puffin `run_shell`）。回合在跑时内核把它排到回合之后（D9），
+            // 照旧在板上的栈里。
+            if !self.running() {
+                self.view.hold_shell(&command);
+            }
+            return Some(Action::Bash { command, delivery });
         }
         let text = self.composer.area.text().trim().to_owned();
         // 整行是 exit、quit、:q 等时退出（tui-display.md §4.1）。
@@ -367,7 +394,6 @@ impl App {
                 return None;
             }
         }
-        let delivery = self.delivery();
         // 粘贴的图片：占位文字还在的那些排在文字块之后（tui-input.md §3.1）。
         let images = self.composer.image_blocks(self.composer.area.text());
         let text = self.composer.submit();
@@ -388,6 +414,26 @@ impl App {
             return Some(Action::SubmitContent { content, delivery });
         }
         Some(Action::Submit { text, delivery })
+    }
+}
+
+impl App {
+    /// ⏎ 会再发的失败回合的消息（Puffin `try_again`）：最新的块提供它（你的消息之后的失败块，说 `⏎ tries again.`），回合
+    /// 不在跑，没有排着的消息。
+    fn try_again(&self) -> Option<String> {
+        if self.running() || !self.view.outgoing().is_empty() {
+            return None;
+        }
+        let last = self.view.rows().iter().rev().find(|row| {
+            matches!(
+                row.body,
+                crate::view::Body::Failure(_) | crate::view::Body::User { .. }
+            )
+        })?;
+        let crate::view::Body::Failure(f) = &last.body else {
+            return None;
+        };
+        (super::cells::failure::offers_again(f) && !f.resend.is_empty()).then(|| f.resend.clone())
     }
 }
 

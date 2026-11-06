@@ -1,13 +1,19 @@
 //! 入口注入的服务（依赖注入，docs/specs/rust-cli/tui.md §7.1、§7.2）：TUI 不读写文件、不起进程，界面语言的
-//! 持久化、输入历史的追加与账号的登录、退出由入口经 platform 实现；测试用替身。TUI 不依赖 platform（F133，审查 E7）。
+//! 持久化、输入历史的追加与账号的登录、退出由入口经 platform 实现；测试用替身。TUI 不依赖 platform 与 runtime（F133，
+//! 审查 E7）。端口的 trait 与类型在 `rust-cli-tui-ports`（tui-kit.md §2.2），这里再导出；本界面自己的剪贴板、历史与
+//! 自动压缩的端口与 `Services` 留在这里。
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
-pub use rust_cli_base::account::Family;
-pub use rust_cli_base::secret::RedactedString;
-pub use rust_cli_base::ui_prefs::{UiLocale, UiTheme};
-use tokio::sync::oneshot;
-pub use tokio_util::sync::CancellationToken;
+use rust_cli_tui_kit::app::widgets::usage::{
+    PlanDetail, PlanQuota, UsageModel, UsagePlan, UsageRange,
+};
+pub use rust_cli_tui_ports::services::{
+    Account, Authorize, CancellationToken, CockpitNote, CockpitPort, Configured, CopyRoute, Editor,
+    Family, FamilyModel, FamilyStatus, ImageBytes, LocaleStore, LoginFailure, MemoryFile,
+    PlanConnection, Preferences, RedactedString, StoreFile, Stores, TeamStatus, UiLocale,
+    WorkspaceTrust,
+};
 
 /// 输入历史的追加（tui.md「输入历史」）：发送时调用，不等待写完；入口唯一的写者按调用顺序追加到历史文件。`at_ms` 是
 /// 发送时刻（毫秒）。
@@ -15,102 +21,11 @@ pub trait HistoryRecorder: Send + Sync {
     fn record(&self, text: &str, at_ms: u64);
 }
 
-/// 界面语言的持久化：写回 Node 共用的用户级配置文件 `ui.locale`。成功时给出文件路径，失败时给出原因。
-pub trait LocaleStore: Send + Sync {
-    fn save(&self, locale: UiLocale) -> BoxFuture<'static, Result<String, String>>;
-}
-
-/// 界面偏好的持久化（docs/specs/rust-cli/tui-manage.md §2）：主题写 Node 配置的 `ui.theme`，`/effort` 把当前
-/// 模型与档位写成新会话的缺省（个人配置的 `defaultModelSelection`）。成功时给出文件路径，失败时给出原因。
-pub trait Preferences: Send + Sync {
-    fn save_theme(&self, theme: UiTheme) -> BoxFuture<'static, Result<String, String>>;
-    fn save_default_model(
-        &self,
-        selection: rust_cli_kernel_api::model::ModelSelection,
-    ) -> BoxFuture<'static, Result<String, String>>;
-
-    /// `/mcp enable/disable`（tui-manage.md §6.1）：把 `enabled` 写进定义这个服务器的配置文件。`Ok(None)`：它不在
-    /// 配置文件里（`--mcp-config`、插件），只改本次运行。
-    fn save_mcp_enabled(
-        &self,
-        _server: String,
-        _enabled: bool,
-    ) -> BoxFuture<'static, Result<Option<String>, String>> {
-        Box::pin(async { Ok(None) })
-    }
-}
-
-/// 浏览器授权的地址（`begin_login` 之后、轮询之前交给界面）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Authorize {
-    pub url: String,
-    /// 打开浏览器失败的原因（Node 在结果末尾提示 `Browser open failed`）。
-    pub browser_failed: Option<String>,
-}
-
-/// 登录或手工 key 配置成功。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Configured {
-    pub family: Family,
-    /// 浏览器登录的用户名（`name`、`email`、`user_id` 中第一个非空的）；手工 key 没有。
-    pub user: Option<String>,
-    /// `<provider>/<model>`：登录写进个人配置的默认模型。
-    pub model: String,
-    /// 凭据文件（浏览器登录时显示）。
-    pub credentials: Option<String>,
-    /// 个人配置文件。
-    pub config: String,
-    pub browser_failed: Option<String>,
-    /// 经浏览器授权（否则是手工 key）。
-    pub oauth: bool,
-}
-
-/// 登录失败。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LoginFailure {
-    /// 用户取消（esc），没有写任何文件。
-    Cancelled,
-    /// 其他失败：原因原样显示。
-    Failed(String),
-}
-
-/// 账号的登录与退出（platform.md §5.6）。取消是一条消息：`cancel` 被取消后，实现在下一次检查时停下并返回
-/// [`LoginFailure::Cancelled`]，调用方不丢弃 future。
-pub trait Account: Send + Sync {
-    /// 浏览器授权：拿到地址后经 `authorize` 交给界面（打开浏览器由实现负责），再轮询到结果。
-    fn login(
-        &self,
-        family: Family,
-        authorize: oneshot::Sender<Authorize>,
-        cancel: CancellationToken,
-    ) -> BoxFuture<'static, Result<Configured, LoginFailure>>;
-
-    /// 手工 key（platform 不验证 key）。
-    fn configure_api_key(
-        &self,
-        family: Family,
-        key: RedactedString,
-    ) -> BoxFuture<'static, Result<Configured, String>>;
-
-    /// 退出 Coding Plan 账号，返回凭据文件的路径。
-    fn logout(&self) -> BoxFuture<'static, Result<String, String>>;
-}
-
-/// 读到的图片：原始字节（TUI 判断格式并编码，tui-input.md §3.1）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ImageBytes {
-    pub bytes: Vec<u8>,
-}
-
-/// 复制到了哪里（docs/specs/rust-cli/tui-select.md §3.2）：决定复制后的提示文字。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CopyRoute {
-    /// 系统剪贴板命令（pbcopy、wl-copy / xclip / xsel、PowerShell）。
-    Native,
-    /// tmux 的缓冲区（SSH 里或本机没有剪贴板命令时）。
-    TmuxBuffer,
-    /// 只有终端的 OSC 52（无法确认）。
-    Osc52,
+/// 配置的 `compact.autoThresholdTokens`（compact.md §2.3）的那一份：进程里一份，内核每次判定现读，设置写回后换掉它。
+/// 入口把内核的那一份包成这个端口（TUI 不依赖 runtime，F133）。
+pub trait AutoCompactCell: Send + Sync {
+    fn get(&self) -> Option<u64>;
+    fn set(&self, at: Option<u64>);
 }
 
 /// 剪贴板与拖进来的图片文件（tui-input.md §3.1）：读写系统剪贴板要起进程（macOS `osascript` / `pbcopy`、Linux
@@ -128,40 +43,20 @@ pub trait Clipboard: Send + Sync {
     }
 }
 
-/// 外部编辑器（tui-input.md §4）：写读临时文件、起编辑器进程都由入口做。调用时 TUI 已交出终端，编辑器继承
-/// 终端；返回后 TUI 收回终端。失败的原因原样显示（`<名字> exited with code N`）。
-pub trait Editor: Send + Sync {
-    /// 编辑一段文字，返回编辑后的全文。
-    fn edit(&self, text: String) -> BoxFuture<'static, Result<String, String>>;
-
-    /// 打开一个文件（不存在时先建空文件，`/memory`），等编辑器结束。
-    fn open(&self, path: String) -> BoxFuture<'static, Result<(), String>>;
-
-    /// 编辑器来自哪个环境变量与它的值（`/memory` 的提示）：`("$VISUAL", "code")`；用缺省编辑器时 None。
-    fn source(&self) -> Option<(String, String)>;
-}
-
-/// `/memory` 列出的一个规则或记忆文件（tui-input.md §4.2）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MemoryFile {
-    /// 列表里的名字（原文，例如 `User memory`）。
-    pub label: String,
-    /// 显示用的路径（家目录写成 `~`）。
-    pub display: String,
-    /// 交给编辑器的路径。
-    pub path: String,
-}
-
-/// 工作区信任（修复线 F29，docs/specs/rust-cli/workspace-trust.md §2.8）：切到别的项目之前判定那个目录。判定与写记录在
-/// 入口（与启动时同一段代码），界面只画对话框。
-pub trait WorkspaceTrust: Send + Sync {
-    /// 已信任（直接或经父目录）时为 None；否则是要问的内容（不带项目授权的后备询问）。
-    fn check(
+/// `/usage` 的套餐用量（Puffin `SettingsHost::usage` 的三个问题，platform.md §11）：入口经 platform 回答（cli 的
+/// `tui_usage.rs`：一分钟内的结果直接给出，同一个问题同时只有一个请求）。答的是 kit 的类型。
+pub trait PlanUsage: Send + Sync {
+    /// 当前模型的 provider 的计划，与当前模型。
+    fn plans(
         &self,
-        workspace: rust_cli_kernel_api::env::WorkspaceRef,
-    ) -> BoxFuture<'static, Option<crate::trust::TrustPrompt>>;
-    /// 用户同意：写项目键的记录（home 只本进程有效）；写失败只记日志。
-    fn accept(&self, workspace: rust_cli_kernel_api::env::WorkspaceRef) -> BoxFuture<'static, ()>;
+        provider: String,
+    ) -> BoxFuture<'static, Result<(UsageModel, Vec<UsagePlan>), String>>;
+    fn quota(&self, plan: String) -> BoxFuture<'static, Result<PlanQuota, String>>;
+    fn detail(
+        &self,
+        plan: String,
+        range: UsageRange,
+    ) -> BoxFuture<'static, Result<PlanDetail, String>>;
 }
 
 /// 入口给 TUI 的配置值：启动时读一次，之后不变（架构整理 U13：以前与服务混放在 `Services` 里）。
@@ -171,9 +66,7 @@ pub struct UiConfig {
     pub locale: Option<UiLocale>,
     /// `/memory` 的文件（入口按规则文件的位置给出）。
     pub memory_files: Vec<MemoryFile>,
-    /// 配置文件的 `ui.theme`；没有时按终端背景（tui-manage.md §2.1）。
-    pub theme: Option<UiTheme>,
-    /// npm 上有更新的版本时，会话头下面插的提示（docs/specs/rust-cli/update.md §7，F48）。
+    /// npm 上有更新的版本：欢迎块的版本行尾说 `X is out · zcode update`（docs/specs/rust-cli/update.md §7，F48）。
     pub update: Option<crate::update::UpdateInfo>,
     /// 提问框的空闲超时（配置的 `askUserQuestionTimeout` 与 `ZCODE_AFK_*`，tools-more.md §1.1，工作线 F72）；
     /// 没有时不计时。
@@ -181,12 +74,39 @@ pub struct UiConfig {
     /// 绑定到远端机器的 MCP 服务器（服务器名，机器名；R5，remote-exec.md §22.8）：MCP 工具行标出机器。入口从同一份
     /// MCP 设置给出。
     pub mcp_machines: Vec<(String, String)>,
+    /// 配置文件来源的权限规则来自的文件（来源、种类、绝对路径）：设置的 Permissions 段在编辑器里打开它们。
+    pub rule_files: Vec<(
+        rust_cli_kernel_api::permission::RuleSource,
+        rust_cli_kernel_api::permission::RuleBehavior,
+        String,
+    )>,
+    /// `--add-dir` 加的文件夹（设置的 Permissions 段列出）。
+    pub add_dirs: Vec<String>,
+    /// `!` 命令跑在哪个 shell 里（`$SHELL` 的文件名，Puffin `shell_name`）；没有时 `sh`。第一次进 shell 模式时输入框上方说它。
+    pub shell_name: Option<String>,
+    /// 在远程 shell 里（入口按 Puffin 的 `place`：有 SSH，或 Linux 上没有图形界面）：门道的登录把网址整段折出，不等浏览器
+    /// （Puffin `place.remote`，tui-kit.md §4.2「登录」）。
+    pub remote_shell: bool,
 }
+
+/// [`Services::file_len`]。
+pub type FileLen = Arc<dyn Fn(String) -> BoxFuture<'static, Option<u64>> + Send + Sync>;
+
+/// [`Services::peek_file`]。
+pub type PeekFile = Arc<
+    dyn Fn(
+            rust_cli_kernel_api::env::WorkspaceRef,
+            String,
+        ) -> BoxFuture<'static, rust_cli_tui_kit::app::widgets::at_panel::data::PathPeek>
+        + Send
+        + Sync,
+>;
 
 /// 入口注入的服务。
 ///
 /// 架构整理 U13：以前 7 个服务都是 `Option`，入口除了远端机器都给了，`None` 的分支（“不可用”的提示、不写配置、不做
-/// 信任检查）只有测试走到；现在只有远端机器可以没有。
+/// 信任检查）只有测试走到；现在这 7 个里只有远端机器可以没有。本界面另有的端口（小文件、驾驶舱、套餐用量、文件的
+/// 大小与预览、自动压缩）没有时各自退回本次运行有效或不显示，照旧是 `Option`。
 #[derive(Clone)]
 pub struct Services {
     /// `/locale <值>` 的写回。
@@ -197,10 +117,26 @@ pub struct Services {
     pub clipboard: Arc<dyn Clipboard>,
     /// ctrl+g 与 `/memory`（tui-input.md §4）。
     pub editor: Arc<dyn Editor>,
-    /// `/theme`、`/effort`、`/model` 的缺省与 `/mcp enable/disable` 的写回。
+    /// `/effort`、`/model` 的缺省、`/mcp enable/disable` 与自动压缩阈值的写回（主题不经它：`/theme` 写 `theme.json`，
+    /// tui-kit.md §3.4）。
     pub preferences: Arc<dyn Preferences>,
     /// 切到别的项目之前的信任检查（workspace-trust.md §2.8）。
     pub trust: Arc<dyn WorkspaceTrust>,
     /// 远端机器（remote-exec.md §21.2）：`/machines` 与机器状态行；没有时 `/machines` 提示不可用、状态行不出现。
     pub machines: Option<Arc<dyn crate::machines::Machines>>,
+    /// Puffin 的小文件（`theme.json`，与 Puffin 同一个文件，tui-kit.md §2.3、§3.4）：启动时读主题的选择，`/theme` 选定时
+    /// 写回；没有时用缺省（Terminal），`/theme` 只对本次运行有效。
+    pub stores: Option<Arc<dyn Stores>>,
+    /// 驾驶舱的笔记、监听与 tmux（tui-cockpit.md §1）；没有时页上没有“新的”，也不能去别的窗格。
+    pub cockpit: Option<Arc<dyn CockpitPort>>,
+    /// 配置的 `compact.autoThresholdTokens`（compact.md §2.3）与把它钉住的文件（项目或环境写了它时，设置页写了也不生效）；
+    /// 设置的 General 段读写它。没有时那一行不出现。
+    pub compact_at: Option<(Arc<dyn AutoCompactCell>, Option<String>)>,
+    /// 一个文件的字节数，不存在时 `None`（设置的 Memory 段写规则文件的大小；界面不做文件 IO）。没有时都当作不存在。
+    pub file_len: Option<FileLen>,
+    /// `/usage` 的套餐用量；没有时卡说读不到（同 cli host 的「本版不可用」）。
+    pub plan_usage: Option<Arc<dyn PlanUsage>>,
+    /// `@` 面板的预览读一个文件（工作区，相对它的路径；Puffin host 的 `peek`）：行数、大小与前 4 行；入口只读本机工作区里的，
+    /// 远端的回答 `Missing`。没有时预览只有名字与路径。
+    pub peek_file: Option<PeekFile>,
 }

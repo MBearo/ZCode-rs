@@ -85,6 +85,13 @@ pub enum Command {
     Rename {
         title: String,
     },
+    /// 同 [`Command::Rename`]，另带这次命令的记录（TUI 的 `/rename <名字>`，docs/specs/rust-cli/titles.md §4）：空闲时记录与
+    /// 改名同一批提交，改名被拒绝时记录也不在；回合或压缩在跑时改名马上提交，记录在改名成功之后留到这次工作收尾
+    /// （同 [`Command::RecordLocalCommand`]）。
+    RenameRecorded {
+        title: String,
+        record: crate::user_command::LocalCommandRecord,
+    },
     /// 不带参数的 `/rename`（docs/specs/rust-cli/titles.md §8）：会话 actor
     /// 用模型从对话起名，再按 `Rename` 写入。回执等名字：[`CommandResult::Renamed`]，
     /// 起不出名字时 `Rejected.reason` 是给用户看的文本。
@@ -147,6 +154,10 @@ pub enum Command {
     /// 对话。没有要写的（没有补、已经写过、被回退掉）时什么都不做，回执是 `Accepted`；提交失败时 `Rejected`，它留到下一批
     /// 带消息的提交。
     StoreResumeSentinel,
+    /// 取回还在排队的输入（query.md §4.4）：`command` 是提交它的 [`CommandEnvelope::id`]。在队列里时出队（`QueueChanged`）、`Accepted`；已经发出（开了回合或并入了回合）时 `Rejected`，`reason` 给用户看。
+    Dequeue {
+        command: CommandId,
+    },
 }
 
 /// 带 ID 的命令；同一个 ID 重复提交时返回 [`Ack::Duplicate`]，不重复执行。
@@ -465,6 +476,16 @@ pub trait Kernel: Send + Sync {
         })
     }
 
+    /// 写现在的会话的现场（tui-cockpit.md §4）；跨会话关闭时什么也不做。
+    async fn set_presence(&self, _session: &SessionId, _presence: crate::peers::PeerPresence) {}
+
+    /// 让别的进程中止在跑的回合（tui-cockpit.md §1.3）。
+    async fn stop_peer(&self, _address: &crate::peers::PeerAddress) -> Result<(), KernelError> {
+        Err(KernelError::Unsupported {
+            what: "stop peer".to_owned(),
+        })
+    }
+
     /// 给会话改名（F29，tui-manage.md §10.6）：打开着的经它的 actor（`Command::Rename`），否则直接写存储。
     async fn rename_session(
         &self,
@@ -500,6 +521,11 @@ pub trait Kernel: Send + Sync {
         Err(KernelError::Unsupported {
             what: "session catalog".to_owned(),
         })
+    }
+
+    /// 工作区的 agent 类型（agents.md §8 的 PT 增量）：不要会话，顺序同 agent 目录。缺省空。
+    async fn agent_definitions(&self, _workspace: &WorkspaceRef) -> Vec<crate::catalog::AgentInfo> {
+        Vec::new()
     }
 
     /// 旧会话的询问（docs/specs/rust-cli/agents.md §4.1.2，工作线 F72）：先给出还没回答的，再给出之后的变化。缺省

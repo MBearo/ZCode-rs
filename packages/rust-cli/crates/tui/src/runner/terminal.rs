@@ -14,8 +14,8 @@ use rust_cli_kernel_api::session_api::Kernel;
 
 use super::{Options, Screen, drive};
 use crate::ui::console::Console;
-use crate::ui::palette::{ColorLevel, Palette};
-use crate::ui::terminal::Guard;
+use crate::ui::probe::{ColorLevel, Colors};
+use crate::ui::terminal::Terminal;
 
 /// 输入事件流的开关：交出终端时丢掉 crossterm 的事件流，收回后重建。
 #[derive(Default)]
@@ -78,15 +78,29 @@ impl Stream for Input {
 
 /// 写到 stdout 的终端副作用。
 struct Stdout {
-    guard: Guard,
+    guard: Terminal,
     gate: Arc<Gate>,
     /// 入口给的终端变量：OSC 52 在 tmux / screen 里要包一层（F25）。
     vars: std::collections::BTreeMap<String, String>,
+    /// 进界面时探测到终端支持程序状态（OSC 7501，tui-manage.md §5.4）。
+    program_status: bool,
 }
 
 impl Screen for Stdout {
+    fn size(&self) -> std::io::Result<(u16, u16)> {
+        self.guard.size()
+    }
+
+    fn write(&mut self, bytes: &str) -> std::io::Result<()> {
+        self.guard.write(bytes)
+    }
+
     fn keyboard_enhanced(&self) -> bool {
         self.guard.enhanced()
+    }
+
+    fn program_status(&self) -> bool {
+        self.program_status
     }
 
     fn notify(&mut self, sequence: &str) {
@@ -126,8 +140,8 @@ pub async fn run(kernel: Arc<dyn Kernel>, options: Options) -> Result<super::Exi
     if let Some(refusal) = Console::current().refusal(crate::ui::i18n::strings(lang)) {
         bail!("{refusal}");
     }
-    let (mut terminal, guard, probed) = crate::ui::terminal::enter()?;
-    let palette = Palette::new(
+    let (guard, probed) = crate::ui::terminal::enter()?;
+    let colors = Colors::new(
         ColorLevel::detect(&options.vars, options.os),
         probed.background,
     )
@@ -138,10 +152,10 @@ pub async fn run(kernel: Arc<dyn Kernel>, options: Options) -> Result<super::Exi
         guard,
         gate,
         vars: options.vars.clone(),
+        program_status: probed.program_status,
     };
-    let result = drive(kernel, options, palette, &mut terminal, &mut screen, input).await;
-    // 先恢复终端（`Guard` 的 drop），再把 SessionEnd 交回入口。
-    drop(terminal);
+    let result = drive(kernel, options, colors, &mut screen, input).await;
+    // 先恢复终端（`Terminal` 的 drop），再把 SessionEnd 交回入口。
     drop(screen);
     result
 }

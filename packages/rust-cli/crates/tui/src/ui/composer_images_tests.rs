@@ -38,7 +38,7 @@ fn formats_follow_the_shared_header_check() {
 #[test]
 fn images_share_the_paste_counter_and_drop_when_their_placeholder_goes() {
     let mut composer = Composer::default();
-    composer.paste_text(&"x".repeat(900));
+    composer.paste_text(&"x".repeat(900), 80);
     assert_eq!(
         composer.add_image(PNG),
         Added::Inserted("[Image #2]".into())
@@ -74,7 +74,7 @@ fn the_space_after_an_image_comes_with_the_next_typed_character() {
     composer.add_image(PNG);
     assert_eq!(composer.area.text(), "[Image #1] [Image #2]");
     // 粘贴文字与 alt 组合键不补空格，之后也不再补。
-    composer.paste_text("x");
+    composer.paste_text("x", 80);
     composer.before_typing('y', false);
     assert_eq!(composer.area.text(), "[Image #1] [Image #2]x");
     let mut composer = Composer::default();

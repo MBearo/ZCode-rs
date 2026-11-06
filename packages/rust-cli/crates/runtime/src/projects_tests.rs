@@ -30,7 +30,7 @@ fn kernel<E: rust_cli_kernel_api::testing::AllPorts + 'static>(
             ids: Arc::new(SequentialIds::default()),
         },
         Defaults {
-            selection: selection(),
+            selection: selection().into(),
             mode: PermissionMode::Default,
             max_turns: None,
             search_tools: false,
@@ -64,6 +64,125 @@ fn all() -> SessionQuery {
         order: SessionOrder::Updated,
         limit: 200,
     }
+}
+
+/// 登记处：别的进程在跑或等你的会话。
+struct Registry(Vec<rust_cli_kernel_api::peers::PeerRecord>);
+
+#[async_trait::async_trait]
+impl rust_cli_kernel_api::peers::PeerMessaging for Registry {
+    async fn identity(&self) -> Option<rust_cli_kernel_api::peers::PeerIdentity> {
+        None
+    }
+    async fn peers(&self) -> Vec<rust_cli_kernel_api::peers::PeerRecord> {
+        self.0.clone()
+    }
+    async fn send(
+        &self,
+        _message: rust_cli_kernel_api::peers::PeerOutbound,
+    ) -> Result<(), rust_cli_kernel_api::peers::PeerSendError> {
+        Ok(())
+    }
+    async fn receipt(
+        &self,
+        _to: rust_cli_kernel_api::peers::PeerAddress,
+        _msg_id: String,
+        _status: rust_cli_kernel_api::peers::ReceiptStatus,
+    ) {
+    }
+    async fn bind(&self, _session: &SessionId) {}
+    async fn unbind(&self, _session: &SessionId) {}
+    fn signals(
+        &self,
+        _session: &SessionId,
+    ) -> futures_util::stream::BoxStream<'static, rust_cli_kernel_api::peers::PeerSignal> {
+        Box::pin(futures_util::stream::pending())
+    }
+    async fn ack(&self, _session: &SessionId, _seq: u64) {}
+    async fn set_status(
+        &self,
+        _session: &SessionId,
+        _status: rust_cli_kernel_api::peers::PeerStatus,
+    ) {
+    }
+}
+
+/// 别的进程的记录合进行：状态、时刻、现场与地址都来自登记（tui-cockpit.md §1）。
+#[tokio::test]
+async fn sessions_live_in_another_process_carry_the_registry() {
+    use rust_cli_kernel_api::peers::{PeerAddress, PeerPresence, PeerRecord, PeerStatus};
+    let store = Arc::new(MemoryStore::default());
+    let env = Arc::new(UnusedEnvironment);
+    let earlier = kernel(store.clone(), env.clone());
+    earlier
+        .create_session(create("elsewhere", "/w/app"))
+        .await
+        .unwrap();
+    earlier
+        .create_session(create("closed", "/w/app"))
+        .await
+        .unwrap();
+    let presence = PeerPresence {
+        now: Some("Bash  pnpm test".to_owned()),
+        ..PeerPresence::default()
+    };
+    let record = PeerRecord {
+        pid: 42,
+        name: "app-1".to_owned(),
+        address: PeerAddress::from_socket("/peers/42.sock"),
+        kind: "interactive".to_owned(),
+        status: Some(PeerStatus::Waiting),
+        started_at_ms: 0,
+        session: Some(SessionId::new("elsewhere")),
+        status_since_ms: Some(700),
+        presence: presence.clone(),
+        tmux: None,
+    };
+    let kernel = LocalKernel::with_extensions(
+        Ports {
+            model: Arc::new(ScriptedModel::new(Vec::new())),
+            environments: environments(env),
+            store: store.clone(),
+            artifacts: store,
+            clock: Arc::new(FixedClock(1_000)),
+            ids: Arc::new(SequentialIds::default()),
+        },
+        Defaults {
+            selection: selection().into(),
+            mode: PermissionMode::Default,
+            max_turns: None,
+            search_tools: false,
+            task_tools: None,
+            limits: Default::default(),
+        },
+        crate::ContextConfig::new(crate::Surface::Print),
+        crate::CompactConfig::default(),
+        Arc::new(rust_cli_agents::MemoryTaskLists::default()),
+        crate::Extensions {
+            peers: rust_cli_session::PeerDeps {
+                port: Arc::new(Registry(vec![record])),
+                hold_timeout_ms: 1_000,
+                receipts_wake: false,
+            },
+            ..crate::Extensions::none()
+        },
+    );
+    let found = kernel.project_sessions(all()).await.unwrap().sessions;
+    let of = |id: &str| {
+        found
+            .iter()
+            .find(|s| s.record.id.as_str() == id)
+            .unwrap_or_else(|| panic!("no {id}"))
+    };
+    let live = of("elsewhere");
+    assert_eq!(live.activity, Some(SessionActivity::NeedsInput));
+    let joined = live.presence.as_ref().unwrap();
+    assert!(!joined.here);
+    assert_eq!(joined.since_ms, Some(700));
+    assert_eq!(joined.presence, presence);
+    assert_eq!(joined.address, PeerAddress::from_socket("/peers/42.sock"));
+    assert_eq!(of("closed").activity, None);
+    assert!(of("closed").presence.is_none());
 }
 
 /// 两个目录的会话：打开着的有状态，只在库里的没有；每个目录的分支读一次 `.git/HEAD`。

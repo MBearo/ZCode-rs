@@ -127,6 +127,9 @@ pub enum KernelEvent {
     ContextUsage {
         used_tokens: u64,
         max_tokens: u64,
+        /// 生效的自动压缩阈值（[`crate::compaction::ContextOccupancy::compact_at`]，compact.md §2.3）。serde 缺省 None。
+        #[serde(default)]
+        compact_at: Option<u64>,
     },
     /// 上下文快满的提示（docs/specs/rust-cli/compact.md §2.1）：提交带用量的 assistant 与压缩结果之后重算。
     ContextNotice {
@@ -152,6 +155,11 @@ pub enum KernelEvent {
     },
     CompactDone {
         boundary: MessageId,
+    },
+    /// 开始了的压缩失败了（docs/specs/rust-cli/compact.md §4.1）：`message` 是给用户的原因。自动压缩失败时回合照常继续。
+    CompactFailed {
+        trigger: CompactTrigger,
+        message: String,
     },
     /// 历史被改写（rewind、编辑重发）；前端丢弃旧视图后重新取快照。
     HistoryRewritten {

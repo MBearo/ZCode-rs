@@ -21,6 +21,7 @@ fn the_notification_has_the_expected_frame() {
         ("tool_use", "toolu_1"),
         ("status", "completed"),
         ("summary", "Agent \"Find files\" finished"),
+        ("note", super::notification_note()),
         (
             "body",
             "\n<usage><subagent_tokens>13</subagent_tokens><tool_uses>0</tool_uses><duration_ms>5</duration_ms></usage>",

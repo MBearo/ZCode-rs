@@ -24,7 +24,7 @@ fn facts() -> EnvFacts {
 }
 
 fn idle(screen: &str, text: &str) -> bool {
-    screen.contains(text) && !screen.contains("esc to interrupt")
+    screen.contains(text) && !screen.contains("esc stop")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -52,13 +52,19 @@ async fn uncommitted_changes_and_turns_are_listed() {
         ui.submit("/mode yolo");
         // 工作线 F87：切到完全访问先确认。
         ui.confirm_full_access().await;
-        ui.wait_for("⏵⏵ Full access").await;
+        // 确认之后不另说一句（Puffin），等状态栏的模式。
+        ui.wait_for("Full access ⇧⇥").await;
         ui.submit("write the notes");
-        ui.wait("the reply", |s| idle(s, "⏺ done")).await;
+        // 回复的圆点随 S 阶段的 transcript 样子变（tui-kit.md §4.3），这里只认回复的文字。
+        ui.wait("the reply", |s| {
+            s.lines().any(|line| line.trim() == "done") && idle(s, "done")
+        })
+        .await;
         ui.submit("/diff");
         let page = ui.wait_for("src/a.rs").await;
+        // 照 Puffin 的层画（tui-kit.md §4.3）：头一行是标题、三格、说明；文件行没有 `›` 指针。
         assert!(
-            page.contains("Uncommitted changes (git diff HEAD)"),
+            page.contains("Uncommitted changes   (git diff HEAD)"),
             "{page}"
         );
         assert!(
@@ -66,13 +72,14 @@ async fn uncommitted_changes_and_turns_are_listed() {
             "{page}"
         );
         assert!(page.contains("2 files changed +1 -1"), "{page}");
-        assert!(page.contains("› src/a.rs +1 -1"), "{page}");
+        assert!(page.contains("   src/a.rs +1 -1"), "{page}");
+        assert!(!page.contains("› src/a.rs"), "{page}");
         assert!(page.contains("notes.md untracked"), "{page}");
         // 详情：git 的 diff 行；esc 回到列表。
         ui.key(KeyCode::Enter);
         let detail = ui.wait_for("new line").await;
         assert!(detail.contains("old line"), "{detail}");
-        assert!(detail.contains("↑/↓ to scroll · Esc to back"), "{detail}");
+        assert!(detail.contains("↑↓ to scroll · esc to go back"), "{detail}");
         ui.key(KeyCode::Esc);
         ui.key(KeyCode::Down);
         ui.key(KeyCode::Enter);
@@ -80,7 +87,7 @@ async fn uncommitted_changes_and_turns_are_listed() {
         ui.key(KeyCode::Esc);
         // 回合：这一回合里 Write 的内容。
         ui.key(KeyCode::Right);
-        let turn = ui.wait_for("Turn 1 \"write the notes\"").await;
+        let turn = ui.wait_for("Turn 1   \"write the notes\"").await;
         assert!(turn.contains("notes.md +2"), "{turn}");
         ui.key(KeyCode::Enter);
         let detail = ui.wait_for("alpha").await;

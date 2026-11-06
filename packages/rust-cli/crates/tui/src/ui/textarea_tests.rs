@@ -125,7 +125,7 @@ fn the_kill_ring_rotates_with_yank_pop() {
     // alt+d 删掉后一个词。
     let mut a = area("alpha beta");
     a.home();
-    assert_eq!(a.kill_word_forward(), 5);
+    a.kill_word_forward();
     assert_eq!(a.text(), " beta");
 }
 
@@ -154,7 +154,7 @@ fn a_selection_is_replaced_by_typing_and_removed_by_delete_keys() {
         TextArea::kill_word_forward,
     ] {
         let mut a = selected();
-        assert_eq!(kill(&mut a), 5);
+        kill(&mut a);
         assert_eq!((a.text(), a.cursor()), ("heorld", 2));
         a.yank();
         assert_eq!(a.text(), "hello world");

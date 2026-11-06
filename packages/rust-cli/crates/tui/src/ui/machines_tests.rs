@@ -11,8 +11,8 @@ use serde_json::json;
 use super::*;
 use crate::machines::{ConnectStep, ExecutorInfo};
 use crate::ui::i18n::Lang;
-use crate::ui::interaction_view::View;
 use crate::ui::test_support::key;
+use rust_cli_tui_kit::render::StyledLine;
 
 fn app(lang: Lang) -> App {
     let mut app = crate::ui::test_support::app_in(lang);
@@ -39,10 +39,10 @@ fn waiting() -> MachineStatus {
     }
 }
 
-fn plain(lines: &[Line<'static>]) -> Vec<String> {
+fn plain(lines: &[StyledLine]) -> Vec<String> {
     lines
         .iter()
-        .map(|line| crate::ui::text::plain(line).trim_end().to_owned())
+        .map(|line| crate::ui::lines::plain(line).trim_end().to_owned())
         .collect()
 }
 
@@ -63,39 +63,80 @@ fn a_machine_waiting_to_reconnect_can_be_retried_now() {
         app.machines_command("connect gpu-1"),
         Some(Action::Machines(MachineRequest::Connect("gpu-1".into())))
     );
-    app.machines_command("");
-    let lines = plain(&app.machines_lines(100, 30, 0));
-    let hint = lines.last().unwrap();
-    assert!(hint.contains("r to retry now"), "{hint}");
+    assert_eq!(
+        app.machines_command(""),
+        Some(Action::Machines(MachineRequest::Hosts))
+    );
+    // 槽照 Puffin `machines_slot`：空格做随状态的操作，重连中的是立即重试（tui-kit.md §4.2「`/machines`」）。
+    let hint: String = app.machines_slot().iter().map(|span| &*span.text).collect();
+    assert!(hint.contains("space retry now"), "{hint}");
+    assert_eq!(
+        app.machines_key(key(KeyCode::Char(' '))),
+        Some(Action::Machines(MachineRequest::Retry("dev-a".into())))
+    );
+    // 旧界面的 `r` 留着；就绪的机器上不做事，空格是断开。
     assert_eq!(
         app.machines_key(key(KeyCode::Char('r'))),
         Some(Action::Machines(MachineRequest::Retry("dev-a".into())))
     );
-    // 就绪的机器上 `r` 不做事，提示行也不写。
     app.machines_key(key(KeyCode::Down));
     assert_eq!(app.machines_key(key(KeyCode::Char('r'))), None);
-    let lines = plain(&app.machines_lines(100, 30, 0));
-    assert!(!lines.last().unwrap().contains("retry"), "{lines:?}");
+    let hint: String = app.machines_slot().iter().map(|span| &*span.text).collect();
+    assert!(hint.contains("space disconnect"), "{hint}");
+}
+
+/// ⏎ 打开设置里的那一页（Puffin `machines_key`）：机器是它的页，`+ Add a machine` 是新机器的页；↑↓ 循环。以前 ⏎ 随状态
+/// 连或断，没有 `+ Add a machine`。
+#[test]
+fn enter_opens_the_machine_in_settings() {
+    let mut app = app(Lang::En);
+    app.machines = vec![machine("dev-a", MachineStatus::Ready)];
+    app.machines_command("");
+    assert_eq!(
+        app.machine_entries(),
+        [
+            super::super::machines_list::Entry::Machine("dev-a".into()),
+            super::super::machines_list::Entry::Add
+        ]
+    );
+    let lines = plain(&app.machines_lines(100, 0));
+    assert!(
+        lines.iter().any(|l| l.contains("+ Add a machine")),
+        "{lines:#?}"
+    );
+    // ↑ 从第一项绕到最后一项。
+    app.machines_key(key(KeyCode::Up));
+    let hint: String = app.machines_slot().iter().map(|span| &*span.text).collect();
+    assert!(hint.starts_with("⏎ add"), "{hint}");
+    app.machines_key(key(KeyCode::Enter));
+    // 同 Puffin：设置盖在上面，列表留在下面（关上设置后回到列表）。
+    assert!(app.settings.is_some());
+    assert!(matches!(app.overlay, Some(Overlay::Machines(_))));
 }
 
 /// §25.4.2：第一次连接时状态行与列表分出上传与握手。旧代码只写 `connecting`。
 #[test]
 fn the_first_connection_shows_its_steps() {
-    for (lang, upload, handshake) in [
+    // 坞行（tui-kit.md §4.0 第 6 条，Puffin `machines_row`）：这一步、上传的大小、连了多久；以前状态栏下面一行从 `● local`
+    // 起列出每台。
+    for (lang, upload, handshake, checking) in [
         (
             Lang::En,
-            "○ dev-a connecting · uploading the executor (89 MB)",
-            "○ dev-a connecting · handshaking",
+            "○ dev-a  uploading the executor (89 MB) · 0s",
+            "○ dev-a  handshaking · 0s",
+            "○ dev-a  checking · 0s",
         ),
         (
             Lang::Zh,
-            "○ dev-a 连接中 · 上传执行器（89 MB）",
-            "○ dev-a 连接中 · 握手",
+            "○ dev-a  上传执行器（89 MB） · 0s",
+            "○ dev-a  握手 · 0s",
+            "○ dev-a  检查中 · 0s",
         ),
     ] {
         let mut app = app(lang);
         let status = |app: &App| {
-            crate::ui::text::plain(&app.machine_status_line(100, 0).unwrap())
+            let row = app.machines_row(0).expect("a machine is changing");
+            crate::ui::lines::plain(&rust_cli_tui_kit::app::layout::Layout::lay(&row, 100)[0])
                 .trim()
                 .to_owned()
         };
@@ -103,29 +144,29 @@ fn the_first_connection_shows_its_steps() {
             "dev-a",
             MachineStatus::Connecting(ConnectStep::Uploading { bytes: 93_323_264 }),
         )];
-        assert_eq!(status(&app), format!("● local  {upload}"));
+        assert_eq!(status(&app), upload);
         app.machines[0].status = MachineStatus::Connecting(ConnectStep::Handshaking);
-        assert_eq!(status(&app), format!("● local  {handshake}"));
+        assert_eq!(status(&app), handshake);
         app.machines[0].status = MachineStatus::Connecting(ConnectStep::Checking);
-        assert!(
-            status(&app).ends_with("○ dev-a connecting")
-                || status(&app).ends_with("○ dev-a 连接中")
-        );
+        assert_eq!(status(&app), checking);
+        // 就绪与没连的不写：都不在变时没有这一行。
+        app.machines[0].status = MachineStatus::Ready;
+        assert!(app.machines_row(0).is_none());
     }
 }
 
-/// §25.4.4（Docker 试用 L7）：列表里重连中的机器的最近一次错误去掉内部的错误链，中文写人话。
+/// §25.4.4（Docker 试用 L7）：列表里重连中的机器的最近一次错误去掉内部的错误链（字照 Puffin，同设置的 Machines 段）。
 #[test]
 fn the_last_error_is_said_plainly() {
-    let mut app = app(Lang::Zh);
+    let mut app = app(Lang::En);
     app.machines = vec![machine("dev-a", waiting())];
     app.machines_command("");
-    let lines = plain(&app.machines_lines(100, 30, 0));
+    let lines = plain(&app.machines_lines(100, 0));
     assert!(
         lines
             .iter()
-            .any(|line| line
-                == "    最近一次的错误：ssh 连不上 127.0.0.1:51110（Connection refused）"),
+            .any(|line| line.trim_start().starts_with("Last error: ")
+                && !line.contains("link io error")),
         "{lines:#?}"
     );
 }
@@ -160,18 +201,14 @@ fn ask(tool: &str, input: serde_json::Value, machine: Option<&str>) -> DetachedE
     }
 }
 
-fn ask_lines(app: &mut App) -> Vec<String> {
+/// 打开询问：在回答的请求的工作目录与绑定的机器（“不再询问”的规则按它写；板上的字照 Puffin，不写目录与机器）。
+fn asked(app: &mut App) -> (String, Option<String>) {
     app.sync_interaction(Instant::now());
-    let (_, request) = app.pending().unwrap();
-    let request = request.clone();
-    let view = View {
-        palette: &app.palette,
-        lang: app.lang,
-        width: 120,
-        height: 40,
-        now_ms: 0,
-    };
-    plain(&app.interaction.as_ref().unwrap().lines(&request, &view).0)
+    let ui = app.interaction.as_ref().unwrap();
+    (
+        ui.workspace.clone(),
+        ui.bound_machine.remote().map(str::to_owned),
+    )
 }
 
 /// §25.4.3（Docker 试用 L4）：远端 Bash 的“不再询问”写那台机器的工作目录（清单的；没写时握手报告的 home）。旧代码写本机
@@ -195,28 +232,14 @@ fn a_remote_bash_ask_names_the_remote_directory() {
         json!({"command": "mkdir -p out && awk 1 a > out/b"}),
         Some("dev-a"),
     ));
-    let lines = ask_lines(&mut app);
-    assert!(
-        lines.iter().any(|line| line.contains("in /srv/proj")),
-        "{lines:#?}"
-    );
-    assert!(
-        !lines.iter().any(|line| line.contains("/Users/dev")),
-        "{lines:#?}"
-    );
+    assert_eq!(asked(&mut app).0, "/srv/proj");
 }
 
-/// §25.4.3（Docker 试用 L5）：MCP 工具的询问框照服务器的绑定写机器。旧代码只写“使用工具”。
+/// §25.4.3（Docker 试用 L5）：MCP 工具的询问照服务器的绑定找机器。
 #[test]
 fn an_mcp_ask_names_the_machine_of_its_server() {
-    for (lang, expected) in [
-        (Lang::En, "Tool use · runs on dev-a"),
-        (Lang::Zh, "使用工具 · 在 dev-a 上执行"),
-    ] {
-        let mut app = app(lang);
-        app.mcp_machines = vec![("devtools".into(), "dev-a".into())];
-        app.detached_changed(ask("mcp__devtools__where", json!({}), None));
-        let lines = ask_lines(&mut app);
-        assert!(lines[1].trim_start().starts_with(expected), "{lines:#?}");
-    }
+    let mut app = app(Lang::En);
+    app.mcp_machines = vec![("devtools".into(), "dev-a".into())];
+    app.detached_changed(ask("mcp__devtools__where", json!({}), None));
+    assert_eq!(asked(&mut app).1.as_deref(), Some("dev-a"));
 }

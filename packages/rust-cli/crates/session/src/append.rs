@@ -20,13 +20,15 @@ pub(crate) struct Appended {
 }
 
 impl Actor {
-    /// 一批消息与计量一个事务：每条消息带出的 checkpoint 与子代理关联排在它后面（kernel-api `RunLedger`），`usage`
-    /// 排在最后（usage.md §2.5）。成功后调用方调 [`Self::after_commit`]（通知回合在两者之间发 `TurnStarted`）。
+    /// 一批消息与计量一个事务：每条消息带出的 checkpoint 与子代理关联排在它后面（kernel-api `RunLedger`），工具边界
+    /// 并入的同伴项的 `peer_merged` 跟在它的 attachment 后面（F139），`tail` 排在最后：计量（usage.md §2.5），或开回合
+    /// 并入的同伴项的 `peer_merged`（turn.rs）。成功后调用方调 [`Self::after_commit`]（通知回合在两者之间发
+    /// `TurnStarted`）。
     pub(crate) async fn append(
         &mut self,
         command: Option<CommandId>,
         messages: Vec<Message>,
-        usage: Vec<Fact>,
+        tail: Vec<Fact>,
     ) -> Result<Appended, StoreError> {
         let prompt = self.running.as_ref().and_then(|r| r.prompt.clone());
         let mut facts = Vec::new();
@@ -40,8 +42,13 @@ impl Actor {
             );
             facts.extend(settled.facts);
             checkpoints.extend(settled.checkpoints);
+            // 工具边界并入的同伴消息与回执：“已并入”的事实与这条 attachment 同一批（cross-session.md §2.4，F139），
+            // 中间失败时两者都不在。
+            if let Some(waiting) = self.inbox.absorbing_item(message.id()) {
+                facts.extend(waiting.merged_facts());
+            }
         }
-        facts.extend(usage);
+        facts.extend(tail);
         self.commit(command, facts).await?;
         Ok(Appended {
             messages,

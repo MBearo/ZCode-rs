@@ -1,17 +1,16 @@
-//! 权限询问与计划审批的焦点行（docs/specs/rust-cli/tui.md §7.7，工作线 F76，用户决定 2026-10-23）：与提问视图（§7.6）
-//! 相同，焦点行不铺底色条，指针 `❯` 与名字是强调色，序号 dim；输入行（“否”行的意见、“继续计划”）聚焦时终端光标停在
-//! 输入位置。深浅两种背景。旧代码的焦点行整行铺底色条、界面上没有光标，这些测试都失败。扣住的同伴消息的批准框在
-//! peers.rs。
+//! 权限询问与计划审批的焦点行（docs/specs/rust-cli/tui.md §7.7，工作线 F76）。样子照 Puffin 的「请求」与「计划」
+//! （tui.md §5.2，tui-kit.md §4.2）：回答在 panel 底色的板上，焦点行的序号与名字是 brand、不加粗，其余序号 fg3、名字 fg2，没有
+//! 底色条；意见在真的输入框里打，打了字时选中 Deny / Keep planning，⏎ 带着字发出。深浅两种背景。扣住的同伴消息在 peers.rs。
 use std::sync::Arc;
 
+use super::support::Shot;
 use crossterm::event::KeyCode;
-use ratatui::buffer::Buffer;
-use ratatui::style::{Color, Modifier};
 use rust_cli_kernel_api::env::{EnvFacts, EnvPath};
 use rust_cli_kernel_api::testing::{
     MemoryEnvironment, environments, text_response, tool_use_response,
 };
-use rust_cli_tui::{ColorLevel, Palette};
+use rust_cli_tui::{ColorLevel, Colors, Ink};
+use rust_cli_tui_kit::render::{Color, attr};
 use serde_json::json;
 
 use super::support::{GatedModel, Setup, Ui, request_text, with_ui};
@@ -21,19 +20,43 @@ type Rgb = (u8, u8, u8);
 struct Theme {
     background: Rgb,
     foreground: Rgb,
-    accent: Color,
+}
+
+/// 期望的墨（主题 token，tui-kit.md §3.4）。
+#[derive(Clone, Copy)]
+struct Inks {
+    brand: Color,
+    fg2: Color,
+    fg3: Color,
+    panel: Color,
+}
+
+fn inks(theme: &Theme) -> Inks {
+    let ink = Ink::new(
+        ColorLevel::TrueColor,
+        Some(theme.foreground),
+        Some(theme.background),
+    );
+    let theme = ink.theme;
+    let Some(panel) = theme.panel else {
+        panic!("rich 的主题有板的底色");
+    };
+    Inks {
+        brand: theme.brand,
+        fg2: theme.fg2.fg_color(),
+        fg3: theme.fg3.fg_color(),
+        panel,
+    }
 }
 
 const THEMES: [Theme; 2] = [
     Theme {
         background: (0, 0, 0),
         foreground: (255, 255, 255),
-        accent: Color::Rgb(99, 168, 248),
     },
     Theme {
         background: (255, 255, 255),
         foreground: (0, 0, 0),
-        accent: Color::Rgb(28, 100, 200),
     },
 ];
 
@@ -41,7 +64,7 @@ fn setup(theme: &Theme) -> Setup {
     Setup {
         width: 80,
         height: 40,
-        palette: Palette::new(ColorLevel::TrueColor, Some(theme.background))
+        colors: Colors::new(ColorLevel::TrueColor, Some(theme.background))
             .with_foreground(Some(theme.foreground)),
         environments: environments(Arc::new(MemoryEnvironment::new(EnvFacts {
             cwd: EnvPath::new("/Users/dev/project"),
@@ -56,61 +79,60 @@ fn setup(theme: &Theme) -> Setup {
     }
 }
 
-fn frame(ui: &Ui) -> Buffer {
-    ui.buffer.lock().unwrap().clone().unwrap()
+fn frame(ui: &Ui) -> Shot {
+    ui.frame()
 }
 
 /// 第一处 `needle` 所在的（列，行）。
-fn find(buffer: &Buffer, needle: &str) -> Option<(u16, u16)> {
-    let area = buffer.area;
-    (area.top()..area.bottom()).find_map(|y| {
-        let cells: Vec<(u16, String)> = (area.left()..area.right())
-            .map(|x| (x, buffer[(x, y)].symbol().to_owned()))
-            .collect();
-        let row: String = cells.iter().map(|(_, s)| s.as_str()).collect();
-        let at = row.find(needle)?;
-        let mut bytes = 0;
-        cells
-            .iter()
-            .find(|(_, s)| {
-                let hit = bytes >= at;
-                bytes += s.len();
-                hit
-            })
-            .map(|(x, _)| (*x, y))
-    })
+fn find(buffer: &Shot, needle: &str) -> Option<(u16, u16)> {
+    buffer.find(needle)
 }
 
-/// 整行没有底色。
-fn assert_no_fill(buffer: &Buffer, y: u16) {
+/// 整行铺板的底色。
+fn assert_panel(buffer: &Shot, y: u16, panel: Color) {
     for x in buffer.area.left()..buffer.area.right() {
         let cell = &buffer[(x, y)];
-        assert_eq!(cell.bg, Color::Reset, "column {x} of row {y}: {cell:?}");
+        assert_eq!(cell.bg, panel, "column {x} of row {y}: {cell:?}");
     }
 }
 
-/// `number`（如 `1. Yes`）所在的行是焦点行：没有底色，`❯` 与名字是强调色、不加粗，序号 dim。
-fn assert_focused(buffer: &Buffer, number: &str, accent: Color) {
+/// `number`（如 `1  Yes`）所在的行是焦点行：序号与名字是 brand、不加粗，行铺板的底色。
+fn assert_focused(buffer: &Shot, number: &str, inks: Inks) {
     let (x, y) = find(buffer, number).unwrap_or_else(|| panic!("no {number}"));
-    assert_no_fill(buffer, y);
-    let pointer = &buffer[(x - 2, y)];
-    assert_eq!(pointer.symbol(), "❯", "{pointer:?}");
-    assert_eq!(pointer.fg, accent, "{pointer:?}");
-    assert!(
-        buffer[(x, y)].modifier.contains(Modifier::DIM),
-        "the number is dim"
-    );
+    assert_eq!(x, 3, "the number starts at column 3");
+    assert_panel(buffer, y, inks.panel);
+    assert_eq!(buffer[(x, y)].fg, inks.brand, "the number");
     let name = &buffer[(x + 3, y)];
-    assert_eq!(name.fg, accent, "{name:?}");
-    assert!(!name.modifier.contains(Modifier::BOLD), "{name:?}");
+    assert_eq!(name.fg, inks.brand, "{name:?}");
+    assert!(!name.has(attr::BOLD), "{name:?}");
 }
 
-/// 没聚焦的行：没有底色、没有指针，名字不上色。
-fn assert_plain(buffer: &Buffer, number: &str) {
+/// 没聚焦的行：序号 fg3，名字 fg2。
+fn assert_plain(buffer: &Shot, number: &str, inks: Inks) {
     let (x, y) = find(buffer, number).unwrap_or_else(|| panic!("no {number}"));
-    assert_no_fill(buffer, y);
-    assert_eq!(buffer[(x - 2, y)].symbol(), " ");
-    assert_eq!(buffer[(x + 3, y)].fg, Color::Reset);
+    assert_panel(buffer, y, inks.panel);
+    assert_eq!(buffer[(x, y)].fg, inks.fg3);
+    assert_eq!(buffer[(x + 3, y)].fg, inks.fg2);
+}
+
+/// 等到最近一帧满足条件（焦点移动只改颜色，画面的文字不变）；等待有上限，只为让失败的测试结束。
+async fn until(ui: &Ui, what: &str, done: impl Fn(&Shot) -> bool) {
+    let wait = async {
+        while !done(&ui.frame()) {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    };
+    if tokio::time::timeout(std::time::Duration::from_secs(10), wait)
+        .await
+        .is_err()
+    {
+        panic!("timed out waiting for {what}; screen:\n{}", ui.screen());
+    }
+}
+
+/// `number` 所在的行聚焦了（序号是 brand）。
+fn focused(buffer: &Shot, number: &str, brand: Color) -> bool {
+    buffer.find(number).is_some_and(|at| buffer[at].fg == brand)
 }
 
 fn touching() -> Arc<GatedModel> {
@@ -125,39 +147,40 @@ fn touching() -> Arc<GatedModel> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_permission_ask_has_no_bar_and_shows_the_cursor_while_typing() {
+async fn the_permission_ask_has_no_bar_and_typing_chooses_deny() {
     for theme in &THEMES {
-        let accent = theme.accent;
+        let inks = inks(theme);
         let model = touching();
         with_ui(model.clone(), setup(theme), |mut ui| async move {
             ui.submit("make a file");
-            ui.wait_for("Do you want to proceed?").await;
+            ui.wait_for("Run this command?").await;
             ui.settle().await;
             let buffer = frame(&ui);
-            assert_focused(&buffer, "1. Yes", accent);
-            assert_plain(&buffer, "2. No");
-            assert_eq!(ui.cursor(), None);
+            assert_focused(&buffer, "1  Allow once", inks);
+            assert_plain(&buffer, "2  Full access", inks);
+            assert_plain(&buffer, "3  Deny", inks);
             ui.key(KeyCode::Down);
-            ui.wait("the pointer on No", |s| s.contains("❯ 2. No"))
-                .await;
+            until(&ui, "the focus on Full access", |b| {
+                focused(b, "2  Full access", inks.brand)
+            })
+            .await;
             let buffer = frame(&ui);
-            assert_focused(&buffer, "2. No", accent);
-            assert_plain(&buffer, "1. Yes");
-            assert_eq!(ui.cursor(), None);
-            // tab 补充意见：这一行变成输入，光标停在占位文字的第一个字上。
-            ui.key(KeyCode::Tab);
-            let screen = ui.wait_for("tell ZCode what to do differently").await;
-            let buffer = frame(&ui);
-            let (x, y) = find(&buffer, "tell ZCode").unwrap();
-            assert_no_fill(&buffer, y);
-            assert_eq!(ui.cursor(), Some((x, y)), "{screen}");
-            // 输入之后光标在文字末尾。
+            assert_focused(&buffer, "2  Full access", inks);
+            assert_plain(&buffer, "1  Allow once", inks);
+            // 打字：字进输入框，Deny 选中，槽说 ⏎ 做什么。
             ui.type_text("use make");
-            ui.wait_for("2. use make").await;
+            ui.wait_for("› use make").await;
+            ui.wait_for("⏎ deny and send").await;
+            // 光标格在输入框的字后面（输入框的光标，不是板上的输入行）。
             let buffer = frame(&ui);
             let (x, y) = find(&buffer, "use make").unwrap();
-            assert_no_fill(&buffer, y);
+            assert_eq!(x, 3);
             assert_eq!(ui.cursor(), Some((x + 8, y)));
+            until(&ui, "the focus on Deny", |b| {
+                focused(b, "3  Deny", inks.brand)
+            })
+            .await;
+            assert_plain(&frame(&ui), "2  Full access", inks);
             ui.key(KeyCode::Enter);
             ui.wait_for("done").await;
         })
@@ -168,9 +191,9 @@ async fn the_permission_ask_has_no_bar_and_shows_the_cursor_while_typing() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_plan_approval_has_no_bar_and_shows_the_cursor_on_keep_planning() {
+async fn the_plan_approval_has_no_bar_and_typing_keeps_planning() {
     for theme in &THEMES {
-        let accent = theme.accent;
+        let inks = inks(theme);
         let model = GatedModel::scripted(vec![
             tool_use_response("toolu_1", "EnterPlanMode", &json!({})),
             tool_use_response("toolu_2", "ExitPlanMode", &json!({})),
@@ -178,34 +201,29 @@ async fn the_plan_approval_has_no_bar_and_shows_the_cursor_on_keep_planning() {
         ]);
         with_ui(model.clone(), setup(theme), |mut ui| async move {
             ui.submit("plan first");
-            ui.wait_for("Ready to code?").await;
+            let screen = ui.wait_for("Start on this plan?").await;
+            assert!(screen.contains("Keep planning"), "{screen}");
             ui.settle().await;
             let buffer = frame(&ui);
-            assert_focused(&buffer, "1. Yes, exit plan mode", accent);
-            assert_plain(&buffer, "2. No, keep planning");
-            assert_eq!(ui.cursor(), None);
-            // 第 2 行直接是输入：聚焦时光标在占位文字上，输入后在文字末尾。
+            assert_focused(&buffer, "1  Approve", inks);
+            assert_plain(&buffer, "2  Keep planning", inks);
+            // Keep planning 要有字：选中它按 ⏎ 不起作用；打了字之后 ⏎ 带着字发出。
             ui.key(KeyCode::Down);
-            ui.wait_for("Tell ZCode what to change").await;
-            let buffer = frame(&ui);
-            let (x, y) = find(&buffer, "Tell ZCode what to change").unwrap();
-            assert_no_fill(&buffer, y);
-            assert_eq!(buffer[(x - 5, y)].symbol(), "❯");
-            assert_eq!(ui.cursor(), Some((x, y)));
-            assert_plain(&buffer, "1. Yes, exit plan mode");
-            ui.type_text("smaller steps");
-            ui.wait_for("2. smaller steps").await;
-            let buffer = frame(&ui);
-            let (x, y) = find(&buffer, "smaller steps").unwrap();
-            assert_eq!(ui.cursor(), Some((x + 13, y)));
-            // 回到第 1 行：光标隐藏。
+            until(&ui, "the focus on keep planning", |b| {
+                focused(b, "2  Keep planning", inks.brand)
+            })
+            .await;
+            assert_plain(&frame(&ui), "1  Approve", inks);
             ui.key(KeyCode::Up);
-            ui.wait("the pointer on approve", |s| s.contains("❯ 1. Yes"))
-                .await;
-            assert_eq!(ui.cursor(), None);
-            ui.key(KeyCode::Down);
-            ui.wait("the pointer on keep planning", |s| {
-                s.contains("❯ 2. smaller")
+            until(&ui, "the focus on approve", |b| {
+                focused(b, "1  Approve", inks.brand)
+            })
+            .await;
+            ui.type_text("smaller steps");
+            ui.wait_for("› smaller steps").await;
+            ui.wait_for("⏎ keep planning").await;
+            until(&ui, "the focus on keep planning", |b| {
+                focused(b, "2  Keep planning", inks.brand)
             })
             .await;
             ui.key(KeyCode::Enter);
@@ -215,32 +233,4 @@ async fn the_plan_approval_has_no_bar_and_shows_the_cursor_on_keep_planning() {
         let last = request_text(&model.requests()[2]);
         assert!(last.contains("smaller steps"), "{last}");
     }
-}
-
-/// 长的意见按宽度折行，光标跟着到最后一行。
-#[tokio::test(flavor = "multi_thread")]
-async fn long_feedback_wraps_and_the_cursor_follows() {
-    let model = touching();
-    let narrow = Setup {
-        width: 40,
-        ..setup(&THEMES[0])
-    };
-    with_ui(model, narrow, |mut ui| async move {
-        ui.submit("make a file");
-        ui.wait_for("Do you want to proceed?").await;
-        ui.settle().await;
-        ui.key(KeyCode::Tab);
-        ui.wait_for("tell ZCode").await;
-        ui.type_text("alpha beta gamma delta epsilon zeta eta");
-        ui.wait_for("zeta eta").await;
-        let buffer = frame(&ui);
-        let (_, first) = find(&buffer, "alpha").unwrap();
-        let (x, y) = find(&buffer, "zeta eta").unwrap();
-        assert!(y > first, "the input wrapped");
-        // 续行与文字对齐（序号之后）。
-        let (start, _) = find(&buffer, "alpha").unwrap();
-        assert_eq!(x, start);
-        assert_eq!(ui.cursor(), Some((x + 8, y)));
-    })
-    .await;
 }

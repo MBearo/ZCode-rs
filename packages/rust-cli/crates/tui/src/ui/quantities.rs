@@ -22,16 +22,6 @@ impl Unit {
             Self::Day => "d",
         }
     }
-
-    /// 英文的单数名字：`second`、`minute`、`hour`、`day`。
-    pub fn english(self) -> &'static str {
-        match self {
-            Self::Second => "second",
-            Self::Minute => "minute",
-            Self::Hour => "hour",
-            Self::Day => "day",
-        }
-    }
 }
 
 /// 秒数只取最大的一个单位，向下取整：不到一分钟是秒，不到一小时是分，不到一天是时，其余是天。
@@ -80,15 +70,6 @@ pub fn thousands(count: u64) -> String {
 
 /// 百分比的分母。
 pub const PERCENT: u64 = 100;
-/// 浮点运算里百分比的分母。
-pub const PERCENT_F64: f64 = 100.0;
-
-/// 四舍五入到一位小数，整数也写 `.0`（`12.3`、`40.0`）；负数按 0。
-pub fn tenths(value: f64) -> String {
-    /// 一位小数的倍数。
-    const TENTHS: f64 = 10.0;
-    format!("{:.1}", (value * TENTHS).round().max(0.0) / TENTHS)
-}
 
 #[cfg(test)]
 #[path = "quantities_tests.rs"]

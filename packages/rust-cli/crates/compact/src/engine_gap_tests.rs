@@ -31,7 +31,7 @@ async fn the_initial_gap_truncates_the_head_of_a_summarize_all_request() {
     let runner = ScriptedRunner::new(vec![summary()]);
     let ports = ports(runner.clone(), no_tools());
     let result = Engine { ports: &ports }
-        .run(&reactive(Some(500)), true, &CancellationToken::new())
+        .run(&reactive(Some(500)), true, &CancellationToken::new(), None)
         .await
         .unwrap();
     let sent = runner.requests();
@@ -62,7 +62,7 @@ async fn without_a_gap_everything_is_summarized() {
     let runner = ScriptedRunner::new(vec![summary()]);
     let ports = ports(runner.clone(), no_tools());
     let result = Engine { ports: &ports }
-        .run(&reactive(None), true, &CancellationToken::new())
+        .run(&reactive(None), true, &CancellationToken::new(), None)
         .await
         .unwrap();
     let sent = runner.requests();
@@ -83,7 +83,7 @@ async fn a_gap_covered_by_the_kept_part_does_not_truncate() {
     let mut request = request(history, CompactTrigger::Reactive);
     request.initial_token_gap = Some(100);
     Engine { ports: &ports }
-        .run(&request, true, &CancellationToken::new())
+        .run(&request, true, &CancellationToken::new(), None)
         .await
         .unwrap();
     let sent = runner.requests();
@@ -111,7 +111,7 @@ async fn more_than_three_groups_seed_the_kept_groups() {
         let mut request = request(history(), CompactTrigger::Reactive);
         request.initial_token_gap = gap;
         let result = Engine { ports: &ports }
-            .run(&request, true, &CancellationToken::new())
+            .run(&request, true, &CancellationToken::new(), None)
             .await
             .unwrap();
         let preserved = result.boundary.preserved.expect("kept tail");

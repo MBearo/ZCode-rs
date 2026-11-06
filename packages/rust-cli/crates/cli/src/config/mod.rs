@@ -72,15 +72,19 @@ pub(crate) struct ConfigSnapshot {
     pub(crate) plugins: PluginSources,
     /// 界面语言 `ui.locale`（tui.md §7.1）。
     pub(crate) locale: Option<rust_cli_base::ui_prefs::UiLocale>,
-    /// 主题 `ui.theme`（tui-manage.md §2.1）。
-    pub(crate) theme: Option<rust_cli_base::ui_prefs::UiTheme>,
     /// 启动时检查新版本 `checkForUpdateOnStartup`（update.md §10，F48；缺省 true）。
     pub(crate) check_for_update: bool,
     /// 提问框的空闲超时 `askUserQuestionTimeout`（毫秒，tools-more.md §1.1，工作线 F72；缺省不计时）。
     pub(crate) question_timeout: Option<u64>,
+    /// `compact.autoThresholdTokens`（自动压缩的位置，compact.md §2.3）。
+    pub(crate) compact_at: Option<u64>,
+    /// 定了 `compact_at` 的文件，当它在用户级之后的层（项目、local、`--settings`）时：写回用户级配置改不了它。
+    pub(crate) compact_pinned: Option<String>,
     /// 项目级配置文件里会生效的 `permission.allowedTools`：最后写它的项目文件（相对工作区根）与规则原文
     /// （工作区信任对话框的项目授权，workspace-trust.md §2.4）。
     pub(crate) project_allow: Option<(String, Vec<String>)>,
+    /// 配置文件来源（用户级、项目级）的规则来自的文件：最后写那个键的一层（tui-manage.md §1.2）。`--settings` 不算。
+    pub(crate) rule_files: Vec<(RuleSource, RuleBehavior, String)>,
     /// 会话库与存储根（`storage.sessionDbPath`、`storage.dir`，修复线 F2）：入口按它解析库与产物目录的位置。
     pub(crate) storage: StorageLayers,
 }
@@ -228,9 +232,9 @@ pub(crate) async fn assemble(inputs: &ConfigInputs<'_>) -> ConfigSnapshot {
     } = merge::mcp_layers(&layers, &mut warnings);
     let mcp_enabled = merge::mcp_enabled(&layers);
     let locale = merge::locale(&layers, &mut warnings);
-    let theme = merge::theme(&layers, &mut warnings);
     let check_for_update = merge::check_for_update(&layers, &mut warnings);
     let question_timeout = merge::question_timeout(&layers, &mut warnings);
+    let (compact_at, compact_pinned) = merge::compact_at(&layers, &mut warnings);
     let root = inputs.workspace.root.as_str();
     let plugin_section = plugins::merge(&layers, &mut warnings);
     let storage = if inputs.project_is_local {
@@ -294,12 +298,40 @@ pub(crate) async fn assemble(inputs: &ConfigInputs<'_>) -> ConfigSnapshot {
         pending: workspace.pending(),
         plugins,
         locale,
-        theme,
         check_for_update,
         question_timeout,
+        compact_at,
+        compact_pinned,
         project_allow: project_allow(&projects, inputs.workspace.root.as_str()),
+        rule_files: rule_files(&permission),
         storage,
     }
+}
+
+fn rule_files(permission: &merge::Permission) -> Vec<(RuleSource, RuleBehavior, String)> {
+    [
+        (
+            RuleBehavior::Allow,
+            &permission.allowed,
+            &permission.allowed_file,
+        ),
+        (
+            RuleBehavior::Deny,
+            &permission.disallowed,
+            &permission.disallowed_file,
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(behavior, rules, file)| {
+        let (source, _) = rules.as_ref()?;
+        matches!(
+            source,
+            RuleSource::UserSettings | RuleSource::ProjectSettings
+        )
+        .then(|| file.clone().map(|path| (*source, behavior, path)))
+        .flatten()
+    })
+    .collect()
 }
 
 /// 与 `merge::permission` 的按键覆盖同一层：最后一份写了合法 `permission.allowedTools` 的项目文件。

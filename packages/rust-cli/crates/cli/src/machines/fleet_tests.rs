@@ -49,16 +49,20 @@ async fn remote(name: &str) -> Remote {
     }
 }
 
-/// 端点：部署成功（或按 `fail` 失败），连接器是内存网络。
+/// 端点：部署成功（或按 `fail` 失败），连接器是内存网络；有 `gate` 时部署等它放行。
 struct TestEndpoint {
     ready: Ready,
     fail: Option<ProvisionError>,
+    gate: Option<Arc<tokio::sync::Notify>>,
     connector: Arc<MemoryConnector>,
 }
 
 #[async_trait::async_trait]
 impl Provisioner for TestEndpoint {
     async fn provision(&self) -> Result<Provisioned, ProvisionError> {
+        if let Some(gate) = &self.gate {
+            gate.notified().await;
+        }
         match &self.fail {
             Some(error) => Err(error.clone()),
             None => self.ready.provision().await,
@@ -80,9 +84,10 @@ impl Endpoint for TestEndpoint {
     }
 }
 
-/// 按名字建状态机：`bad` 部署失败（连不上），其余连到 `remote`。
-fn make(remote: &Remote) -> MakeMachine {
+/// 按名字建状态机：`bad` 部署失败（连不上），`slow` 部署等 `gate` 放行，其余连到 `remote`。
+fn make(remote: &Remote, gate: &Arc<tokio::sync::Notify>) -> MakeMachine {
     let connector = remote.connector.clone();
+    let gate = gate.clone();
     Box::new(move |entry: &MachineEntry| {
         let fail = (entry.name == "bad").then(|| ProvisionError::Unreachable {
             message: "connection refused".to_owned(),
@@ -94,6 +99,7 @@ fn make(remote: &Remote) -> MakeMachine {
                 args: Vec::new(),
             }),
             fail,
+            gate: (entry.name == "slow").then(|| gate.clone()),
             connector: connector.clone(),
         };
         Ok(Machine::new(
@@ -107,6 +113,8 @@ struct Built {
     fleet: Fleet,
     registry: Arc<MachineRegistry>,
     list: MachineList,
+    /// `slow` 的部署等它放行。
+    gate: Arc<tokio::sync::Notify>,
     _scope: TaskScope,
     _remote: Remote,
 }
@@ -118,8 +126,9 @@ async fn built(dir: &Path) -> Built {
         UnusedEnvironment,
     ))));
     let scope = TaskScope::root("fleet-test", |_| {});
+    let gate = Arc::new(tokio::sync::Notify::new());
     let fleet = Fleet::new(
-        (list.clone(), make(&remote)),
+        (list.clone(), make(&remote, &gate)),
         Vec::new(),
         registry.clone(),
         scope.spawner(),
@@ -128,6 +137,7 @@ async fn built(dir: &Path) -> Built {
         fleet,
         registry,
         list,
+        gate,
         _scope: scope,
         _remote: remote,
     }
@@ -155,6 +165,7 @@ async fn add_connect_disconnect_and_remove() {
         list,
         _scope,
         _remote,
+        ..
     } = built(dir.path()).await;
     let changes = fleet.subscribe();
     fleet
@@ -355,4 +366,57 @@ async fn retrying_now_only_acts_on_a_machine_waiting_to_reconnect() {
     assert_eq!(fleet.connect("dev-a").await.unwrap(), Changed::Done);
     assert_eq!(fleet.retry("dev-a").await.unwrap(), Changed::Already);
     fleet.disconnect("dev-a").await.unwrap();
+}
+
+/// 连接中断开（remote-exec.md §19.10，2026-10-29）：断开回 `Done`，走完的 connect 回 `Stopped`，不进注册表、清单不记
+/// connected；再连照常就绪。缺陷：以前那次 connect 回 `Done`、放进注册表、写 connected，状态却是 Unconnected，之后的
+/// connect 什么都不做。
+#[tokio::test(flavor = "multi_thread")]
+async fn a_disconnect_while_connecting_stops_the_connect() {
+    let dir = tempfile::tempdir().unwrap();
+    let Built {
+        fleet,
+        registry,
+        list,
+        gate,
+        _scope,
+        _remote,
+    } = built(dir.path()).await;
+    fleet
+        .add(MachineEntry::new("slow", "slow", None))
+        .await
+        .unwrap();
+    let stop = async {
+        until(&fleet, fleet.subscribe(), |fleet| {
+            fleet.snapshot()[0].state == MachineState::Provisioning
+        })
+        .await;
+        let stopped = fleet.disconnect("slow").await;
+        gate.notify_one();
+        stopped
+    };
+    let (connected, stopped) = tokio::join!(fleet.connect("slow"), stop);
+    assert_eq!(stopped.unwrap(), Changed::Done);
+    assert!(
+        matches!(
+            connected,
+            Err(FleetError::Connection(MachineError::Stopped))
+        ),
+        "{connected:?}"
+    );
+    assert_eq!(fleet.snapshot()[0].state, MachineState::Unconnected);
+    assert!(
+        registry
+            .remote(&rust_cli_kernel_api::ids::MachineName::new("slow"))
+            .is_none()
+    );
+    assert!(!list.load().await.unwrap()[0].connected);
+    gate.notify_one();
+    assert_eq!(fleet.connect("slow").await.unwrap(), Changed::Done);
+    assert!(matches!(fleet.snapshot()[0].state, MachineState::Ready(_)));
+    assert!(
+        registry
+            .remote(&rust_cli_kernel_api::ids::MachineName::new("slow"))
+            .is_some()
+    );
 }

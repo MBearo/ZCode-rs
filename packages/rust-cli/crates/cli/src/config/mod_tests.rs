@@ -293,3 +293,39 @@ async fn the_effective_project_allow_list_feeds_the_trust_dialog() {
         [(RuleSource::UserSettings, RuleBehavior::Deny, "WebFetch")]
     );
 }
+
+/// 设置的 Permissions 段打开的文件：最后写那个键的一层（tui-manage.md §1.2）。
+#[tokio::test]
+async fn rule_files_name_the_layer_that_last_wrote_each_key() {
+    let user = json!({"permission": {"allowedTools": ["Read"], "disallowedTools": ["WebFetch"]}});
+    let files = [(
+        "/Users/dev/repo/.zcode/config.json",
+        json!({"permission": {"allowedTools": ["Bash(ls:*)"]}}),
+    )];
+    let snapshot = assemble_with(Some(user), &files).await;
+    let shown: Vec<_> = snapshot
+        .rule_files
+        .iter()
+        .map(|(source, behavior, path)| {
+            (
+                *source,
+                *behavior,
+                path.ends_with("cli/config.json"),
+                path.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(shown.len(), 2);
+    assert_eq!(
+        (shown[0].0, shown[0].1, shown[0].3.as_str()),
+        (
+            RuleSource::ProjectSettings,
+            RuleBehavior::Allow,
+            "/Users/dev/repo/.zcode/config.json"
+        )
+    );
+    assert_eq!(
+        (shown[1].0, shown[1].1, shown[1].2),
+        (RuleSource::UserSettings, RuleBehavior::Deny, true)
+    );
+}

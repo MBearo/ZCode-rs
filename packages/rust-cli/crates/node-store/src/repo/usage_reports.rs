@@ -160,13 +160,27 @@ const INPUT_SIDE: &str = "case
        else input_tokens
      end";
 
+/// 量得到速度的行（子代理的平均速度，usage.md §4.1）：输出已知且大于 0，总时长大于首字时间。
+fn measured() -> String {
+    format!(
+        "{output} = 1 and output_tokens > 0 and time_to_first_token_ms is not null
+         and duration_ms > time_to_first_token_ms",
+        output = known("outputTokens"),
+    )
+}
+
 fn totals_sql() -> String {
     format!(
         "select count(*), coalesce(sum({INPUT_SIDE}), 0), coalesce(sum(cache_read_input_tokens), 0),
-                coalesce(sum(1 - {input} * {read}), 0)
+                coalesce(sum(1 - {input} * {read}), 0),
+                coalesce(sum(case when {output} = 1 then output_tokens else 0 end), 0),
+                coalesce(sum(case when {measured} then output_tokens else 0 end), 0),
+                coalesce(sum(case when {measured} then duration_ms - time_to_first_token_ms else 0 end), 0)
            from model_usage where {COUNTED_REQUESTS}",
         input = known("inputTokens"),
         read = known("cacheReadTokens"),
+        output = known("outputTokens"),
+        measured = measured(),
     )
 }
 
@@ -179,13 +193,17 @@ fn last_sql() -> String {
     )
 }
 
-/// 本会话计入 footer 的请求（[`totals_sql`]）：个数、输入一侧的 token、缓存读、用量不全的行数。
+/// 本会话计入 footer 的请求（[`totals_sql`]）：个数、输入一侧的 token、缓存读、用量不全的行数；已知的输出之和，与
+/// 量得到速度的行的输出与生成时长之和（子代理的 token 与平均速度）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RequestTotals {
     pub requests: i64,
     pub input: i64,
     pub cache_read: i64,
     pub unknown: i64,
+    pub output: i64,
+    pub measured_output: i64,
+    pub generation_ms: i64,
 }
 
 pub fn request_totals(conn: &Connection, session: &str) -> Result<RequestTotals> {
@@ -197,6 +215,9 @@ pub fn request_totals(conn: &Connection, session: &str) -> Result<RequestTotals>
                 input: r.get(1)?,
                 cache_read: r.get(2)?,
                 unknown: r.get(3)?,
+                output: r.get(4)?,
+                measured_output: r.get(5)?,
+                generation_ms: r.get(6)?,
             })
         })?)
 }

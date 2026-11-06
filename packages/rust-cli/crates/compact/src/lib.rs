@@ -26,18 +26,19 @@ pub use tokens::{IMAGE_TOKENS, measured};
 pub use window::Thresholds;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use rust_cli_kernel_api::clock::Ids;
-use rust_cli_kernel_api::compaction::{ContextNotice, PostCompactContext};
+use rust_cli_kernel_api::compaction::{ContextNotice, ContextOccupancy, PostCompactContext};
 use rust_cli_kernel_api::env::Operations;
 use rust_cli_kernel_api::env_registry::EnvironmentRegistry;
 use rust_cli_kernel_api::history;
 use rust_cli_kernel_api::message::{CompactTrigger, Message};
 use rust_cli_kernel_api::model::ModelSelection;
 use rust_cli_kernel_api::orchestration::{
-    AutoCompactOutcome, CompactRequest, CompactResult, CompactTracking, Compactor, HookRunner,
-    OrchestrationError, QueryRunner, ToolRegistry,
+    AutoCompactOutcome, CompactProgress, CompactRequest, CompactResult, CompactTracking, Compactor,
+    HookRunner, OrchestrationError, QueryRunner, ToolRegistry,
 };
 use rust_cli_kernel_api::provider::ModelLimits;
 use rust_cli_kernel_api::store::ArtifactStore;
@@ -77,6 +78,27 @@ pub struct CompactPorts {
     pub operations: Operations,
 }
 
+/// 配置的 `compact.autoThresholdTokens`（compact.md §2.3）：进程里一份，入口放初值，Puffin 的设置写回后换掉它；每次
+/// 判定现读（[`CompactConfig::thresholds`]），所以正在运行的会话从下一次判定起就用新值。0 是没有设置。
+#[derive(Clone, Default)]
+pub struct AutoCompactAt(Arc<AtomicU64>);
+
+impl AutoCompactAt {
+    pub fn new(at: Option<u64>) -> Self {
+        let cell = Self::default();
+        cell.set(at);
+        cell
+    }
+
+    pub fn get(&self) -> Option<u64> {
+        Some(self.0.load(Ordering::Relaxed)).filter(|at| *at > 0)
+    }
+
+    pub fn set(&self, at: Option<u64>) {
+        self.0.store(at.unwrap_or(0), Ordering::Relaxed);
+    }
+}
+
 /// 入口从设置与环境变量构造（自动压缩的设置、`DISABLE_COMPACT`；`ZCODE_AUTOCOMPACT_PCT_OVERRIDE`、
 /// `ZCODE_AUTO_COMPACT_WINDOW`、`ZCODE_MAX_OUTPUT_TOKENS`，修复线 F42）。
 #[derive(Clone)]
@@ -85,7 +107,10 @@ pub struct CompactConfig {
     pub auto: bool,
     /// `/compact` 能用（`DISABLE_COMPACT` 没设）。只决定“上下文快满”提示的后半句（compact.md §2.1）。
     pub compact_command: bool,
+    /// 环境变量给的阈值配置；`at` 不用这里的，用 [`Self::at`]（[`Self::thresholds`] 合成）。
     pub thresholds: Thresholds,
+    /// 配置的 `compact.autoThresholdTokens`（compact.md §2.3）。
+    pub at: AutoCompactAt,
     /// 模型上限查询（compact.md §2，修复线 F61）：窗口与输出上限的唯一来源，入口在两种模式下都接上（平台层、显式
     /// 覆盖的内置规则）。没有时（测试）按卡片与默认窗口。
     pub limits: Option<Arc<dyn ModelLimits>>,
@@ -97,12 +122,21 @@ impl Default for CompactConfig {
             auto: true,
             compact_command: true,
             thresholds: Thresholds::default(),
+            at: AutoCompactAt::default(),
             limits: None,
         }
     }
 }
 
 impl CompactConfig {
+    /// 这一刻的阈值配置：环境变量的那些加上现读的 `compact.autoThresholdTokens`（compact.md §2.3）。
+    pub fn thresholds(&self) -> Thresholds {
+        Thresholds {
+            at: self.at.get(),
+            ..self.thresholds
+        }
+    }
+
     /// 这个选择的窗口与输出上限（模型上限查询 → 卡片 → 默认窗口）。自动压缩的判定、footer 的 ctx、“上下文快满”
     /// 的提示与 `/context` 都只经这里（compact.md §2）。
     ///
@@ -144,10 +178,64 @@ impl Compaction {
         request: &CompactRequest,
         fallback: bool,
         cancel: &CancellationToken,
+        progress: Option<&dyn CompactProgress>,
     ) -> Result<CompactResult, Failure> {
         Engine { ports: &self.ports }
-            .run(request, fallback, cancel)
+            .run(request, fallback, cancel, progress)
             .await
+    }
+
+    /// 自动压缩的判定、熔断与压缩；`progress` 见 [`Engine::run`]。
+    async fn auto(
+        &self,
+        mut request: CompactRequest,
+        tracking: &mut CompactTracking,
+        cancel: &CancellationToken,
+        progress: Option<&dyn CompactProgress>,
+    ) -> AutoCompactOutcome {
+        if !self.config.auto || tracking.consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+            return AutoCompactOutcome::NotNeeded;
+        }
+        let facts = self.config.facts(&request.selection);
+        let tokens = Self::tokens(&request.messages);
+        if !window::should_compact(tokens, &facts, &self.config.thresholds()) {
+            return AutoCompactOutcome::NotNeeded;
+        }
+        let rapid = if tracking.compacted && tracking.turn_counter < RAPID_REFILL_TURNS {
+            tracking.consecutive_rapid_refills + 1
+        } else {
+            0
+        };
+        if rapid >= RAPID_REFILL_LIMIT {
+            return AutoCompactOutcome::Thrashing {
+                message: THRASHING.to_owned(),
+            };
+        }
+        request.trigger = CompactTrigger::Auto;
+        // 阈值触发只在达到阻塞线时许“全部摘要”（compact.md §3.1）。
+        let blocked =
+            window::level(tokens, &facts, &self.config.thresholds()) == window::Level::Blocked;
+        match self.run(&request, blocked, cancel, progress).await {
+            Ok(result) => {
+                *tracking = CompactTracking {
+                    compacted: true,
+                    turn_counter: 0,
+                    consecutive_failures: 0,
+                    consecutive_rapid_refills: rapid,
+                };
+                AutoCompactOutcome::Compacted {
+                    result: Box::new(result),
+                }
+            }
+            // 被 PreCompact hook 拦下不算失败，照常发请求。
+            Err(Failure::Blocked(_)) => AutoCompactOutcome::NotNeeded,
+            Err(failure) => {
+                tracking.consecutive_failures += 1;
+                AutoCompactOutcome::Failed {
+                    message: failure.to_string(),
+                }
+            }
+        }
     }
 }
 
@@ -158,18 +246,25 @@ impl Compactor for Compaction {
             && window::should_compact(
                 Self::tokens(history),
                 &self.config.facts(selection),
-                &self.config.thresholds,
+                &self.config.thresholds(),
             )
     }
 
     /// footer 的 ctx（tui-display.md §2.6，修复线 F27）：`(token, 有效窗口)`，与 [`Self::context_notice`] 同一套 token、
     /// 窗口（[`CompactConfig::facts`]）与覆盖。F14 起这里没有实现（提示改成 `context_notice`），F27 起会话 actor 又发这一对值。
-    fn context_usage(&self, history: &[Message], selection: &ModelSelection) -> Option<(u64, u64)> {
+    /// `compact_at` 是生效的自动压缩位置（compact.md §2.3），界面不自己算。
+    fn context_usage(
+        &self,
+        history: &[Message],
+        selection: &ModelSelection,
+    ) -> Option<ContextOccupancy> {
         let facts = self.config.facts(selection);
-        Some((
-            Self::tokens(history),
-            window::effective(&facts, &self.config.thresholds),
-        ))
+        let thresholds = self.config.thresholds();
+        Some(ContextOccupancy {
+            used_tokens: Self::tokens(history),
+            max_tokens: window::effective(&facts, &thresholds),
+            compact_at: window::compact_at(&facts, &thresholds, self.config.auto),
+        })
     }
 
     /// 输入框下方“上下文快满”的提示（compact.md §2.1）：与 [`Self::should_auto_compact`] 同一套 token、窗口
@@ -183,7 +278,7 @@ impl Compactor for Compaction {
         Some(window::notice(
             Self::tokens(history),
             &facts,
-            &self.config.thresholds,
+            &self.config.thresholds(),
             self.config.auto,
             self.config.compact_command,
         ))
@@ -191,53 +286,22 @@ impl Compactor for Compaction {
 
     async fn auto_compact(
         &self,
-        mut request: CompactRequest,
+        request: CompactRequest,
         tracking: &mut CompactTracking,
         cancel: CancellationToken,
     ) -> Result<AutoCompactOutcome, OrchestrationError> {
-        if !self.config.auto || tracking.consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-            return Ok(AutoCompactOutcome::NotNeeded);
-        }
-        let facts = self.config.facts(&request.selection);
-        let tokens = Self::tokens(&request.messages);
-        if !window::should_compact(tokens, &facts, &self.config.thresholds) {
-            return Ok(AutoCompactOutcome::NotNeeded);
-        }
-        let rapid = if tracking.compacted && tracking.turn_counter < RAPID_REFILL_TURNS {
-            tracking.consecutive_rapid_refills + 1
-        } else {
-            0
-        };
-        if rapid >= RAPID_REFILL_LIMIT {
-            return Ok(AutoCompactOutcome::Thrashing {
-                message: THRASHING.to_owned(),
-            });
-        }
-        request.trigger = CompactTrigger::Auto;
-        // 阈值触发只在达到阻塞线时许“全部摘要”（compact.md §3.1）。
-        let blocked =
-            window::level(tokens, &facts, &self.config.thresholds) == window::Level::Blocked;
-        match self.run(&request, blocked, &cancel).await {
-            Ok(result) => {
-                *tracking = CompactTracking {
-                    compacted: true,
-                    turn_counter: 0,
-                    consecutive_failures: 0,
-                    consecutive_rapid_refills: rapid,
-                };
-                Ok(AutoCompactOutcome::Compacted {
-                    result: Box::new(result),
-                })
-            }
-            // 被 PreCompact hook 拦下不算失败，照常发请求。
-            Err(Failure::Blocked(_)) => Ok(AutoCompactOutcome::NotNeeded),
-            Err(failure) => {
-                tracking.consecutive_failures += 1;
-                Ok(AutoCompactOutcome::Failed {
-                    message: failure.to_string(),
-                })
-            }
-        }
+        Ok(self.auto(request, tracking, &cancel, None).await)
+    }
+
+    /// 带进度的自动压缩（compact.md §4.1）：开始与失败由引擎在摘要请求前后说。
+    async fn auto_compact_with(
+        &self,
+        request: CompactRequest,
+        tracking: &mut CompactTracking,
+        cancel: CancellationToken,
+        progress: &dyn CompactProgress,
+    ) -> Result<AutoCompactOutcome, OrchestrationError> {
+        Ok(self.auto(request, tracking, &cancel, Some(progress)).await)
     }
 
     /// 发请求前的阻塞线（compact.md §2.2）：与自动压缩同一套窗口、token 与开关。
@@ -248,11 +312,9 @@ impl Compactor for Compaction {
         failure: Option<&str>,
     ) -> Option<String> {
         let facts = self.config.facts(selection);
-        let thresholds = &self.config.thresholds;
+        let thresholds = &self.config.thresholds();
         // 不拦的情形先判断，不为它数 token。
-        if self.config.auto
-            && window::window(&facts, thresholds).source == window::WindowSource::Auto
-        {
+        if self.config.auto && window::reactive_only(&facts, thresholds) {
             return None;
         }
         window::blocks(Self::tokens(history), &facts, thresholds, self.config.auto)
@@ -270,7 +332,7 @@ impl Compactor for Compaction {
             });
         }
         // 手动与反应式压缩许“全部摘要”（没有媒体超限错误时）。
-        self.run(&request, true, &cancel)
+        self.run(&request, true, &cancel, None)
             .await
             .map_err(|f| failed(&f))
     }

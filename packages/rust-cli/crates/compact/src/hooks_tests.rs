@@ -51,7 +51,7 @@ async fn session_start_runs_inside_every_compaction_before_post_compact() {
         let mut request = request(vec![human("u1", "hi"), reply("a1", "ok", None)], trigger);
         request.agent = Some(AgentId::new("agent_1"));
         let result = Engine { ports: &ports }
-            .run(&request, true, &CancellationToken::new())
+            .run(&request, true, &CancellationToken::new(), None)
             .await
             .unwrap();
         let seen = hooks.0.lock_unpoisoned().clone();

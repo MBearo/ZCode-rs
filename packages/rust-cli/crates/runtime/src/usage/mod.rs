@@ -3,6 +3,7 @@
 
 mod arith;
 mod counts;
+mod detail;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -14,7 +15,8 @@ use rust_cli_compact::window::{WindowSource as Source, context_buffer, window};
 use rust_cli_context::PromptAssembler;
 use rust_cli_ext::skills::{SkillCatalog, SkillSource};
 use rust_cli_kernel_api::context_usage::{
-    AgentUsage, ContextUsage, ContextUsageQuery, MemoryFileUsage, SkillUsage, WindowSource,
+    AgentUsage, ContextUsage, ContextUsageQuery, MemoryFileUsage, PromptSectionUsage, SkillUsage,
+    ToolUsage, WindowSource,
 };
 use rust_cli_kernel_api::history;
 use rust_cli_kernel_api::ids::SessionId;
@@ -223,10 +225,13 @@ impl UsageAnalyzer {
         let mcp_definitions: Vec<ToolDefinition> =
             wired.mcp.iter().map(|(tool, _)| tool.clone()).collect();
         let mcp_total = counter.tools(&mcp_definitions);
-        let sections: Vec<u64> = analysis
+        let sections: Vec<PromptSectionUsage> = analysis
             .sections
             .iter()
-            .map(|section| counter.text(section))
+            .map(|section| PromptSectionUsage {
+                name: section.name.to_owned(),
+                tokens: counter.text(&section.text),
+            })
             .collect();
         let memory: Vec<u64> = analysis
             .memory_files
@@ -234,6 +239,18 @@ impl UsageAnalyzer {
             .map(|file| counter.text(&file.content))
             .collect();
         let listed = counter.tools(&wired.listed);
+        // 每个工具的定义单独估算、减去开销（与延迟的工具相同）：列出的是明细的权重，延迟的就是明细（§3.1）。
+        let each = |tools: &[ToolDefinition]| -> Vec<ToolUsage> {
+            tools
+                .iter()
+                .map(|tool| ToolUsage {
+                    name: tool.name.clone(),
+                    tokens: counter
+                        .tools(std::slice::from_ref(tool))
+                        .saturating_sub(TOOL_OVERHEAD),
+                })
+                .collect()
+        };
         let agents: Vec<u64> = custom
             .iter()
             .map(|agent| counter.text(&format!("{} {}", agent.agent_type, agent.when_to_use)))
@@ -244,17 +261,24 @@ impl UsageAnalyzer {
             counter.text(&instructions.join("\n\n"))
         };
         // 消息：没有用量锚点时估算规范化后的活动历史（F89 到 F93 之间先经 ToolSearch 的降级函数，那只为计数请求服务）。
-        let counted = anchor.is_none().then(|| {
-            let kept = active.iter().copied().filter(|message| {
+        let kept: Vec<&Message> = active
+            .iter()
+            .copied()
+            .filter(|message| {
                 !matches!(message, Message::Attachment(found)
                     if found.source == "instructions" || found.source == "mcp_instructions_delta")
-            });
+            })
+            .collect();
+        let counted = anchor.is_none().then(|| {
             let configured = capabilities.map(|found| found.supports_mid_conversation_system);
-            counter.count(&rust_cli_query::api_messages(kept, &model, configured), &[])
+            counter.count(
+                &rust_cli_query::api_messages(kept.iter().copied(), &model, configured),
+                &[],
+            )
         });
         // 与自动压缩、footer 同一个来源（compact.md §2，修复线 F61：以前这里读目录，显式覆盖下没有目录，按 200,000）。
         let facts = self.compact.facts(&query.selection);
-        let thresholds = &self.compact.thresholds;
+        let thresholds = &self.compact.thresholds();
         let found = window(&facts, thresholds);
         let measured = Measured {
             model,
@@ -274,15 +298,8 @@ impl UsageAnalyzer {
                 })
                 .collect(),
             listed_tools: listed,
-            deferred_tools: wired
-                .deferred
-                .iter()
-                .map(|tool| {
-                    counter
-                        .tools(std::slice::from_ref(tool))
-                        .saturating_sub(TOOL_OVERHEAD)
-                })
-                .collect(),
+            listed: each(&wired.listed),
+            deferred_tools: each(&wired.deferred),
             mcp_total,
             mcp_tools: wired
                 .mcp
@@ -328,6 +345,7 @@ impl UsageAnalyzer {
                 (Some((input, tail)), _) => Messages::Measured { input, tail },
                 (None, counted) => Messages::Counted(counted.unwrap_or(0)),
             },
+            pieces: detail::pieces(&kept, per_token),
         };
         Ok(arith::usage(measured))
     }

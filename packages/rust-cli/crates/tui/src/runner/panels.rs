@@ -2,7 +2,6 @@
 //! 快照、只读视图的查询。回执按请求序号丢掉过时的（`FuturesUnordered` 里回执的先后不定），不用超时。
 use futures_util::stream::{self, BoxStream};
 use futures_util::{FutureExt, StreamExt};
-use ratatui::backend::Backend;
 use rust_cli_kernel_api::ids::AgentId;
 use rust_cli_kernel_api::panels::{ShellDetail, SubagentEntry, TasksSnapshot};
 use rust_cli_kernel_api::session_api::{KernelError, SessionView};
@@ -19,6 +18,10 @@ pub(super) struct Panels {
     changes: BoxStream<'static, ()>,
     /// 子代理列表与后台任务的同一份快照的请求序号（修复线 F34；原来列表与后台任务各有一个序号）。
     tasks_seq: u64,
+    /// 子代理的数字（`refresh_figures`）：发出的最后一个请求序号与已收下的最新序号。比收下的旧的回执丢掉（晚到的旧数不
+    /// 覆盖新的）；不要求是最后发出的那个，子代理很忙、查询一个接一个时数字也照样更新。
+    pub(super) figures_seq: u64,
+    pub(super) figures_taken: u64,
     view_seq: u64,
     shell_seq: u64,
 }
@@ -28,6 +31,8 @@ impl Default for Panels {
         Self {
             changes: stream::pending().boxed(),
             tasks_seq: 0,
+            figures_seq: 0,
+            figures_taken: 0,
             view_seq: 0,
             shell_seq: 0,
         }
@@ -64,7 +69,7 @@ pub(super) enum PanelDone {
     },
 }
 
-impl<B: Backend> Loop<'_, B> {
+impl Loop<'_> {
     /// 有了会话（新建、切换）：订阅子代理的变化，先取一次子代理列表与后台任务。
     pub(super) fn attach_panels(&mut self) {
         let Some(session) = self.outbox.session().cloned() else {
@@ -72,19 +77,20 @@ impl<B: Backend> Loop<'_, B> {
         };
         self.panels.changes = session.subagent_changes();
         self.refresh_tasks();
+        // 会话的目标（状态栏的记号，cards.rs）。
+        self.refresh_goal();
     }
 
-    /// 离开会话：不再订阅，列表、pill 与查看都清掉（新会话的快照到达前不显示旧的）；在途的快照回执作废。
+    /// 离开会话：不再订阅，子代理、后台命令与查看都清掉（新会话的快照到达前不显示旧的）；在途的快照回执作废。
     ///
-    /// 修复（修复线 F34）：原来这里只清列表，pill 留到新会话打开时 `App::reset` 才清，切换会话的这段时间里是“列表没了、
-    /// pill 还在”的帧。两者是同一份快照，一起清。
+    /// 修复（修复线 F34）：原来这里只清子代理列表，后台命令（当时的 pill）留到新会话打开时 `App::reset` 才清，切换会话的
+    /// 这段时间里是“列表没了、pill 还在”的帧。两者是同一份快照，一起清。
     pub(super) fn detach_panels(&mut self) {
         self.panels.changes = stream::pending().boxed();
         self.panels.tasks_seq += 1;
         self.panels.view_seq += 1;
         self.app.snapshots.agents = crate::ui::agents::AgentList::default();
         self.app.snapshots.background.clear();
-        self.app.focus = None;
         if self.app.viewing.take().is_some() {
             self.cache.clear();
             self.app.port.find = None;
@@ -97,7 +103,7 @@ impl<B: Backend> Loop<'_, B> {
     ///
     /// 修复（修复线 F34，用户决定 2026-10-20）：原来列表在变化通知之后取 `subagents()`、pill 在主会话事件之后取
     /// `background_tasks()`，两次查询、两个序号，谁先画出不定，子代理里再派生的子代理也不刷新 pill（F32 查明，D16）。
-    /// 现在一次查询、一个序号，回执一次收下、一次重画，列表的行与 pill 同一帧出现（两者出自同一份快照）。
+    /// 现在一次查询、一个序号，回执一次收下、一次重画，子代理与后台命令同一帧出现（两者出自同一份快照）。
     pub(super) fn refresh_tasks(&mut self) {
         let Some(session) = self.outbox.session().cloned() else {
             return;
@@ -175,7 +181,7 @@ impl<B: Backend> Loop<'_, B> {
         );
     }
 
-    /// 回到主会话：两个视图的行 id 会重复，清掉排版缓存、滚动、选区与单独展开的块。footer 的命中率换回主会话的：清空
+    /// 回到主会话：两个视图的行 id 会重复，清掉排版缓存、滚动、选区与单独展开的块。`/stats` 卡的命中率换回主会话的：清空
     /// 回执（序号加一，在途的子会话回执作废）再查主会话（修复线 F112，tui-panels.md §1.7）。
     fn stop_viewing(&mut self) {
         self.panels.view_seq += 1;
@@ -200,22 +206,29 @@ impl<B: Backend> Loop<'_, B> {
                 if seq != self.panels.tasks_seq {
                     return;
                 }
-                // 会话不支持时当作没有子代理、没有后台任务。列表与 pill 一起换（同一份快照）。
+                // 会话不支持时当作没有子代理、没有后台任务。子代理与命令一起换（同一份快照）。
                 let TasksSnapshot {
                     subagents,
                     background,
                 } = snapshot.unwrap_or_default();
+                // 子会话提交了新的消息（版本变了）或子代理结束了：它的请求统计可能变了，重查数字（tui-panels.md §1.3）。
+                let moved = |entries: &[rust_cli_kernel_api::panels::SubagentEntry]| {
+                    entries
+                        .iter()
+                        .map(|e| (e.child.clone(), e.version, e.status))
+                        .collect::<Vec<_>>()
+                };
+                let figures_moved = moved(&subagents) != moved(&self.app.snapshots.agents.entries);
                 self.app.snapshots.agents = crate::ui::agents::AgentList {
                     entries: subagents,
-                    at: Some(std::time::Instant::now()),
+                    at: Some(self.now_ms()),
+                    shown: self.app.snapshots.agents.shown,
                 };
                 self.app.snapshots.background = background;
-                // pill 没了：选中也随之取消（tui-panels.md §3.1）。
-                let gone = crate::ui::manage::pill(&self.app.snapshots.background, lang).is_none();
-                if gone && self.app.focus == Some(crate::ui::agents::Focus::Pill) {
-                    self.app.focus = None;
-                }
                 self.follow_viewed();
+                if figures_moved {
+                    self.refresh_figures();
+                }
             }
             PanelDone::Viewed { seq, entry, view } => {
                 if seq != self.panels.view_seq {
@@ -284,7 +297,7 @@ impl<B: Backend> Loop<'_, B> {
     /// 新的列表快照：正在查看的子代理不在了就改看它的 owner（还在、没驱逐时），否则回到主会话（tui-panels.md §1.6）；
     /// 版本或状态变了就重取它的快照。
     fn follow_viewed(&mut self) {
-        match self.app.viewed_gone(std::time::Instant::now()) {
+        match self.app.viewed_gone() {
             Some(Some(owner)) => return self.load_agent(&owner),
             Some(None) => return self.stop_viewing(),
             None => {}

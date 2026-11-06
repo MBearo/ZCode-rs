@@ -1,24 +1,38 @@
 // 复制自 apps/zcode-host/crates/tui/src/ui/list_tests.rs（feat/rs 79b6691c55）。
 use crossterm::event::KeyCode;
 use rust_cli_base::models::{GLM_4_6_ACCOUNT, GLM_4_ACCOUNT, GLM_5_ACCOUNT};
+use rust_cli_kernel_api::model::ModelSelection;
+use rust_cli_kernel_api::permission::PermissionMode;
+use rust_cli_tui_kit::render::{StyledLine, attr};
 
 use super::*;
+use crate::ui::i18n::Lang;
+use crate::ui::ink::Ink;
+use crate::ui::lines::plain;
+use crate::ui::probe::ColorLevel;
 use crate::ui::test_support::key;
-use crate::ui::text::plain;
+
+fn ink() -> Ink {
+    Ink::new(
+        ColorLevel::TrueColor,
+        Some((255, 255, 255)),
+        Some((0, 0, 0)),
+    )
+}
 
 fn item(label: &str, current: bool) -> Item {
     Item {
         label: label.into(),
         description: format!("{label} description"),
         current,
-        value: Choice::Effort(label.into()),
+        value: Choice::Theme(label.into()),
         ..Item::default()
     }
 }
 
-/// 选中的值是 `Choice::Effort(label)`（测试用它当带名字的值）。
+/// 选中的值是 `Choice::Theme(label)`（测试用它当带名字的值）。
 fn chose(outcome: Outcome, label: &str) -> bool {
-    matches!(outcome, Outcome::Chosen { choice: Choice::Effort(v), level: None } if v == label)
+    matches!(outcome, Outcome::Chosen { choice: Choice::Theme(v), level: None } if v == label)
 }
 
 /// 选中的是这个模型、这一档。
@@ -35,25 +49,17 @@ fn model_choice(provider: &str, model: &str) -> Choice {
 }
 
 fn text(list: &ListView, width: usize) -> Vec<String> {
-    list.lines(
-        width,
-        20,
-        Lang::En,
-        &crate::ui::palette::Palette::new(
-            crate::ui::palette::ColorLevel::TrueColor,
-            Some((0, 0, 0)),
-        ),
-    )
-    .0
-    .iter()
-    .map(|line| plain(line).trim_end().to_owned())
-    .collect()
+    list.lines(width, Lang::En, &ink())
+        .0
+        .iter()
+        .map(|line| plain(line).trim_end().to_owned())
+        .collect()
 }
 
 #[test]
 fn starts_on_the_current_item_wraps_around_and_chooses_with_enter_or_digits() {
     let mut list = ListView::new(
-        Shape::Modes,
+        Purpose::Permissions,
         "Pick".into(),
         vec![item("a", false), item("b", true)],
         "none".into(),
@@ -68,33 +74,115 @@ fn starts_on_the_current_item_wraps_around_and_chooses_with_enter_or_digits() {
     assert!(matches!(list.on_key(key(KeyCode::Esc)), Outcome::Closed));
 }
 
+/// 一层（tui-kit.md §4.0「板」，Puffin 输入框的板上的那一层）：板的上下沿由底部栈画，按键提示在槽里；这一层是头一行（标题
+/// 与放得下的副标题）与从第 3 列起的条目（没有指针与序号；当前值后面 `current`）。模型、权限、导出与回退的列表没有头一行。
 #[test]
-fn the_frame_has_a_rule_a_bold_title_a_focus_pointer_and_a_hint() {
+fn the_layer_has_a_head_and_rows_from_column_three() {
+    let list = |purpose: Purpose| {
+        ListView::new(
+            purpose,
+            "Pick".into(),
+            vec![item("a", false), item("b", true)],
+            "none".into(),
+        )
+        .with_subtitle("Choose one".into())
+    };
+    let lines = text(&list(Purpose::Info), 40);
+    assert_eq!(
+        lines,
+        [
+            "   Pick   Choose one",
+            "   a   a description",
+            "   b   b description   current"
+        ]
+    );
+    let lines = text(&list(Purpose::Export), 60);
+    assert_eq!(
+        lines,
+        [
+            format!("   {:<21}a description", "a"),
+            format!("   {:<21}b description   current", "b"),
+        ]
+    );
+}
+
+/// 条目的标签（Puffin 模式列表的 `on` / `off`）代替 `current`；权限与导出的名字补到 21 格（Puffin `mode_list_rows`、
+/// `export_rows`）。
+#[test]
+fn a_tag_replaces_current_and_mode_names_pad_to_twenty_one() {
+    let tagged = Item {
+        tag: "off".into(),
+        ..item("Plan", true)
+    };
     let list = ListView::new(
-        Shape::OneLine,
+        Purpose::Permissions,
+        String::new(),
+        vec![item("Ask", true), tagged],
+        "none".into(),
+    );
+    assert_eq!(
+        text(&list, 60),
+        [
+            format!("   {:<21}Ask description   current", "Ask"),
+            format!("   {:<21}Plan description   off", "Plan"),
+        ]
+    );
+}
+
+/// 墨色（tui-kit.md §4.2）：头 fg2 粗体、副标题 fg3；选中的名字是 `chosen`（rich 是 brand）、说明 fg2；其余名字 fg2、
+/// 说明 fg3；`current` fg3。panel 底由板铺（底部栈）。
+#[test]
+fn the_layer_takes_puffins_inks() {
+    let ink = ink();
+    let theme = ink.theme;
+    let list = ListView::new(
+        Purpose::Info,
         "Pick".into(),
-        vec![item("a", false), item("b", true)],
+        vec![item("a", true), item("b", false)],
         "none".into(),
     )
     .with_subtitle("Choose one".into());
-    let lines = text(&list, 40);
-    assert_eq!(lines[0], "─".repeat(40));
-    assert_eq!(lines[1], "  Pick");
-    assert_eq!(lines[2], "  Choose one");
-    assert!(
-        lines[4].starts_with("    1. a     a description"),
-        "{lines:?}"
+    let (lines, rows) = list.lines(40, Lang::En, &ink);
+    let head = &lines[0];
+    let style_of = |line: &StyledLine, text: &str| {
+        line.spans
+            .iter()
+            .find(|span| span.text.contains(text))
+            .map(|span| span.style)
+    };
+    assert_eq!(
+        style_of(head, "Pick"),
+        Some(theme.fg2.with_attr(attr::BOLD))
     );
-    assert!(
-        lines[5].starts_with("  › 2. b ✔   b description"),
-        "{lines:?}"
-    );
-    assert_eq!(lines.last().unwrap(), "  Enter to select · Esc to cancel");
+    assert_eq!(style_of(head, "Choose"), Some(theme.fg3));
+    let focused = &lines[rows[0].0];
+    assert_eq!(style_of(focused, "a "), Some(ink.selection()));
+    assert_eq!(style_of(focused, "a description"), Some(theme.fg2));
+    assert_eq!(style_of(focused, "current"), Some(theme.fg3));
+    let other = &lines[rows[1].0];
+    assert_eq!(style_of(other, "b "), Some(theme.fg2));
+    assert_eq!(style_of(other, "b description"), Some(theme.fg3));
 }
 
-/// `/mode` 的选择器（工作线 F76，照 App 的菜单）：每个模式两行，名称（当前的打勾）与下面一行的说明。
+/// plain（16 色）：选中的名字 brand 加粗（板的上下沿是 line 色的 `─`，由底部栈画）。
 #[test]
-fn the_mode_picker_puts_the_description_under_the_name() {
+fn plain_terminals_choose_in_bold() {
+    let ink = Ink::new(ColorLevel::Ansi16, Some((255, 255, 255)), Some((0, 0, 0)));
+    let list = ListView::new(
+        Purpose::Export,
+        "Pick".into(),
+        vec![item("a", true)],
+        "none".into(),
+    );
+    let (lines, rows) = list.lines(30, Lang::En, &ink);
+    let focused = &lines[rows[0].0];
+    assert_eq!(focused.spans[1].style, ink.selection());
+    assert!(ink.selection().has_attr(attr::BOLD));
+}
+
+/// `/mode` 的选择器（Puffin `/mode`）：每个模式一行，名字补到最长的名字之后再空三格，然后是说明；当前的后面 `current`。
+#[test]
+fn the_mode_picker_has_one_row_per_mode() {
     let mode = |label: &str, mode: PermissionMode, current: bool| Item {
         label: label.into(),
         description: format!("{label} description"),
@@ -103,7 +191,7 @@ fn the_mode_picker_puts_the_description_under_the_name() {
         ..Item::default()
     };
     let list = ListView::new(
-        Shape::Modes,
+        Purpose::Permissions,
         "Mode".into(),
         vec![
             mode("Ask before changes", PermissionMode::Default, true),
@@ -111,14 +199,12 @@ fn the_mode_picker_puts_the_description_under_the_name() {
         ],
         "none".into(),
     );
-    let lines = text(&list, 50);
-    assert!(
-        lines[3].starts_with("  › 1. Ask before changes ✔"),
-        "{lines:?}"
+    let lines = text(&list, 80);
+    assert_eq!(
+        lines[0],
+        "   Ask before changes   Ask before changes description   current"
     );
-    assert_eq!(lines[4].trim_end(), "       Ask before changes description");
-    assert_eq!(lines[5].trim_end(), "    2. Full access");
-    assert_eq!(lines[6].trim_end(), "       Full access description");
+    assert_eq!(lines[1], "   Full access          Full access description");
 }
 
 #[test]
@@ -130,9 +216,10 @@ fn models_have_one_row_each_and_arrows_change_the_effort() {
         value: model_choice("zai", label),
         levels: vec!["low".into(), "medium".into(), "high".into()],
         level,
+        tag: String::new(),
     };
     let mut list = ListView::new(
-        Shape::OneLine,
+        Purpose::Model,
         "Select model".into(),
         vec![
             model(GLM_5_ACCOUNT, true, 2),
@@ -140,19 +227,23 @@ fn models_have_one_row_each_and_arrows_change_the_effort() {
         ],
         "none".into(),
     );
+    // 档位行（Puffin 的 Steps）：窄于 64 列时没有 provider 列，标签 `Effort ` 后面是条与档位名。
     let lines = text(&list, 60);
     assert!(
-        lines.iter().any(|l| l == "  ◉ high effort  ←/→ to adjust"),
+        lines.iter().any(|l| l == "   Effort  ▄▄ ▅▅ ▆▆  high"),
         "{lines:?}"
     );
     list.on_key(key(KeyCode::Left));
     let lines = text(&list, 60);
     assert!(
-        lines
-            .iter()
-            .any(|l| l == "  ● medium effort  ←/→ to adjust"),
+        lines.iter().any(|l| l == "   Effort  ▄▄ ▅▅ ▆▆  medium"),
         "{lines:?}"
     );
+    // 宽时有 provider 列（只在一组的第一行写出），当前模型后面 `current`（槽的 `←→ effort` 由 `pane.rs` 画）。
+    let lines = text(&list, 80);
+    assert_eq!(lines[0], format!("   Z.ai   {GLM_5_ACCOUNT}   current"));
+    assert_eq!(lines[1], format!("          {GLM_4_ACCOUNT}"));
+    assert_eq!(lines[2], "   Effort ▄▄ ▅▅ ▆▆  medium");
     assert!(chose_model(
         list.on_key(key(KeyCode::Enter)),
         GLM_5_ACCOUNT,
@@ -167,44 +258,9 @@ fn models_have_one_row_each_and_arrows_change_the_effort() {
 }
 
 #[test]
-fn two_line_lists_search_and_two_lines_per_item() {
-    let mut list = ListView::new(
-        Shape::TwoLines,
-        "Resume session".into(),
-        vec![
-            Item {
-                label: "alpha".into(),
-                description: "5m ago".into(),
-                current: true,
-                value: Choice::Effort("a".into()),
-                ..Item::default()
-            },
-            Item {
-                label: "beta".into(),
-                description: "2h ago".into(),
-                value: Choice::Effort("b".into()),
-                ..Item::default()
-            },
-        ],
-        "none".into(),
-    )
-    .filterable();
-    let lines = text(&list, 60);
-    assert_eq!(lines[2], "  ⌕ Search…");
-    assert!(lines.contains(&"  › alpha".to_owned()), "{lines:?}");
-    assert!(
-        lines.contains(&"    5m ago · current".to_owned()),
-        "{lines:?}"
-    );
-    list.on_key(key(KeyCode::Char('b')));
-    assert_eq!(list.visible().len(), 1);
-    assert!(chose(list.on_key(key(KeyCode::Enter)), "b"));
-}
-
-#[test]
 fn the_wheel_moves_the_focus_and_stops_at_the_ends() {
     let mut list = ListView::new(
-        Shape::OneLine,
+        Purpose::Permissions,
         "Pick".into(),
         vec![item("a", true), item("b", false), item("c", false)],
         "none".into(),
@@ -227,9 +283,10 @@ fn models_are_searchable_and_digits_go_into_the_search() {
         value: model_choice("p", label),
         levels: vec!["low".into(), "high".into()],
         level: 1,
+        tag: String::new(),
     };
     let mut list = ListView::new(
-        Shape::OneLine,
+        Purpose::Model,
         "Select model".into(),
         vec![
             model(GLM_5_ACCOUNT, "Z.ai", false),
@@ -240,14 +297,13 @@ fn models_are_searchable_and_digits_go_into_the_search() {
     )
     .with_subtitle("Applies to this session".into())
     .filterable();
-    // 打开时焦点仍在当前模型上；搜索行在副标题下面，条目不写编号。
+    // 打开时焦点仍在当前模型上（过滤的词在草稿里，tui-kit.md §4.0；`ListView` 自己的过滤在这里直接按键）。
     assert_eq!(list.selected, 1);
     let lines = text(&list, 60);
-    assert_eq!(lines[3], "  ⌕ Search…");
     assert!(
         lines
             .iter()
-            .any(|l| l.starts_with(&format!("  › {GLM_4_6_ACCOUNT} ✔"))),
+            .any(|l| l == &format!("   {GLM_4_6_ACCOUNT}   current")),
         "{lines:?}"
     );
     // 数字输入到搜索里，不直接选中。
@@ -271,6 +327,6 @@ fn models_are_searchable_and_digits_go_into_the_search() {
     // 有条目但没有匹配：写 No matches，不用列表为空时的说法。
     list.on_key(key(KeyCode::Char('x')));
     let lines = text(&list, 60);
-    assert!(lines.contains(&"  No matches".to_owned()), "{lines:?}");
+    assert!(lines.contains(&"   No matches".to_owned()), "{lines:?}");
     assert!(!lines.iter().any(|l| l.contains("none")), "{lines:?}");
 }

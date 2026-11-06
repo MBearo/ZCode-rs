@@ -109,11 +109,13 @@ impl Actor {
         if let Some(ContextOccupancy {
             used_tokens,
             max_tokens,
+            compact_at,
         }) = self.context_occupancy()
         {
             self.log.append(KernelEvent::ContextUsage {
                 used_tokens,
                 max_tokens,
+                compact_at,
             });
         }
     }
@@ -128,10 +130,6 @@ impl Actor {
         self.deps
             .compactor
             .context_usage(&self.messages, &self.selection)
-            .map(|(used_tokens, max_tokens)| ContextOccupancy {
-                used_tokens,
-                max_tokens,
-            })
     }
 }
 

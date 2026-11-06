@@ -13,7 +13,7 @@ use crate::env::{
     CommandEvent, EnvError, EnvFacts, EnvPath, FileContent, OperationContext, Outcome, ReadFile,
     StartCommand, WorkspaceRef, WriteFile, WriteReceipt,
 };
-use crate::env_shell::{ShellNotice, ShellState};
+use crate::env_shell::{BackgroundInfo, BackgroundStop, BackgroundTask, ShellNotice, ShellState};
 use crate::ids::{OperationId, SessionId, ShellTaskId};
 use crate::machine::Git;
 use crate::machine::{Background, Checkpoints, Commands, EnvInfo, Files, Pdf, Search, Shell};
@@ -25,6 +25,8 @@ pub struct NoticeEnvironment {
     acked: Mutex<Vec<u64>>,
     /// 还在跑的命令，与它还要经过几次状态查询才结束。
     running: Mutex<Vec<(ShellNotice, usize)>>,
+    /// 用 [`Self::run_in`] 登记的命令所在的会话：`background_command` 只在这个会话里认它（缺省哪个会话都认）。
+    sessions: Mutex<Vec<(ShellTaskId, SessionId)>>,
     /// `close_session` 的调用（会话与 `forget`），按顺序。
     closed: Mutex<Vec<(SessionId, bool)>>,
 }
@@ -38,6 +40,7 @@ impl Default for NoticeEnvironment {
             pushed: Mutex::default(),
             acked: Mutex::default(),
             running: Mutex::default(),
+            sessions: Mutex::default(),
             closed: Mutex::default(),
         }
     }
@@ -53,6 +56,14 @@ impl NoticeEnvironment {
     /// 一条后台命令在跑；第 `checks` 次 `shell_state` 报告它之后立即结束（模拟"刚查完就结束"的时序）。
     pub fn finish_after_checks(&self, notice: ShellNotice, checks: usize) {
         self.running.lock_unpoisoned().push((notice, checks));
+    }
+
+    /// 一条在 `session` 里一直跑的命令（TaskStop 按会话找它；`shell_state` 仍不分会话）。
+    pub fn run_in(&self, session: SessionId, notice: ShellNotice) {
+        self.sessions
+            .lock_unpoisoned()
+            .push((notice.task.clone(), session));
+        self.finish_after_checks(notice, usize::MAX);
     }
 
     pub fn acked(&self) -> Vec<u64> {
@@ -203,7 +214,49 @@ impl Shell for NoticeEnvironment {
 }
 
 impl Search for NoticeEnvironment {}
-impl Background for NoticeEnvironment {}
+/// 在跑的命令（`finish_after_checks` 登记的）能查、能停：停掉的不发终态通知，也不再算后台工作（同 env-local）。
+#[async_trait]
+impl Background for NoticeEnvironment {
+    async fn background_command(
+        &self,
+        request: BackgroundTask,
+    ) -> Result<Option<BackgroundInfo>, EnvError> {
+        let elsewhere = self
+            .sessions
+            .lock_unpoisoned()
+            .iter()
+            .any(|(task, session)| *task == request.task && *session != request.session);
+        if elsewhere {
+            return Ok(None);
+        }
+        let running = self.running.lock_unpoisoned();
+        Ok(running
+            .iter()
+            .find(|(notice, _)| notice.task == request.task)
+            .map(|(notice, _)| BackgroundInfo {
+                command: notice.description.clone(),
+                ..BackgroundInfo::default()
+            }))
+    }
+
+    async fn stop_background_command(
+        &self,
+        _context: OperationContext,
+        request: BackgroundTask,
+    ) -> Result<BackgroundStop, EnvError> {
+        let mut running = self.running.lock_unpoisoned();
+        let Some(index) = running
+            .iter()
+            .position(|(notice, _)| notice.task == request.task)
+        else {
+            return Ok(BackgroundStop::NotFound);
+        };
+        let (notice, _) = running.remove(index);
+        Ok(BackgroundStop::Stopped {
+            command: notice.description,
+        })
+    }
+}
 impl Checkpoints for NoticeEnvironment {}
 impl Pdf for NoticeEnvironment {}
 impl Git for NoticeEnvironment {}

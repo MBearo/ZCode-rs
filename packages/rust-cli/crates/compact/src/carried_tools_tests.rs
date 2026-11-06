@@ -47,6 +47,7 @@ async fn compact(history: Vec<Message>) -> CompactBoundary {
             &request(history, CompactTrigger::Auto),
             true,
             &CancellationToken::new(),
+            None,
         )
         .await
         .unwrap()

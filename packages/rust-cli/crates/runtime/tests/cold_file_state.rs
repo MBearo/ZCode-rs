@@ -141,7 +141,7 @@ mod cold_file_state {
                 ids: Arc::new(SequentialIds::default()),
             },
             Defaults {
-                selection: selection(),
+                selection: selection().into(),
                 mode: PermissionMode::Default,
                 max_turns: None,
                 search_tools: false,

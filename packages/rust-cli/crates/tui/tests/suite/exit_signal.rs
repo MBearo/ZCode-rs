@@ -48,11 +48,11 @@ async fn a_stop_signal_interrupts_the_running_turn_and_leaves() {
                 }),
             ],
         );
-        // 修复线 F35：等模型流出的文字，不等 `esc to interrupt`。后者在 TurnStarted 时就画出，输入要等
+        // 修复线 F35：等模型流出的文字，不等 `esc stop`。后者在 TurnStarted 时就画出，输入要等
         // UserPromptSubmit 跑完才提交；信号落在这段空档里时回合在提交输入之前中止，库里既没有输入也没有中断标记
         // （session-lifecycle.md §3.1 的空档）。流出的文字说明输入已提交、主循环在跑。
         let running = ui.wait_for("partial reply").await;
-        assert!(running.contains("esc to interrupt"), "{running}");
+        assert!(running.contains("esc stop"), "{running}");
         stop.cancel();
     });
     // 期限只用于让失败的测试结束。
@@ -99,7 +99,7 @@ async fn the_session_ends_only_after_the_loop_hands_the_exit_back() {
                 usage: Default::default(),
             })],
         );
-        ui.wait_for("esc to interrupt").await;
+        ui.wait_for("esc stop").await;
         stop.cancel();
     });
     // 期限只用于让失败的测试结束。

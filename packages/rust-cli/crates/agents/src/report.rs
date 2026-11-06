@@ -157,6 +157,7 @@ fn escape(text: &str) -> String {
 
 /// 完成通知的 `<task-notification>` 信封（不带说明与包装）。`<result>` 只在有最后的文本时出现，
 /// `<usage>` 只在完成（与停放时被停止）时出现（A2、A5；agents.md §5、§5.1）。`error` 是失败的原因。
+/// `keepalive`：命令保活、停放时送出的通知（agents.md §5.2 第 5 条），`<note>` 换成保活的说明（`notification_note_keepalive`）。
 pub(crate) fn envelope(
     agent: &str,
     tool_use: Option<&str>,
@@ -164,6 +165,7 @@ pub(crate) fn envelope(
     ending: Ending,
     report: &Report,
     error: Option<&str>,
+    keepalive: bool,
 ) -> String {
     let summary = escape(&format!(
         "Agent \"{description}\" {}",
@@ -199,6 +201,14 @@ pub(crate) fn envelope(
             ("tool_use", tool_use.unwrap_or_default()),
             ("status", ending.status().as_str()),
             ("summary", &summary),
+            (
+                "note",
+                if keepalive {
+                    texts::notification_note_keepalive()
+                } else {
+                    texts::notification_note()
+                },
+            ),
             ("body", &body),
         ],
     );
@@ -227,6 +237,7 @@ pub(crate) fn notification(
         ending,
         report,
         error,
+        false,
     ))
 }
 

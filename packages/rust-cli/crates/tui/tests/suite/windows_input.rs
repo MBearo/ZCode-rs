@@ -43,21 +43,21 @@ async fn altgr_characters_and_alt_codes_reach_the_input_box() {
         // 每个键都有按下与松开（Windows 的控制台）：配对的松开不重复插入。
         ui.send(altgr('@'));
         ui.send(release(altgr('@')));
-        ui.wait_for("❯ @").await;
+        ui.wait_for("› @").await;
         ui.send(altgr('{'));
         // AltGr 先松开：字母键的松开不带修饰键、字符也变了，照样配对。
         ui.send(release(KeyEvent::new(
             KeyCode::Char('7'),
             KeyModifiers::NONE,
         )));
-        ui.wait_for("❯ @{").await;
+        ui.wait_for("› @{").await;
         // alt+小键盘码：字符只在 Alt 键的松开事件里，前面没有它的按下。
         ui.send(KeyEvent::new_with_kind(
             KeyCode::Char('é'),
             KeyModifiers::NONE,
             KeyEventKind::Release,
         ));
-        ui.wait_for("❯ @{é").await;
+        ui.wait_for("› @{é").await;
     })
     .await;
 }
@@ -74,24 +74,28 @@ async fn other_platforms_ignore_ctrl_alt_characters_and_releases() {
             KeyEventKind::Release,
         ));
         ui.type_text("x");
-        let screen = ui.wait_for("❯ x").await;
+        let screen = ui.wait_for("› x").await;
         assert!(!screen.contains('@') && !screen.contains('é'), "{screen}");
     })
     .await;
 }
+
+/// 粘贴的六行。
+const PASTED: &str = "line one\nline two\nline three\nline four\nline five\nline six";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_paste_burst_folds_and_enter_inside_it_does_not_submit() {
     let model = GatedModel::scripted(vec![text_response(&["got it"])]);
     with_ui(model.clone(), windows(), |mut ui| async move {
         ui.wait_for("Ask before changes").await;
-        // Windows 上粘贴的三行是一串很快的字符键与 enter（一次送进事件循环）。
-        keys(&ui, "line one\nline two\nline three");
-        ui.wait_for("[Pasted text #1 +3 lines]").await;
+        // Windows 上粘贴的六行是一串很快的字符键与 enter（一次送进事件循环）。六行起折成一块（Puffin 的粘贴阈值，kit
+        // `paste_caps`；以前三行就折成 `[Pasted text #1 +3 lines]`）。
+        keys(&ui, PASTED);
+        ui.wait_for("[Pasted · 6 lines]").await;
         // 缓存里的 enter 没有发送；过了 enter 当作换行的窗口（120 ms）再按 enter 才发送。
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         let screen = ui.screen();
-        assert!(screen.contains("[Pasted text #1 +3 lines]"), "{screen}");
+        assert!(screen.contains("[Pasted · 6 lines]"), "{screen}");
         ui.key(KeyCode::Enter);
         ui.wait_for("got it").await;
     })
@@ -99,7 +103,7 @@ async fn a_paste_burst_folds_and_enter_inside_it_does_not_submit() {
     let requests = model.requests();
     assert_eq!(requests.len(), 1);
     assert!(
-        request_text(&requests[0]).contains("line one\\nline two\\nline three"),
+        request_text(&requests[0]).contains(&PASTED.replace('\n', "\\n")),
         "{}",
         request_text(&requests[0])
     );

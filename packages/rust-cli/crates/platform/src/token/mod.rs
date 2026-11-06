@@ -73,6 +73,9 @@ pub struct AccountOrigins {
     pub bigmodel_team_plans: String,
     /// 签发项目令牌时的 `clientVersion`。
     pub client_version: String,
+    /// 套餐额度的地址覆盖（`ZCODE_BIGMODEL_USAGE_QUOTA_URL`，其次 `BIGMODEL_USAGE_QUOTA_URL`，App `resolveQuotaUrlFromEnv`）：
+    /// 给出时 quota/limit 与 monitor 都由它换路径（platform.md §11.3）。
+    pub usage_quota_url: Option<String>,
 }
 
 /// 一次换取的结果。

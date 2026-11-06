@@ -1,264 +1,119 @@
-//! 任务清单（Task v2，docs/specs/rust-cli/tui-display.md §2.2）：输入框上方的独立清单，ctrl+t 展开与收起。
-//! 清单本身是内核 `TasksChanged` 的快照（在视图里），
-//! 这里只有界面状态：是否展开、每项第一次被看到完成的时刻（排序用）。
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
-
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+//! 任务清单（Task v2，docs/specs/rust-cli/tui-display.md §2.2）：任务行里的计数与任务卡的 Todos（tui-tasks.md）。清单本身是
+//! 内核 `TasksChanged` 的快照（在视图里），这里只记清单是不是最新的回合写的。步骤按内核的次序（Puffin 同）；全部的清单也在
+//! ^O 里，挂在最新的任务调用下面（[`steps`]，`cells/work.rs`）。
+//!
+//! 旧界面多出的（tui-kit.md §4.3）：被没完成的任务阻塞的步骤在文字后面接 ` › blocked by #1, #3`。2026-10-31（用户决定）之前
+//! 输入框上方是 Puffin 的待办坞（kit `widgets::todo_dock`，至多 5 行），之前 ctrl+t 收起与展开它；现在任务行只数步骤，^T 打开
+//! 任务卡。
 use rust_cli_kernel_api::agents::{TaskRecord, TaskStatus};
+use rust_cli_tui_kit::app::widgets::tools::Steps;
 
 use super::app::App;
 use super::i18n::Lang;
-use super::text::truncate;
-use crate::view::task_counts;
-
-/// 刚完成的任务在截断时优先显示的时长。
-const RECENT: Duration = Duration::from_secs(30);
-/// 最多显示的行数：终端不超过 10 行时不显示；否则 `行数 − 14`，在 3 到 5 之间。
-const HIDDEN_UP_TO_ROWS: usize = 10;
-const ROWS_RESERVED: usize = 14;
-const MIN_SHOWN: usize = 3;
-const MAX_SHOWN: usize = 5;
-/// 标题最多 `宽度 − 15` 列，不少于 15 列。
-const SUBJECT_RESERVED: usize = 15;
-const MIN_SUBJECT: usize = 15;
+use crate::view::{Body, Transcript};
 
 /// 任务清单的界面状态。
 #[derive(Debug, Default)]
 pub struct TaskPanel {
-    /// 展开（显示任务清单）。
-    pub expanded: bool,
-    /// 任务 ID → 第一次看到它完成的时刻；冷加载或第一次快照里已完成的记 None（不算“刚完成”）。
-    completed: HashMap<String, Option<Instant>>,
-    seen_any: bool,
+    /// 清单最近一次（实时）变化时最新的回合（它的回合头的行 id）：还是最新的回合时清单是新的（Puffin `TodoList.fresh`）。
+    /// 冷加载的清单没有它。
+    changed_in: Option<Option<u64>>,
 }
 
 impl TaskPanel {
-    /// 新的快照到达（`TasksChanged`）：展开（每次 TaskCreate / TaskUpdate 都展开），
-    /// 记下新完成的任务。
-    pub fn changed(&mut self, tasks: &[TaskRecord], now: Instant) {
-        self.expanded = true;
-        let first = !self.seen_any;
-        self.seen_any = true;
-        let done: Vec<&str> = tasks
-            .iter()
-            .filter(|task| task.status == TaskStatus::Completed)
-            .map(|task| task.id.as_str())
-            .collect();
-        self.completed.retain(|id, _| done.contains(&id.as_str()));
-        for id in done {
-            self.completed
-                .entry(id.to_owned())
-                .or_insert((!first).then_some(now));
-        }
+    /// 新的快照实时到达（`TasksChanged`）：记下它属于哪个回合（回合头是唯一的事实，不设定时器）。
+    pub fn changed(&mut self, view: &Transcript) {
+        self.changed_in = Some(latest_turn(view));
     }
 
-    fn recent(&self, id: &str, now: Instant) -> bool {
-        self.completed
-            .get(id)
-            .copied()
-            .flatten()
-            .is_some_and(|at| now.duration_since(at) < RECENT)
+    /// 清单是最新的回合写的：之后没有开过新回合（Puffin 在回合开始时清掉 `fresh`）。
+    fn fresh(&self, view: &Transcript) -> bool {
+        self.changed_in == Some(latest_turn(view))
     }
 }
 
-/// 按 ID 的数值排序（`parseInt(a) - parseInt(b)`），不是数字时按字符串。
-fn by_id(left: &TaskRecord, right: &TaskRecord) -> std::cmp::Ordering {
-    match (left.id.parse::<u64>(), right.id.parse::<u64>()) {
-        (Ok(l), Ok(r)) => l.cmp(&r),
-        _ => left.id.cmp(&right.id),
+impl App {
+    /// 回合在跑或在等你回答（Puffin `Session::busy`）。
+    pub(super) fn busy(&self) -> bool {
+        self.running() || !super::interaction_view::open_asks(self).is_empty()
     }
 }
 
-/// 最多显示的行数：`rows <= 10 ? 0 : min(5, max(3, rows - 14))`。
-fn max_display(rows: usize) -> usize {
-    if rows <= HIDDEN_UP_TO_ROWS {
-        0
-    } else {
-        rows.saturating_sub(ROWS_RESERVED)
-            .clamp(MIN_SHOWN, MAX_SHOWN)
-    }
+/// 最新的回合头的行 id。
+fn latest_turn(view: &Transcript) -> Option<u64> {
+    view.rows()
+        .iter()
+        .rev()
+        .find(|row| matches!(row.body, Body::Turn(_)))
+        .map(|row| row.id)
 }
 
-fn header(tasks: &[TaskRecord], lang: Lang) -> Line<'static> {
-    let (done, progress, open) = task_counts(tasks);
-    let dim = Style::default().add_modifier(Modifier::DIM);
-    let bold = dim.add_modifier(Modifier::BOLD);
-    let n = |value: usize| Span::styled(value.to_string(), bold);
-    let t = |text: &str| Span::styled(text.to_owned(), dim);
-    let mut spans = vec![Span::raw("  ")];
-    match lang {
-        Lang::En => {
-            spans.extend([n(tasks.len()), t(" tasks ("), n(done), t(" done, ")]);
-            if progress > 0 {
-                spans.extend([n(progress), t(" in progress, ")]);
-            }
-            spans.extend([n(open), t(" open)")]);
-        }
-        Lang::Zh => {
-            spans.extend([n(tasks.len()), t(" 个任务（"), n(done), t(" 完成，")]);
-            if progress > 0 {
-                spans.extend([n(progress), t(" 进行中，")]);
-            }
-            spans.extend([n(open), t(" 待办）")]);
-        }
-    }
-    Line::from(spans)
-}
-
-fn item(
-    task: &TaskRecord,
-    open: &[&str],
-    accent: Color,
-    width: usize,
-    lang: Lang,
-) -> Line<'static> {
+/// 一步的文字：被没完成的任务阻塞时后面接 ` › blocked by #1, #3`（旧界面多出的，Puffin 的待办没有阻塞）。
+fn step_text(task: &TaskRecord, open: &[&str], lang: Lang) -> String {
     let mut blockers: Vec<&String> = task
         .blocked_by
         .iter()
         .filter(|id| open.contains(&id.as_str()))
         .collect();
+    let subject = task.subject.replace(['\n', '\r'], " ");
+    if blockers.is_empty() {
+        return subject;
+    }
     blockers.sort_by(|l, r| match (l.parse::<u64>(), r.parse::<u64>()) {
         (Ok(a), Ok(b)) => a.cmp(&b),
         _ => l.cmp(r),
     });
-    let blocked = !blockers.is_empty();
-    let (icon, icon_style) = match task.status {
-        TaskStatus::Completed => ("✔", Style::default().fg(Color::Green)),
-        TaskStatus::InProgress => ("◼", Style::default().fg(accent)),
-        TaskStatus::Pending => ("◻", Style::default()),
-    };
-    let mut subject = Style::default();
-    match task.status {
-        TaskStatus::Completed => {
-            subject = subject.add_modifier(Modifier::CROSSED_OUT | Modifier::DIM);
-        }
-        TaskStatus::InProgress => subject = subject.add_modifier(Modifier::BOLD),
-        TaskStatus::Pending => {}
+    let ids = blockers
+        .iter()
+        .map(|id| format!("#{id}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match lang {
+        Lang::En => format!("{subject} › blocked by {ids}"),
+        Lang::Zh => format!("{subject} › 被 {ids} 阻塞"),
     }
-    if blocked {
-        subject = subject.add_modifier(Modifier::DIM);
-    }
-    // 标题最多 `columns - 15` 列（不少于 15）。
-    let shown = truncate(
-        &task.subject,
-        width.saturating_sub(SUBJECT_RESERVED).max(MIN_SUBJECT),
-    );
-    let mut spans = vec![
-        Span::raw("  "),
-        Span::styled(format!("{icon} "), icon_style),
-        Span::styled(shown, subject),
-    ];
-    if blocked {
-        let ids = blockers
-            .iter()
-            .map(|id| format!("#{id}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let text = match lang {
-            Lang::En => format!(" › blocked by {ids}"),
-            Lang::Zh => format!(" › 被 {ids} 阻塞"),
-        };
-        spans.push(Span::styled(
-            text,
-            Style::default().add_modifier(Modifier::DIM),
-        ));
-    }
-    Line::from(spans)
 }
 
-/// 放不下时的顺序：刚完成、进行中、待办（没被阻塞的在前）、较早完成；同组按 ID。
-fn ordered<'a>(
-    tasks: &'a [TaskRecord],
-    panel: &TaskPanel,
-    open: &[&str],
-    now: Instant,
-) -> Vec<&'a TaskRecord> {
-    let sorted = |filter: &dyn Fn(&TaskRecord) -> bool| {
-        let mut group: Vec<&TaskRecord> = tasks.iter().filter(|t| filter(t)).collect();
-        group.sort_by(|l, r| by_id(l, r));
-        group
-    };
-    let done = |t: &TaskRecord| t.status == TaskStatus::Completed;
-    let blocked = |t: &TaskRecord| t.blocked_by.iter().any(|id| open.contains(&id.as_str()));
-    let mut pending = sorted(&|t| t.status == TaskStatus::Pending);
-    pending.sort_by(|l, r| blocked(l).cmp(&blocked(r)).then_with(|| by_id(l, r)));
-    let mut all = sorted(&|t| done(t) && panel.recent(&t.id, now));
-    all.extend(sorted(&|t| t.status == TaskStatus::InProgress));
-    all.extend(pending);
-    all.extend(sorted(&|t| done(t) && !panel.recent(&t.id, now)));
-    all
-}
-
-fn hidden_summary(hidden: &[&TaskRecord], lang: Lang) -> String {
-    let count = |status: TaskStatus| hidden.iter().filter(|t| t.status == status).count();
-    let parts: Vec<String> = [
-        (count(TaskStatus::InProgress), "in progress", "进行中"),
-        (count(TaskStatus::Pending), "pending", "待办"),
-        (count(TaskStatus::Completed), "completed", "完成"),
-    ]
-    .into_iter()
-    .filter(|(n, _, _)| *n > 0)
-    .map(|(n, en, zh)| match lang {
-        Lang::En => format!("{n} {en}"),
-        Lang::Zh => format!("{n} {zh}"),
-    })
-    .collect();
-    let joiner = match lang {
-        Lang::En => ", ",
-        Lang::Zh => "，",
-    };
-    format!("  … +{}", parts.join(joiner))
-}
-
-/// 输入框上方的清单；没有任务或收起时为空。`rows` 是终端高度。
-pub fn lines(app: &App, width: usize, rows: usize, now: Instant) -> Vec<Line<'static>> {
-    let tasks = app.view.tasks();
-    if !app.snapshots.tasks.expanded || tasks.is_empty() {
-        return Vec::new();
-    }
+/// 清单的每一步：状态与文字（kit 的形状；坞与 ^O 里挂在任务调用下面的清单共用）。
+pub fn steps(tasks: &[TaskRecord], lang: Lang) -> Steps {
     let open: Vec<&str> = tasks
         .iter()
         .filter(|t| t.status != TaskStatus::Completed)
         .map(|t| t.id.as_str())
         .collect();
-    let limit = max_display(rows);
-    let mut out = vec![header(tasks, app.lang)];
-    let (visible, hidden): (Vec<&TaskRecord>, Vec<&TaskRecord>) = if tasks.len() > limit {
-        let all = ordered(tasks, &app.snapshots.tasks, &open, now);
-        let (shown, rest) = all.split_at(limit.min(all.len()));
-        (shown.to_vec(), rest.to_vec())
-    } else {
-        let mut all: Vec<&TaskRecord> = tasks.iter().collect();
-        all.sort_by(|l, r| by_id(l, r));
-        (all, Vec::new())
-    };
-    out.extend(
-        visible
-            .iter()
-            .map(|task| item(task, &open, app.palette.accent, width, app.lang)),
-    );
-    if limit > 0 && !hidden.is_empty() {
-        out.push(Line::from(Span::styled(
-            hidden_summary(&hidden, app.lang),
-            Style::default().add_modifier(Modifier::DIM),
-        )));
-    }
-    out
+    tasks
+        .iter()
+        .map(|task| {
+            let status = match task.status {
+                TaskStatus::Pending => "pending",
+                TaskStatus::InProgress => "inProgress",
+                TaskStatus::Completed => "completed",
+            };
+            (status.to_owned(), step_text(task, &open, lang))
+        })
+        .collect()
 }
 
-/// footer 的提示：有任务时 `ctrl+t to hide tasks` / `ctrl+t to show tasks`。
-pub fn toggle_hint(app: &App) -> Option<&'static str> {
-    if app.view.tasks().is_empty() {
+/// 任务行里待办的完成数与总数（tui-tasks.md §2.1）：以前的待办坞此刻会显示时才有（Puffin「待办」的规则：全部完成时回合还在
+/// 跑、清单是这个回合写的才说；没全部完成而你发了下一条消息、那个回合没碰它时离开）。2026-10-31 之前这里画坞的行
+/// （kit `todo_dock`，至多 5 行）。
+pub fn todo_counts(app: &App) -> Option<(usize, usize)> {
+    let tasks = app.view.tasks();
+    if tasks.is_empty() {
         return None;
     }
-    Some(match (app.lang, app.snapshots.tasks.expanded) {
-        (Lang::En, true) => "{ctrl+t} to hide tasks",
-        (Lang::En, false) => "{ctrl+t} to show tasks",
-        (Lang::Zh, true) => "{ctrl+t} 隐藏任务",
-        (Lang::Zh, false) => "{ctrl+t} 显示任务",
-    })
+    let total = tasks.len();
+    let done = tasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Completed)
+        .count();
+    let (busy, fresh) = (app.busy(), app.snapshots.tasks.fresh(&app.view));
+    let shown = if done == total {
+        busy && fresh
+    } else {
+        busy || fresh
+    };
+    shown.then_some((done, total))
 }
 
 #[cfg(test)]

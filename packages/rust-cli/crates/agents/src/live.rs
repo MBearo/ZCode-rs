@@ -43,9 +43,13 @@ pub(crate) enum AgentState {
         abort: Abort,
         mailbox: Vec<Mail>,
     },
-    /// 跑完了，但还有在跑的后台子代理（keepalive，只在交互模式）：自己的通知推迟到续跑结束后。
-    /// 记着最后一次运行的报告（被 TaskStop 停止时的通知用它）。
-    Parked(Report),
+    /// 跑完了，但还有在跑的后台子代理、monitor 或没交给它的后台命令（keepalive，只在交互模式，agents.md §5.1 第 3 条）。
+    /// 记着最后一次运行的报告（被 TaskStop 停止、收尾时的通知用它）与自己的通知送过没有：只为后台子代理与 monitor
+    /// 停放时推迟（`false`），只为命令停放时已经送出（`true`，§5.2 第 5 条）。
+    Parked {
+        report: Report,
+        notified: bool,
+    },
     Finished(Ending),
 }
 
@@ -78,6 +82,9 @@ pub(crate) struct LiveAgent {
     pub(crate) state: AgentState,
     /// 列表显示用的记录（tui-panels.md §1.1）；由 `live::Live` 在每次改动后统一维护。
     pub(crate) shown: Shown,
+    /// 转发任务已经交给它的命令通知的来源（命令的任务 ID，agents.md §5.2 第 5 条）：在交出的同一把锁里记。命令通知交出
+    /// 之后才 ack，这一段里执行环境的 `shell_state` 还列着它；收尾判断“还有没交给它的命令”时去掉这些。
+    pub(crate) delivered: Vec<AgentId>,
     /// fork 子代理继承的前缀（修复线 L-A，agents.md §8.1.3）：不落库，续跑时拼在子会话的冷读取之前；别的子代理为 None。
     pub(crate) fork_prefix: Option<Arc<Vec<rust_cli_kernel_api::message::Message>>>,
 }
@@ -102,7 +109,7 @@ impl LiveAgent {
         match &self.state {
             AgentState::Running { .. } => BackgroundStatus::Running,
             // 停放的子代理状态是 completed（带 keepalive）。
-            AgentState::Parked(_) => BackgroundStatus::Completed,
+            AgentState::Parked { .. } => BackgroundStatus::Completed,
             AgentState::Finished(ending) => ending.status(),
         }
     }

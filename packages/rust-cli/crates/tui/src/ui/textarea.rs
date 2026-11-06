@@ -27,6 +27,9 @@ pub struct TextArea {
     goal: Option<usize>,
     /// 鼠标选区：字节范围（start < end），光标在其中一端。
     selection: Option<(usize, usize)>,
+    /// 整块的提及（`textarea_marks.rs`）与它们上一次同步时的文字。
+    marks: Vec<marks::Mark>,
+    marked: String,
 }
 
 /// 折行后的一行：在 `text` 里的字节范围。
@@ -58,6 +61,9 @@ impl TextArea {
     }
 
     pub fn set_text(&mut self, text: &str) {
+        // 整个换掉的文字里没有整块的提及（历史、暂存、撤回放回的都是普通文字）。
+        self.marks.clear();
+        self.marked = text.to_owned();
         self.text = text.to_owned();
         self.cursor = self.text.len();
         self.goal = None;
@@ -280,28 +286,25 @@ impl TextArea {
     }
 
     /// 删掉 `[start, end)` 放进 kill ring；返回删掉的字符数。有选区时 kill 类的键都只删掉选区。
-    fn kill(&mut self, start: usize, end: usize) -> usize {
+    fn kill(&mut self, start: usize, end: usize) {
         // 两端移出占位文字（F26）：删掉的是整块，不剩半个。
         let (start, end) = (self.snap(start, true), self.snap(end, false));
         let (start, end) = self.selection.take().unwrap_or((start, end));
         self.goal = None;
         self.yanked = None;
         if start >= end {
-            return 0;
+            return;
         }
-        let killed = self.text[start..end].to_owned();
-        let count = killed.chars().count();
-        self.ring.push(killed);
+        self.ring.push(self.text[start..end].to_owned());
         if self.ring.len() > RING {
             self.ring.remove(0);
         }
         self.text.replace_range(start..end, "");
         self.cursor = start;
-        count
     }
 
     /// ctrl+k：删到行尾；已在行尾时删掉换行。
-    pub fn kill_to_end(&mut self) -> usize {
+    pub fn kill_to_end(&mut self) {
         let end = self.line_end();
         let end = if end == self.cursor {
             next_boundary(&self.text, end)
@@ -312,17 +315,17 @@ impl TextArea {
     }
 
     /// ctrl+u：删到行首。
-    pub fn kill_to_start(&mut self) -> usize {
+    pub fn kill_to_start(&mut self) {
         self.kill(self.line_start(), self.cursor)
     }
 
     /// ctrl+w：删掉前一个词。
-    pub fn kill_word(&mut self) -> usize {
+    pub fn kill_word(&mut self) {
         self.kill(self.word_start(), self.cursor)
     }
 
     /// alt+d：删掉后一个词。
-    pub fn kill_word_forward(&mut self) -> usize {
+    pub fn kill_word_forward(&mut self) {
         self.kill(self.cursor, self.word_end())
     }
 
@@ -356,6 +359,9 @@ mod layout;
 
 #[path = "textarea_chips.rs"]
 pub mod chips;
+
+#[path = "textarea_marks.rs"]
+pub mod marks;
 
 #[cfg(test)]
 #[path = "textarea_tests.rs"]

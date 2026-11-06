@@ -67,10 +67,19 @@ pub fn cancel(lang: Lang, backstop: bool) -> &'static str {
     }
 }
 
-pub fn keys_hint(lang: Lang) -> &'static str {
+/// 按键提示的两对（键，说明）：照 Puffin 信任页的 `⏎ confirm  ·  esc cancel`（tui-kit.md §4.2）。
+pub fn keys(lang: Lang) -> [(&'static str, &'static str); 2] {
     match lang {
-        Lang::En => "{Enter} to confirm · {Esc} to cancel",
-        Lang::Zh => "{Enter} 确认 · {Esc} 取消",
+        Lang::En => [("⏎", "confirm"), ("esc", "cancel")],
+        Lang::Zh => [("⏎", "确认"), ("esc", "取消")],
+    }
+}
+
+/// 连按退出的提示：`^C again to exit`（键在前面）。
+pub fn again(lang: Lang) -> &'static str {
+    match lang {
+        Lang::En => "again to exit",
+        Lang::Zh => "再按一次退出",
     }
 }
 

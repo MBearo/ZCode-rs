@@ -6,7 +6,7 @@ use rust_cli_kernel_api::env::{EnvFacts, EnvPath, WorkspaceRef};
 use rust_cli_kernel_api::ids::EnvironmentId;
 use rust_cli_kernel_api::testing::{MemoryEnvironment, MemoryStore};
 use rust_cli_kernel_api::workspace_trust::TrustKey;
-use rust_cli_tui::trust::{Grants, TrustAnswer, TrustPrompt};
+use rust_cli_tui_ports::trust::{Grants, TrustAnswer, TrustPrompt};
 
 use super::*;
 

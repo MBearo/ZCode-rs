@@ -485,3 +485,55 @@ async fn the_download_shows_as_its_own_state_before_the_upload() {
     assert!(matches!(machine.state(), MachineState::Ready(_)));
     machine.disconnect().await;
 }
+
+/// 连接中断开（remote-exec.md §19.10，2026-10-29）：断开马上回到 Unconnected；走完的 connect 关掉新客户端、回 `Stopped`，
+/// 不留客户端，下一次 connect 重新部署、握手。缺陷：以前它照存客户端而状态留在 Unconnected，之后的 connect 直接返回
+/// 那个客户端、状态不变，disconnect 也不关它。
+#[tokio::test]
+async fn a_disconnect_while_connecting_stops_the_connect() {
+    let (connector, listener) = network("machine");
+    let _server = serve(listener, false);
+    let release = Arc::new(tokio::sync::Notify::new());
+    let endpoint = Arc::new(UploadingEndpoint {
+        uploads: Uploads(
+            release.clone(),
+            vec![crate::ProvisionStep::Uploading { bytes: 1 }],
+        ),
+        connector: Arc::new(Cuttable {
+            inner: Mutex::new(Arc::new(connector)),
+            switches: Mutex::default(),
+            reject: Mutex::default(),
+        }),
+    });
+    let machine = Arc::new(Machine::new(
+        endpoint,
+        ClientOptions::new("test", "client-1"),
+    ));
+    let mut states = machine.states();
+    let connecting = rust_cli_base::owned({
+        let machine = machine.clone();
+        async move { machine.connect().await.map(drop) }
+    });
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        states.wait_for(|state| matches!(state, MachineState::Uploading { .. })),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    machine.disconnect().await;
+    assert_eq!(machine.state(), MachineState::Unconnected);
+    release.notify_one();
+    assert_eq!(connecting.await.unwrap(), Err(MachineError::Stopped));
+    assert_eq!(machine.state(), MachineState::Unconnected);
+    assert!(machine.client().is_none());
+    // 再连是一次真的连接：就绪。
+    let again = rust_cli_base::owned({
+        let machine = machine.clone();
+        async move { machine.connect().await.map(drop) }
+    });
+    release.notify_one();
+    again.await.unwrap().unwrap();
+    assert!(matches!(machine.state(), MachineState::Ready(_)));
+    machine.disconnect().await;
+}

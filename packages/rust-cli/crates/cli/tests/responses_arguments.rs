@@ -179,7 +179,7 @@ impl Sandbox {
             clock,
         };
         let defaults = Defaults {
-            selection: selection(),
+            selection: selection().into(),
             mode: PermissionMode::BypassPermissions,
             max_turns: None,
             search_tools: false,

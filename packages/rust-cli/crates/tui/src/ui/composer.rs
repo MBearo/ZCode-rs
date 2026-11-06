@@ -2,20 +2,37 @@
 //! 输入框的状态（docs/specs/rust-tui.md §8.3、§8.5）：编辑区、输入历史与搜索、粘贴折叠、斜杠命令
 //! 弹出列表与 `@` 文件补全（docs/specs/rust-cli/tui-input.md §1.2，`composer_files.rs`）。历史只在内存里
 //! （docs/specs/rust-cli/tui.md §9）。
+use rust_cli_tui_kit::app::widgets::paste_caps;
+
 use super::textarea::TextArea;
 
-/// 超过这么多字符的粘贴在输入框里折叠成占位文字。
-pub const PASTE_FOLD_CHARS: usize = 800;
-/// 超过这么多行的粘贴也折叠。
-const PASTE_FOLD_LINES: usize = 2;
-/// 输入框为空时斜杠命令列表最前面列出的常用命令数。
-const FREQUENT: usize = 5;
+/// `text` 在宽 `width` 的文字区里比 [`PASTE_FOLD_ROWS`] 行高（Puffin `pastes::folds`）：不是空白，换行至少五个，或折出
+/// 五行以上。
+fn folds(text: &str, width: usize) -> bool {
+    if text.trim().is_empty() {
+        return false;
+    }
+    let room = width.max(1);
+    let rows: usize = text
+        .split('\n')
+        .map(|line| {
+            rust_cli_tui_kit::render::width::string_width(line)
+                .div_ceil(room)
+                .max(1)
+        })
+        .sum();
+    text.matches('\n').count() >= PASTE_FOLD_ROWS || rows > PASTE_FOLD_ROWS
+}
+
+/// 比这么多输入行高的粘贴折成帽（Puffin `pastes::FOLD_ROWS`）：换行至少这么多个，或在文字区的宽度上折出更多行。以前超过
+/// 800 个字或 2 行就折叠。
+pub const PASTE_FOLD_ROWS: usize = 5;
 
 /// 一次粘贴的结果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pasted {
     Inserted,
-    /// 折叠成 `[Pasted text #N …]`。
+    /// 折叠成帽 `[Pasted · <大小>]`。
     Folded,
     /// 同样的内容再粘贴一次：原来的占位文字在原处展开。
     Expanded,
@@ -35,8 +52,12 @@ pub enum Popup {
     Slash {
         selected: usize,
     },
-    /// `@` 文件补全（候选在 `Composer::files.matches`）。
+    /// `@` 面板（`composer_files.rs`；`selected` 是选中的项，面板的组由 `at_view.rs` 建）。
     Files {
+        selected: usize,
+    },
+    /// `$` 面板（`composer_skills.rs`、`skill_view.rs`；`selected` 是选中的技能）。
+    Skills {
         selected: usize,
     },
 }
@@ -53,12 +74,18 @@ pub struct Composer {
     /// ctrl+r：（查询，匹配到的历史下标）。
     pub search: Option<(String, Option<usize>)>,
     pub popup: Option<Popup>,
+    /// esc 关上了命令架，或草稿是从历史调回的：草稿空了之前命令架不再打开（Puffin `shelf_closed`）。
+    pub shelf_closed: bool,
+    /// 命令架上次按哪个词过滤：词变了时选中回到第一行，或正好打完一个名字时选它（Puffin `settle_shelf`）。
+    shelf_typed: Option<String>,
     /// 内核给出的 skill 命令（`Kernel::user_commands`，runner 在启动时与回合结束时取，tui.md §6）。
     pub skills: Vec<rust_cli_kernel_api::user_command::UserCommand>,
     /// 清单至少到过一次（启动时异步取，tui.md §6）；之前提交的命令先留着（`App::held_command`）。
     pub skills_loaded: bool,
     /// `@` 补全的索引与候选（tui-input.md §1.2）。
     pub files: files::Files,
+    /// `$` 提及技能的目录与面板（tui-input.md §1.4）。
+    pub mentions: skills::Mentions,
     /// ctrl+s 暂存的草稿（tui-input.md §5）。
     stash: Option<draft::Draft>,
     /// 输入模式（`!` bash 模式，tui-input.md §2.1）。
@@ -79,11 +106,34 @@ impl Composer {
     }
 
     /// 输入框里的粘贴占位文字与图片的 `[Image #N]`（显示为青色）。
+    /// 粘贴的帽的占位文字。
+    pub fn paste_placeholders(&self) -> impl Iterator<Item = &str> {
+        self.pastes
+            .iter()
+            .map(|(placeholder, _)| placeholder.as_str())
+    }
+
+    /// 图片的占位文字。
+    pub fn image_placeholders(&self) -> impl Iterator<Item = &str> {
+        self.images.iter().map(|image| image.placeholder.as_str())
+    }
+
     pub fn placeholders(&self) -> impl Iterator<Item = &str> {
         self.pastes
             .iter()
             .map(|(placeholder, _)| placeholder.as_str())
             .chain(self.images.iter().map(|image| image.placeholder.as_str()))
+    }
+
+    /// 光标格里的粘贴（光标在它的帽的开头）：它的占位文字与原文。预览为它打开，槽说 `^D remove`（Puffin
+    /// `pastes::under_cursor`）。
+    pub fn paste_under_cursor(&self) -> Option<(&str, &str)> {
+        let text = self.area.text();
+        let at = self.area.cursor();
+        self.pastes
+            .iter()
+            .find(|(placeholder, _)| text[at..].starts_with(placeholder.as_str()))
+            .map(|(placeholder, content)| (placeholder.as_str(), content.as_str()))
     }
 
     pub fn clear(&mut self) {
@@ -116,10 +166,10 @@ impl Composer {
         self.area.set_text(text);
     }
 
-    /// 普通文字的粘贴：统一换行，tab 换成 4 个空格。超过 [`PASTE_FOLD_CHARS`] 个字符或超过 2 行的
-    /// 折叠成 `[Pasted text #N +M lines]`（单行为 `[Pasted text #N]`），发送时展开；同样的内容再粘贴
-    /// 一次就在原处展开。
-    pub fn paste_text(&mut self, text: &str) -> Pasted {
+    /// 普通文字的粘贴：统一换行，tab 换成 4 个空格。在宽 `width` 的文字区里比 [`PASTE_FOLD_ROWS`] 行高的折成帽
+    /// `[Pasted · 40 lines]`（一行的 `[Pasted · 1.2k chars]`，Puffin「粘贴」的标签，kit `paste_caps`），发送时展开；同样的
+    /// 内容再粘贴一次就在原处展开（旧界面才有）。以前的占位是 `[Pasted text #N +M lines]`，折叠后提示 `paste again to expand`。
+    pub fn paste_text(&mut self, text: &str, width: usize) -> Pasted {
         // 粘贴文字只在链接粘贴之后补空格（本工程没有），图片的标记随之清掉。
         self.after_image = false;
         let text = text
@@ -137,17 +187,14 @@ impl Composer {
             self.area.set_cursor(at + content.len());
             return Pasted::Expanded;
         }
-        let lines = text.split('\n').count();
-        if text.chars().count() <= PASTE_FOLD_CHARS && lines <= PASTE_FOLD_LINES {
+        if !folds(&text, width) {
             self.area.insert_str(&text);
             return Pasted::Inserted;
         }
         self.paste_count += 1;
-        let placeholder = if lines > 1 {
-            format!("[Pasted text #{} +{lines} lines]", self.paste_count)
-        } else {
-            format!("[Pasted text #{}]", self.paste_count)
-        };
+        let body = text.trim_end_matches('\n');
+        let size = paste_caps::size(body.matches('\n').count() + 1, body.chars().count());
+        let placeholder = format!("[{}]", paste_caps::label(&size));
         self.area.insert_str(&placeholder);
         self.pastes.push((placeholder, text));
         Pasted::Folded
@@ -178,11 +225,15 @@ impl Composer {
 
     /// 取出要发送的文字（展开粘贴）并清空；非空白的输入记入历史。
     pub fn submit(&mut self) -> String {
+        // 整块的提及（`@` 面板插入的会话）发出时是它的写法，历史里留打出的 `@标题`（tui-input.md §1.2）。
         let mut text = self.area.text().to_owned();
+        let mut wired = self.area.wired();
         for (placeholder, content) in &self.pastes {
             text = text.replacen(placeholder.as_str(), content, 1);
+            wired = wired.replacen(placeholder.as_str(), content, 1);
         }
         let text = text.trim().to_owned();
+        let wired = wired.trim().to_owned();
         // bash 模式的输入在历史里带 `!`。
         let entry = match self.mode {
             InputMode::Bash => format!("!{text}"),
@@ -194,7 +245,7 @@ impl Composer {
             self.submitted = Some(entry);
         }
         self.clear();
-        text
+        wired
     }
 
     /// esc 撤回（修复线 F38，tui-input.md §8）：去掉上一次发送时记下的那条历史（只在本进程的历史里；
@@ -255,6 +306,7 @@ impl Composer {
         self.browsing = Some(next);
         let text = self.history[next].clone();
         self.load_entry(&text);
+        self.shelf_closed = true;
         true
     }
 
@@ -266,6 +318,7 @@ impl Composer {
             self.browsing = Some(index + 1);
             let text = self.history[index + 1].clone();
             self.load_entry(&text);
+            self.shelf_closed = true;
         } else {
             self.browsing = None;
             let draft = std::mem::take(&mut self.draft);
@@ -314,6 +367,9 @@ mod popup;
 
 #[path = "composer_files.rs"]
 pub mod files;
+
+#[path = "composer_skills.rs"]
+pub mod skills;
 
 #[path = "composer_draft.rs"]
 mod draft;

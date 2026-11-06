@@ -212,3 +212,122 @@ async fn records_before_the_first_input_keep_it_the_first_turn() {
     .await;
     assert_eq!(title_model.requests().len(), 1);
 }
+
+/// `/rename 名字` 的命令（`RenameRecorded`）：改名的事实与它的记录。
+fn rename(id: &str, title: &str) -> rust_cli_kernel_api::session_api::CommandEnvelope {
+    let mut renamed = record(
+        "rename",
+        title,
+        &format!("Session renamed to: {title}"),
+        false,
+    );
+    renamed.meta = vec![format!("The user named this session \"{title}\".")];
+    envelope(
+        id,
+        Command::RenameRecorded {
+            title: title.to_owned(),
+            record: renamed,
+        },
+    )
+}
+
+fn has_record(messages: &[Message]) -> bool {
+    sources(messages).contains(&LOCAL_COMMAND_INPUT_SOURCE.to_owned())
+}
+
+/// 空闲时改名与记录同一批（titles.md §4）。
+#[tokio::test]
+async fn an_idle_rename_and_its_record_are_one_batch() {
+    let model = Arc::new(ScriptedModel::new(vec![text_response(&["first"])]));
+    let built = Setup::new(model).build().await;
+    let mut events = built.session.subscribe(Some(0));
+    built.session.send(submit("c1", "hello")).await;
+    until(&mut events, finished).await;
+    let id = crate::test_support::meta().id;
+    let (facts_before, batches_before) = (
+        built.store.facts(&id).len(),
+        built.store.batch_turns(&id).len(),
+    );
+    let ack = built.session.send(rename("c2", "Mine")).await;
+    assert!(matches!(ack, Ack::Accepted { .. }), "{ack:?}");
+    assert_eq!(built.store.batch_turns(&id).len(), batches_before + 1);
+    let added = built.store.facts(&id)[facts_before..].to_vec();
+    let messages: Vec<Message> = added
+        .iter()
+        .filter_map(|fact| match fact {
+            Fact::MessageAppended { message } => Some(message.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sources(&messages),
+        [
+            LOCAL_COMMAND_INPUT_SOURCE,
+            LOCAL_COMMAND_OUTPUT_SOURCE,
+            LOCAL_COMMAND_META_SOURCE
+        ]
+    );
+    assert!(
+        added
+            .iter()
+            .any(|fact| matches!(fact, Fact::TitleChanged { title } if title == "Mine")),
+        "{added:#?}"
+    );
+    let view = built.session.view().await.unwrap();
+    assert_eq!(view.meta.title, "Mine");
+    assert!(has_record(&view.messages));
+}
+
+/// 改名提交失败：回执 `Rejected`，记录也不在，模型看不到“改了名”；之后的输入照常（MR !3465 评审 CR-01）。
+#[tokio::test]
+async fn a_rejected_rename_leaves_no_record() {
+    let model = Arc::new(ScriptedModel::new(vec![
+        text_response(&["first"]),
+        text_response(&["second"]),
+    ]));
+    let built = Setup::new(model.clone()).build().await;
+    let mut events = built.session.subscribe(Some(0));
+    built.session.send(submit("c1", "hello")).await;
+    until(&mut events, finished).await;
+    built.store.fail_next_title_change();
+    let ack = built.session.send(rename("c2", "Mine")).await;
+    assert!(matches!(ack, Ack::Rejected { .. }), "{ack:?}");
+    let view = built.session.view().await.unwrap();
+    assert_ne!(view.meta.title, "Mine");
+    assert!(!has_record(&view.messages), "{:?}", sources(&view.messages));
+    built.session.send(submit("c3", "next")).await;
+    until(&mut events, finished).await;
+    let texts = last_user_texts(&model.requests()[1]).join("");
+    assert!(!texts.contains("Session renamed to"), "{texts}");
+    assert!(texts.ends_with("next"), "{texts}");
+}
+
+/// 回合在跑时改名马上提交，记录在改名成功之后留到收尾（同 `RecordLocalCommand`）。
+#[tokio::test]
+async fn a_rename_during_a_turn_commits_now_and_records_after_the_turn() {
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let model = Arc::new(crate::test_support::GatedModel::new(gate.clone()));
+    let built = Setup::new(model).build().await;
+    let mut events = built.session.subscribe(Some(0));
+    built.session.send(submit("c1", "hello")).await;
+    until(&mut events, |event| {
+        matches!(event, KernelEvent::TurnStarted { .. })
+    })
+    .await;
+    let ack = built.session.send(rename("c2", "Mine")).await;
+    assert!(matches!(ack, Ack::Accepted { .. }), "{ack:?}");
+    let id = crate::test_support::meta().id;
+    assert!(
+        built
+            .store
+            .facts(&id)
+            .iter()
+            .any(|fact| matches!(fact, Fact::TitleChanged { title } if title == "Mine"))
+    );
+    let view = built.session.view().await.unwrap();
+    assert!(!has_record(&view.messages), "{:?}", sources(&view.messages));
+    gate.notify_one();
+    until(&mut events, finished).await;
+    let view = built.session.view().await.unwrap();
+    assert!(has_record(&view.messages), "{:?}", sources(&view.messages));
+}

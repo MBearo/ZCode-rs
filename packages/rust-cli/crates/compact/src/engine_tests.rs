@@ -25,6 +25,7 @@ async fn short_conversation_is_summarized_whole_without_a_tail() {
             &request(history, CompactTrigger::Manual),
             true,
             &CancellationToken::new(),
+            None,
         )
         .await
         .unwrap();
@@ -65,6 +66,7 @@ async fn longer_conversation_keeps_the_last_round_verbatim() {
             &request(history, CompactTrigger::Auto),
             true,
             &CancellationToken::new(),
+            None,
         )
         .await
         .unwrap();
@@ -94,6 +96,7 @@ async fn prompt_too_long_preserves_more_rounds_then_succeeds() {
             &request(history, CompactTrigger::Reactive),
             true,
             &CancellationToken::new(),
+            None,
         )
         .await
         .unwrap();
@@ -120,6 +123,7 @@ async fn not_enough_messages_and_exhaustion_use_the_user_texts() {
             &request(vec![human("u1", "hi")], CompactTrigger::Manual),
             true,
             &cancel,
+            None,
         )
         .await
         .unwrap_err();
@@ -127,7 +131,12 @@ async fn not_enough_messages_and_exhaustion_use_the_user_texts() {
     assert_eq!(error.to_string(), "Not enough messages to compact.");
     assert_eq!(
         engine
-            .run(&request(Vec::new(), CompactTrigger::Manual), true, &cancel)
+            .run(
+                &request(Vec::new(), CompactTrigger::Manual),
+                true,
+                &cancel,
+                None
+            )
             .await
             .unwrap_err()
             .to_string(),
@@ -143,7 +152,12 @@ async fn not_enough_messages_and_exhaustion_use_the_user_texts() {
         reply("a2", "d", None),
     ];
     let error = Engine { ports: &ports }
-        .run(&request(history, CompactTrigger::Reactive), true, &cancel)
+        .run(
+            &request(history, CompactTrigger::Reactive),
+            true,
+            &cancel,
+            None,
+        )
         .await
         .unwrap_err();
     assert_eq!(error, Failure::Exhausted);
@@ -170,6 +184,7 @@ async fn recently_touched_files_are_reread_with_the_read_tool() {
             &request(history, CompactTrigger::Manual),
             true,
             &CancellationToken::new(),
+            None,
         )
         .await
         .unwrap();

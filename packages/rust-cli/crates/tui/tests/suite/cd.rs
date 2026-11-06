@@ -27,7 +27,7 @@ fn env() -> Arc<MemoryEnvironment> {
 }
 
 fn idle(screen: &str, text: &str) -> bool {
-    screen.contains(text) && !screen.contains("esc to interrupt")
+    screen.contains(text) && !screen.contains("esc stop")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -43,7 +43,7 @@ async fn the_session_moves_and_the_next_request_knows() {
         ui.submit("/cd");
         ui.wait_for("Usage: /cd <path>").await;
         ui.submit("hello");
-        ui.wait("the first reply", |s| idle(s, "⏺ first")).await;
+        ui.wait("the first reply", |s| idle(s, "   first")).await;
         ui.submit("/cd ../missing");
         ui.wait_for("Couldn't find a directory at /Users/dev/missing.")
             .await;
@@ -55,10 +55,9 @@ async fn the_session_moves_and_the_next_request_knows() {
         ui.submit("/cd ../other");
         ui.wait_for("Moved to ~/other").await;
         ui.submit("next");
-        ui.wait("the second reply", |s| idle(s, "⏺ second")).await;
+        ui.wait("the second reply", |s| idle(s, "   second")).await;
         ui.submit("/export chat");
-        ui.wait_for("Conversation exported to: /Users/dev/other/chat.txt")
-            .await;
+        ui.wait_for("Exported to ~/other/chat.txt").await;
     })
     .await;
     let requests = model.requests();
@@ -87,7 +86,7 @@ async fn the_session_moves_and_the_next_request_knows() {
     assert!(
         String::from_utf8(exported.bytes)
             .unwrap()
-            .contains("⏺ second")
+            .contains("   second")
     );
 }
 
@@ -107,27 +106,26 @@ async fn the_reopened_session_brings_its_own_workspace() {
     };
     with_ui(model, setup, |mut ui| async move {
         ui.submit("hello");
-        ui.wait("the first reply", |s| idle(s, "⏺ first")).await;
+        ui.wait("the first reply", |s| idle(s, "   first")).await;
         ui.submit("/cd ../other");
         ui.wait_for("Moved to ~/other").await;
-        // 切回同一个会话：`/clear` 关闭它（离开内核），`/resume` 页（修复线 F29）的 Filter 换到 All 才看得到它（当前
-        // 目录已是 ~/other）；选它时目录不同，用会话目录——冷加载后工作目录回到创建时的 ~/project。
+        // 切回同一个会话：`/clear` 关闭它（离开内核），`/resume` 列表 ⇥ 所有文件夹才看得到它（当前目录已是
+        // ~/other）；选它时文件夹不同，用会话的文件夹——冷加载后工作目录回到创建时的 ~/project。
         ui.submit("/clear");
         ui.wait_for("Started a new session.").await;
         ui.submit("/resume");
-        ui.wait_for("Type to search").await;
-        ui.key(KeyCode::Right);
-        ui.wait_for("⌁ ~/project").await;
+        ui.wait_for("No earlier sessions").await;
+        ui.key(KeyCode::Tab);
+        ui.wait_for("~/project").await;
         ui.key(KeyCode::Enter);
-        ui.wait_for("Working directory · resume").await;
+        ui.wait_for("in which folder?").await;
         ui.key(KeyCode::Enter);
         ui.wait("the session to reopen", |s| {
-            s.contains("⏺ first") && !s.contains("Working directory")
+            s.contains("   first") && !s.contains("in which folder?")
         })
         .await;
         ui.submit("/export chat");
-        ui.wait_for("Conversation exported to: /Users/dev/project/chat.txt")
-            .await;
+        ui.wait_for("Exported to ~/project/chat.txt").await;
     })
     .await;
 }

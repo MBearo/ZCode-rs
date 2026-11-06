@@ -141,8 +141,10 @@ async fn inputs_during_a_write_are_written_after_it_in_order() {
         ui.submit("/locale en-US");
         ui.submit("/locale auto");
         // 第二、三次输入还没有写：在途的写回放行之前不发新的写入。
-        ui.submit("/status");
-        ui.wait_for("Status").await;
+        // 打开一张本地的卡（`/stats`，Puffin 的卡），等界面处理完前面的输入。以前用 `/status`；它现在另外打开页的
+        // Session 标签（tui-panels.md §4.5），卡被盖住。
+        ui.submit("/stats");
+        ui.wait_for("Tokens").await;
         assert_eq!(check.saved(), [UiLocale::ZhCn]);
         ui.key(crossterm::event::KeyCode::Esc);
         assert!(check.release());

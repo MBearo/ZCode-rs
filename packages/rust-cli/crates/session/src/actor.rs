@@ -153,7 +153,8 @@ pub(crate) struct Actor {
     pub(crate) meta: SessionMeta,
     pub(crate) messages: Vec<Message>,
     /// 冷读取时只供显示的、最后一个压缩点之前的消息（工作线 F102，compact.md §5.1）：打开后不变，只进 `view()`。
-    /// 模型侧的一切（主循环、压缩、token、标题、rewind、fork、goal 与任务的恢复）只看 `messages`。
+    /// 模型侧的一切（主循环、压缩、token、标题、rewind、fork、goal 与任务的恢复）只看 `messages`。另一个只读的读者：
+    /// 打开时旧会话的跨会话 entry 在这里按文字找一次是否并入过（peer_restore.rs，F139）。
     pub(crate) earlier: Vec<Message>,
     pub(crate) selection: ModelSelection,
     /// 执行状态：权限模式 × plan 开关（修复线 F20，shell-permissions.md §4.6）。判决用的模式是 [`Self::mode`]。
@@ -299,6 +300,18 @@ impl Actor {
         self.running.is_some() || self.job.is_some()
     }
 
+    /// 登记里的状态：有待处理的交互时是等你，否则看在不在跑（tui-cockpit.md §4）。
+    pub(crate) fn status_now(&self) -> rust_cli_kernel_api::peers::PeerStatus {
+        use rust_cli_kernel_api::peers::PeerStatus;
+        if !self.pending.is_empty() {
+            PeerStatus::Waiting
+        } else if self.busy() {
+            PeerStatus::Busy
+        } else {
+            PeerStatus::Idle
+        }
+    }
+
     pub(crate) async fn run(mut self, mut requests: mpsc::Receiver<Request>) {
         // 跨会话：绑定为主会话并从库里恢复（cross-session.md §2.2）；在处理第一条命令之前。
         self.peers_open().await;
@@ -346,13 +359,8 @@ impl Actor {
                 // 主循环的输出端已全部释放：它已经返回，收尾本回合。
                 Next::Sink(None) => self.finish_turn().await,
             }
-            // 登记里的 busy / idle 只看 actor 自己的状态，变化时才写（cross-session.md §2.1）。
-            let status = if self.busy() {
-                rust_cli_kernel_api::peers::PeerStatus::Busy
-            } else {
-                rust_cli_kernel_api::peers::PeerStatus::Idle
-            };
-            self.peer_status(status).await;
+            // 登记里的状态只看 actor 自己的状态，变化时才写（cross-session.md §2.1）。
+            self.peer_status(self.status_now()).await;
         }
     }
 
@@ -464,7 +472,8 @@ impl Actor {
             },
             Command::Fork { at } => self.fork(id, at).await,
             Command::ForkFromInput { input } => self.fork_from_input(input).await,
-            Command::Rename { title } => self.rename(id, title).await,
+            Command::Rename { title } => self.rename(id, title, None).await,
+            Command::RenameRecorded { title, record } => self.rename(id, title, Some(record)).await,
             Command::StopTask { task } => self.stop_task(task).await,
             Command::ResolvePeerMessage { message, approve } => {
                 match self.resolve_peer(&message, approve).await {
@@ -479,6 +488,7 @@ impl Actor {
             Command::RecordLocalCommand { record } => self.record_local_command(id, record).await,
             Command::BackgroundForeground { reason } => self.background_foreground(reason).await,
             Command::StoreResumeSentinel => self.store_resume_sentinel(id).await,
+            Command::Dequeue { command } => self.dequeue(&command),
             // 在 `handle` 里处理（回执要等事务结束或名字）。
             Command::Rewind { .. } | Command::GenerateName => {
                 rejected("this command is handled by the actor loop")

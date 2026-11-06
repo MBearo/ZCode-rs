@@ -12,12 +12,16 @@ use rust_cli_kernel_api::hooks::queued_command;
 use rust_cli_kernel_api::ids::CommandId;
 use rust_cli_kernel_api::machine_notices::MachineNotice;
 use rust_cli_kernel_api::message::{ContentBlock, Message, UserOrigin};
+use rust_cli_kernel_api::store::Fact;
 
 use crate::actor::Actor;
 use crate::inbox::{InputKind, Item, LaneItem, Queued, is_slash};
 use crate::notices::{NOTICE_SOURCE, task_notification};
 use crate::peers::{PEER_SOURCE, PeerItem};
 use crate::turn::TurnInput;
+
+/// 取回时输入已经不在队列里（`Command::Dequeue` 的 `Rejected.reason`，给用户看）。
+pub(crate) const ALREADY_SENT: &str = "the message already went out";
 
 /// 一条等候中的后台通知，或跨会话的消息与回执（同伴消息同样是优先级 `next`，cross-session.md §1.7）。
 #[derive(Debug, Clone)]
@@ -68,13 +72,21 @@ impl Waiting {
         matches!(self, Self::Peer(item) if item.passive())
     }
 
+    /// 并入对话时与那条消息同一批提交的事实：同伴的消息与回执是 `peer_merged`（cross-session.md §2.4，F139），其余没有。
+    pub(crate) fn merged_facts(&self) -> Vec<Fact> {
+        match self {
+            Self::Peer(item) => item.merged_facts(),
+            _ => Vec::new(),
+        }
+    }
+
     pub(crate) fn same(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Shell(a), Self::Shell(b)) => {
                 a.machine == b.machine && a.notice.seq == b.notice.seq
             }
             (Self::Agent(a), Self::Agent(b)) => a.seq == b.seq,
-            (Self::Peer(a), Self::Peer(b)) => a.key() == b.key(),
+            (Self::Peer(a), Self::Peer(b)) => a == b,
             (Self::MonitorEnd { notice: a, .. }, Self::MonitorEnd { notice: b, .. }) => {
                 a.machine == b.machine && a.notice.seq == b.notice.seq
             }
@@ -173,6 +185,17 @@ impl Actor {
             self.emit_queue();
         }
         more
+    }
+
+    /// `Command::Dequeue`（query.md §4.4）：还在队列里的输入取回——从队列与通道去掉（输入的种类与并入点筛查的结果
+    /// 跟着条目一起去掉）。判断与出队在 actor 的一次处理里：开回合、成批与工具边界的结局（`settle_steering`）也都在
+    /// actor 里出队，所以一条输入要么取回、要么发出，不会两样都有。
+    pub(crate) fn dequeue(&mut self, command: &CommandId) -> rust_cli_kernel_api::session_api::Ack {
+        if self.inbox.remove_input(command).is_none() {
+            return crate::actor::rejected(ALREADY_SENT);
+        }
+        self.emit_queue();
+        crate::actor::accepted()
     }
 
     /// 回合结束后的下一项（query.md §5）：通道头是输入就是它；是通知就取走头部连续的通知，合成一个

@@ -135,8 +135,8 @@ fn find_team_project(
     Ok(None)
 }
 
-/// 团队订阅详情的判定表（App `fetchTeamCodingPlanEntitlement`）。
-fn entitlement(payload: &Value) -> Availability {
+/// 团队订阅详情的判定表（App `fetchTeamCodingPlanEntitlement`）；套餐用量的团队订阅也用它（platform.md §11.3）。
+pub(crate) fn entitlement(payload: &Value) -> Availability {
     let Some(data) = successful_data(payload) else {
         return Availability::Unknown;
     };

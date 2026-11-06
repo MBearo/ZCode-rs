@@ -95,9 +95,25 @@ pub struct MemoryStore {
     records: Mutex<HashMap<SessionId, Vec<crate::store::FrontendRecord>>>,
     /// 冷读取按 node-store 的形状切分压缩过的会话（[`Self::split_at_compaction`]，工作线 F102）。
     split: std::sync::atomic::AtomicBool,
+    /// 下一个带 `TitleChanged` 的批次提交失败（[`Self::fail_next_title_change`]）。
+    fail_title: std::sync::atomic::AtomicBool,
+    /// 下一次 `load` 等这道门（[`Self::hold_next_load`]）。
+    load_gate: Mutex<Option<std::sync::Arc<tokio::sync::Notify>>>,
 }
 
 impl MemoryStore {
+    /// 下一个带 `TitleChanged` 的批次整批提交失败（`Storage` 错误），之后照常（titles.md §4：改名被拒绝时它的记录也不在）。
+    pub fn fail_next_title_change(&self) {
+        self.fail_title.store(true, Ordering::SeqCst);
+    }
+
+    /// 下一次 `load` 等到测试放行（`notify_one`）才读，之后的照常：让测试停在“会话正在打开”的窗口里（titles.md §4）。
+    pub fn hold_next_load(&self) -> std::sync::Arc<tokio::sync::Notify> {
+        let gate = std::sync::Arc::new(tokio::sync::Notify::new());
+        *self.load_gate.lock_unpoisoned() = Some(gate.clone());
+        gate
+    }
+
     /// 之后的 `load` 按 node-store 的形状给出压缩过的会话（工作线 F102，compact.md §5.1）：`messages` 从最后一个压缩点开始
     /// （保留段接在摘要之后），之前的放进 `earlier`。缺省不切分（`messages` 是重放出的全部消息）。
     pub fn split_at_compaction(&self) {
@@ -174,6 +190,15 @@ impl SessionStore for MemoryStore {
                 session: session.clone(),
             });
         }
+        let titled = batch
+            .facts
+            .iter()
+            .any(|fact| matches!(fact, Fact::TitleChanged { .. }));
+        if titled && self.fail_title.swap(false, Ordering::SeqCst) {
+            return Err(StoreError::Storage {
+                message: "injected title failure".to_owned(),
+            });
+        }
         let mut sessions = self.sessions.lock_unpoisoned();
         let (meta, facts) = sessions
             .get_mut(session)
@@ -211,6 +236,10 @@ impl SessionStore for MemoryStore {
     }
 
     async fn load(&self, session: &SessionId) -> Result<LoadedSession, StoreError> {
+        let gate = self.load_gate.lock_unpoisoned().take();
+        if let Some(gate) = gate {
+            gate.notified().await;
+        }
         if self.is_deleted(session) {
             return Err(StoreError::NotFound {
                 session: session.clone(),
@@ -572,8 +601,18 @@ impl StoreQueries for MemoryStore {
                 }
                 None => stats.unknown_cache_usage = true,
             }
+            let output = call.usage.map(|usage| usage.output_tokens);
+            stats.output_tokens += output.unwrap_or(0);
+            let generation = call.first_token_at_ms.and_then(|first| {
+                let ms = call.completed_at_ms.saturating_sub(first);
+                (ms > 0).then_some(ms)
+            });
+            if let (Some(output), Some(ms)) = (output.filter(|o| *o > 0), generation) {
+                stats.measured_output_tokens += output;
+                stats.generation_ms += ms;
+            }
             stats.last = Some(crate::metering::LastRequest {
-                output_tokens: call.usage.map(|usage| usage.output_tokens),
+                output_tokens: output,
                 duration_ms: Some(call.completed_at_ms.saturating_sub(call.started_at_ms)),
                 first_token_ms: call
                     .first_token_at_ms

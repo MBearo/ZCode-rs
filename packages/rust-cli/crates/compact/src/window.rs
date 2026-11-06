@@ -81,12 +81,19 @@ pub struct Thresholds {
     /// `ZCODE_MAX_OUTPUT_TOKENS`（修复线 F42）：模型的输出上限先与它取小，再算摘要的
     /// 预留（模型的输出上限已含这个变量）。
     pub max_output_tokens: Option<u64>,
+    /// 配置的 `compact.autoThresholdTokens`（compact.md §2.3）：阈值与它取小；设了时窗口来源是 `auto` 也主动压缩。
+    pub at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Window {
     pub window: u64,
     pub source: WindowSource,
+}
+
+/// 交给反应式压缩、不主动压缩（compact.md §2）：窗口来源是 `auto`，又没有设 `compact.autoThresholdTokens`（§2.3）。
+pub fn reactive_only(facts: &ModelFacts, thresholds: &Thresholds) -> bool {
+    thresholds.at.is_none() && window(facts, thresholds).source == WindowSource::Auto
 }
 
 pub fn window(facts: &ModelFacts, thresholds: &Thresholds) -> Window {
@@ -125,8 +132,19 @@ pub fn effective(facts: &ModelFacts, thresholds: &Thresholds) -> u64 {
         .saturating_sub(reserve(facts, thresholds))
 }
 
-/// 自动压缩的阈值。
+/// 自动压缩的阈值：模型的阈值与 `compact.autoThresholdTokens` 取小（compact.md §2.3）。
 pub fn threshold(facts: &ModelFacts, thresholds: &Thresholds) -> u64 {
+    let model = model_threshold(facts, thresholds);
+    thresholds.at.map_or(model, |at| model.min(at))
+}
+
+/// 会话生效的自动压缩位置（界面的 `compactAt`，compact.md §2.3）：自动压缩关掉或交给反应式压缩时没有。
+pub fn compact_at(facts: &ModelFacts, thresholds: &Thresholds, auto: bool) -> Option<u64> {
+    (auto && !reactive_only(facts, thresholds)).then(|| threshold(facts, thresholds))
+}
+
+/// 模型的阈值（不看设置）。
+fn model_threshold(facts: &ModelFacts, thresholds: &Thresholds) -> u64 {
     let effective = effective(facts, thresholds);
     let buffered = effective.saturating_sub(AUTOCOMPACT_BUFFER);
     match thresholds
@@ -160,10 +178,10 @@ fn blocking_line(facts: &ModelFacts, thresholds: &Thresholds) -> u64 {
         .saturating_sub(BLOCKING_BUFFER)
 }
 
-/// 发请求前到了阻塞线、这一步不发请求（compact.md §2.2）。自动压缩打开（`auto`）且窗口来源是 `auto` 时交给上下文超限
-/// 之后的压缩，不拦。
+/// 发请求前到了阻塞线、这一步不发请求（compact.md §2.2）。自动压缩打开（`auto`）且交给反应式压缩（窗口来源是 `auto`、
+/// 没有设置）时交给上下文超限之后的压缩，不拦。
 pub fn blocks(tokens: u64, facts: &ModelFacts, thresholds: &Thresholds, auto: bool) -> bool {
-    if auto && window(facts, thresholds).source == WindowSource::Auto {
+    if auto && reactive_only(facts, thresholds) {
         return false;
     }
     tokens >= blocking_line(facts, thresholds)
@@ -214,7 +232,7 @@ pub fn notice(
             compact_hint: compact_command,
         };
     }
-    if window(facts, thresholds).source == WindowSource::Auto {
+    if reactive_only(facts, thresholds) {
         // 与 footer 的 ctx 同一个式子（kernel-api `used_percent`，F27）。
         ContextNotice::Used {
             percent: rust_cli_kernel_api::compaction::used_percent(tokens, effective),
@@ -239,9 +257,9 @@ fn percent_left(base: u64, tokens: u64) -> u64 {
     ratio.round().max(0.0) as u64
 }
 
-/// 发请求前要不要主动压缩（本地的判断）：来源是 `auto` 时交给反应式压缩。
+/// 发请求前要不要主动压缩（本地的判断）：来源是 `auto` 且没有设置时交给反应式压缩。
 pub fn should_compact(tokens: u64, facts: &ModelFacts, thresholds: &Thresholds) -> bool {
-    if window(facts, thresholds).source == WindowSource::Auto {
+    if reactive_only(facts, thresholds) {
         return false;
     }
     matches!(
@@ -250,8 +268,9 @@ pub fn should_compact(tokens: u64, facts: &ModelFacts, thresholds: &Thresholds) 
     )
 }
 
-/// `/context` 的缓冲类别（context-usage.md §4）：自动压缩开启且来源不是 `auto` 时
-/// `Autocompact buffer = 窗口 − 阈值`（阈值不看百分比覆盖）；关闭时 `Compact buffer = 3000`；否则没有。
+/// `/context` 的缓冲类别（context-usage.md §4）：自动压缩开启且主动压缩时
+/// `Autocompact buffer = 窗口 − 阈值`（阈值不看百分比覆盖，看 `compact.autoThresholdTokens`）；关闭时
+/// `Compact buffer = 3000`；否则没有。
 pub fn context_buffer(
     facts: &ModelFacts,
     thresholds: &Thresholds,
@@ -261,13 +280,14 @@ pub fn context_buffer(
     if !auto {
         return Some(("Compact buffer", BLOCKING_BUFFER));
     }
-    if window.source == WindowSource::Auto {
+    if reactive_only(facts, thresholds) {
         return None;
     }
-    let threshold = window
+    let model = window
         .window
         .saturating_sub(reserve(facts, thresholds))
         .saturating_sub(AUTOCOMPACT_BUFFER);
+    let threshold = thresholds.at.map_or(model, |at| model.min(at));
     Some(("Autocompact buffer", window.window - threshold))
 }
 

@@ -135,9 +135,15 @@ async fn rust_rows_add_up_the_completed_main_turn_requests() {
                 duration_ms: Some(4_000),
                 first_token_ms: Some(1_000),
             }),
+            // 子代理的数字（usage.md §4.1）：两行的输出都已知、都量得到速度（生成 2000 ms 与 3000 ms）。
+            output_tokens: 140,
+            measured_output_tokens: 140,
+            generation_ms: 5_000,
         }
     );
     assert_eq!(stats.tokens_per_second(), Some(40.0));
+    assert_eq!(stats.tokens(), Some(155 + 910 + 140));
+    assert_eq!(stats.average_tps(), Some(28.0));
     // 用量未知（整条缺失）的完成请求：命中率从此不显示，它的输出也是未知。
     commit(
         &t,
@@ -156,6 +162,15 @@ async fn rust_rows_add_up_the_completed_main_turn_requests() {
     assert_eq!(stats.cache_hit_rate(), None);
     assert_eq!(stats.last.unwrap().output_tokens, None);
     assert_eq!(stats.tokens_per_second(), None);
+    // 输出未知的行不进子代理的和，之前的和不变。
+    assert_eq!(
+        (
+            stats.output_tokens,
+            stats.measured_output_tokens,
+            stats.generation_ms
+        ),
+        (140, 140, 5_000)
+    );
 }
 
 /// Node 写的行：`raw_usage_json` 缺 `cacheReadTokens` 时算未知（Node `token(undefined)`）；旧行的输入不含缓存时
@@ -215,12 +230,17 @@ async fn node_rows_follow_the_node_reading() {
     assert_eq!(stats.cache_hit_rate(), None);
     // 不是 JSON 的 raw 也算未知，查询不因它出错。
     node_row(&t, "u_bad", (1, 0, 1), (17_000, 1_000), Some("{not json"));
-    assert!(
-        t.store
-            .request_stats(&sid("sess_n"))
-            .await
-            .unwrap()
-            .unknown_cache_usage
+    let stats = t.store.request_stats(&sid("sess_n")).await.unwrap();
+    assert!(stats.unknown_cache_usage);
+    // 子代理的和（usage.md §4.1）：输出已知的四行（120 + 120 + 5 + 10），生成时长 3000 + 1000 + 4000 + 4000；
+    // 不是 JSON 的那一行说不出输出，不算。
+    assert_eq!(
+        (
+            stats.output_tokens,
+            stats.measured_output_tokens,
+            stats.generation_ms
+        ),
+        (255, 255, 12_000)
     );
 }
 

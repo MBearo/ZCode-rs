@@ -1,8 +1,7 @@
 //! 入口注入的服务与只读查询的执行（docs/specs/rust-cli/tui.md §7.1、§7.2，context-usage.md §6）：界面语言的
-//! 写回、登录与退出、`/context`。每个操作是一个 future，结果作为 [`ServiceDone`] 回到事件循环；状态只在
+//! 写回、登录与退出、上下文的计数。每个操作是一个 future，结果作为 [`ServiceDone`] 回到事件循环；状态只在
 //! 事件循环里改。
 use futures_util::FutureExt;
-use ratatui::backend::Backend;
 use tokio::sync::oneshot;
 
 use super::Loop;
@@ -10,9 +9,11 @@ use super::session::Done;
 use crate::services::{
     Authorize, CancellationToken, Configured, Family, LoginFailure, RedactedString, UiLocale,
 };
-use crate::ui::app::Local;
+use crate::ui::doorway;
 use crate::ui::i18n;
+use crate::ui::session_page::SessionFacts;
 use rust_cli_kernel_api::context_usage::{ContextUsage, ContextUsageQuery};
+use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::session_api::KernelError;
 
 /// 服务操作的结果。
@@ -31,13 +32,13 @@ pub(crate) enum ServiceDone {
     Login(Result<Configured, LoginFailure>),
     /// 手工 key 保存结束。
     ApiKey(Result<Configured, String>),
-    /// 退出结束：成功时是凭据文件的路径。
-    Logout(Result<String, String>),
-    /// `/context` 的结果（装箱：比其他变体大得多）。
+    /// 上下文的计数与它问的会话（装箱：比其他变体大得多）。
     Context {
         usage: Box<Result<ContextUsage, KernelError>>,
-        all: bool,
+        session: Option<SessionId>,
     },
+    /// 统计的页 Session 标签的事实（装箱，同上）。
+    SessionFacts(Box<SessionFacts>),
 }
 
 /// 只属于事件循环的服务状态。
@@ -47,9 +48,13 @@ pub(super) struct ServiceState {
     locale: super::latest::Latest<UiLocale>,
     /// 在途的浏览器授权登录的取消令牌：登录状态的唯一 owner（tui.md §7.2）。
     login: Option<CancellationToken>,
+    /// 上下文的计数：同时只有一次在途，在途时又要问的，答案回来后再问一次（tui-panels.md §4.1）。
+    context: super::latest::Latest<()>,
+    /// Session 标签的事实：同上，同时只有一次在途（tui-panels.md §4.5）。
+    facts: super::latest::Latest<()>,
 }
 
-impl<B: Backend> Loop<'_, B> {
+impl Loop<'_> {
     /// `/locale <值>`：先写回配置文件，成功后再切换（Node 先写后改）。
     pub(super) fn save_locale(&mut self, locale: UiLocale) {
         let Some(locale) = self.services.locale.start(locale) else {
@@ -88,11 +93,18 @@ impl<B: Backend> Loop<'_, B> {
             .push(async move { Done::Service(ServiceDone::Login(login.await)) }.boxed());
     }
 
-    /// `/context`：内核按会话的当前视图（没有会话时按新会话的模型与模式）算出用量，只读。
-    pub(super) fn context_usage(&mut self, all: bool) {
+    /// 上下文的计数（tui-panels.md §4.1）：数字的卡或上下文的页开着时，内核按主会话的当前视图算出用量，只读。卡打开、
+    /// 每次模型请求结束（`refresh_stats`）、看的会话换了时都经这里；不开着时什么也不做。
+    pub(super) fn count_context(&mut self) {
+        let Some(session) = self.app.context_wanted() else {
+            return;
+        };
+        if self.services.context.start(()).is_none() {
+            return;
+        }
         let kernel = self.kernel.clone();
         let query = ContextUsageQuery {
-            session: self.outbox.session().map(|session| session.id().clone()),
+            session: session.clone(),
             workspace: self.app.view.workspace().clone(),
             selection: self.app.view.selection().clone(),
             // 判决用的模式（plan 开时是 plan，修复线 F20）。
@@ -103,8 +115,62 @@ impl<B: Backend> Loop<'_, B> {
                 let usage = kernel.context_usage(query).await;
                 Done::Service(ServiceDone::Context {
                     usage: Box::new(usage),
-                    all,
+                    session,
                 })
+            }
+            .boxed(),
+        );
+    }
+
+    /// 统计的页 Session 标签的事实（tui-panels.md §4.5）：显示 Session 时问 MCP 服务器、hooks、内置家族的登录状态、模型目录里的
+    /// provider 名字与工作区的分支，一起回来。分支按目录读（`project_sessions` 的每一行都是它目录现在的分支，同 ← 项目页），所以问这个目录的一个会话
+    /// 就够了；这个目录还没有会话时没有分支。打开或换到 Session、每次模型请求结束时经这里；不显示 Session 时什么也不做。
+    pub(super) fn session_facts(&mut self) {
+        if !self.app.session_facts_wanted() || self.services.facts.start(()).is_none() {
+            return;
+        }
+        let kernel = self.kernel.clone();
+        let account = self.options.services.account.clone();
+        let models = self.options.models.clone();
+        let workspace = self.app.view.workspace().clone();
+        let query = rust_cli_kernel_api::store::SessionQuery {
+            environment: workspace.environment.clone(),
+            root: Some(workspace.root),
+            order: Default::default(),
+            limit: 1,
+        };
+        self.pending.push(
+            async move {
+                let catalog = async {
+                    match &models {
+                        Some(directory) => directory.catalog().await.models,
+                        None => Vec::new(),
+                    }
+                };
+                let (mcp, hooks, families, found, catalog) = futures_util::join!(
+                    kernel.mcp_servers(),
+                    kernel.hooks(),
+                    account.families(),
+                    kernel.project_sessions(query),
+                    catalog,
+                );
+                let mut providers: Vec<(String, String)> = Vec::new();
+                for model in catalog {
+                    if !providers.iter().any(|(id, _)| *id == model.provider) {
+                        providers.push((model.provider, model.provider_name));
+                    }
+                }
+                let branch = found
+                    .ok()
+                    .and_then(|found| found.sessions.into_iter().next())
+                    .and_then(|session| session.branch);
+                Done::Service(ServiceDone::SessionFacts(Box::new(SessionFacts {
+                    mcp,
+                    hooks,
+                    families,
+                    providers,
+                    branch,
+                })))
             }
             .boxed(),
         );
@@ -124,24 +190,22 @@ impl<B: Backend> Loop<'_, B> {
             .push(async move { Done::Service(ServiceDone::ApiKey(saving.await)) }.boxed());
     }
 
-    pub(super) fn logout(&mut self) {
-        let account = self.options.services.account.clone();
-        let logout = account.logout();
-        self.pending
-            .push(async move { Done::Service(ServiceDone::Logout(logout.await)) }.boxed());
-    }
-
-    /// 登录成功：关闭视图、提示结果，再重读模型目录、切到登录给出的模型（tui.md §7.2，D8）。
+    /// 登录或密钥的结果：成功时门道关上、说接上了什么，再重读模型目录、切到登录给出的模型（tui.md §7.2，D8）；失败时原因
+    /// 留在门道里（门道关着时在输入框上方）。
     fn configured(&mut self, result: Result<Configured, String>) {
-        self.app.login_closed();
         match result {
             Ok(configured) => {
-                self.app.info(i18n::configured(self.app.lang, &configured));
+                let says = if configured.oauth {
+                    doorway::signed_in_says(configured.family, configured.user.as_deref())
+                } else {
+                    doorway::keyed_says(configured.family, &configured.model)
+                };
+                self.app.door_connected(says);
                 if self.options.models.is_some() {
                     self.catalog(Some(configured.model));
                 }
             }
-            Err(reason) => self.app.error(reason),
+            Err(reason) => self.app.door_failed(reason),
         }
     }
 
@@ -150,39 +214,41 @@ impl<B: Backend> Loop<'_, B> {
         match done {
             ServiceDone::LoginUrl { family, authorize } => {
                 if let Some(authorize) = authorize {
-                    self.app
-                        .info(i18n::login_open_url(lang, family, &authorize.url));
+                    self.app.door_url(family, authorize.url);
                 }
             }
             ServiceDone::Login(result) => {
                 self.services.login = None;
                 match result {
                     Ok(configured) => self.configured(Ok(configured)),
-                    Err(LoginFailure::Cancelled) => {
-                        let status = self.app.strings.login_cancelled;
-                        self.app.login_back(status);
-                    }
+                    Err(LoginFailure::Cancelled) => self.app.door_cancelled(),
                     Err(LoginFailure::Failed(reason)) => self.configured(Err(reason)),
                 }
             }
             ServiceDone::ApiKey(result) => self.configured(result),
-            // 独立页面（L30 起不再插进 transcript，tui-panels.md §4.1）。
-            ServiceDone::Context { usage, all } => match *usage {
-                Ok(usage) => {
-                    self.app.overlay = Some(crate::ui::app::Overlay::Page {
-                        local: Local::Context {
-                            usage: Box::new(usage),
-                            all,
-                        },
-                        scroll: 0,
-                    });
+            // 上下文的计数：答案只进 `App.context_count`（卡的组成与页都读它）；问的不是现在看的会话时丢掉再问，在途时又
+            // 要问的现在问（tui-panels.md §4.1）。失败不进 transcript（每次请求结束都会再问）：页上代替 `Counting…`。
+            ServiceDone::Context { usage, session } => {
+                let again = self.services.context.finish().is_some();
+                let result = (*usage).map_err(|error| i18n::rejected(lang, &error.to_string()));
+                let stale = self.app.context_counted(
+                    session,
+                    result,
+                    std::time::Instant::now(),
+                    self.now_ms(),
+                );
+                if again || stale {
+                    self.count_context();
                 }
-                Err(error) => self.app.error(i18n::rejected(lang, &error.to_string())),
-            },
-            ServiceDone::Logout(result) => match result {
-                Ok(path) => self.app.info(i18n::logged_out(lang, &path)),
-                Err(reason) => self.app.error(reason),
-            },
+            }
+            // Session 标签的事实：替换上一次的；在途时又要问的现在问（§4.5）。
+            ServiceDone::SessionFacts(facts) => {
+                let again = self.services.facts.finish().is_some();
+                self.app.session_facts_arrived(*facts);
+                if again {
+                    self.session_facts();
+                }
+            }
             ServiceDone::Locale { locale, result } => {
                 let next = self.services.locale.finish();
                 match result {

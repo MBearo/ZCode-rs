@@ -1,35 +1,32 @@
 //! 工作区信任对话框的状态与排版（docs/specs/rust-cli/workspace-trust.md §2.4、§2.5）。
 //!
-//! 排版沿用审批视图（`interaction_view`）：整行 `─` 与粗体标题（F26 起用主题的强调色，用户决定），
-//! 正文缩进两格、段落之间空一行，焦点行按选择列表组件画（`› ` 加底色条，F26），选项不带序号，最后一行是按键提示组件。
-//! 状态是要显示的内容与界面状态（焦点、连按的提示）；回答交给调用方。启动前的独立对话框（`trust.rs`）与应用内的信任框
-//! （`trust_ask.rs`）画同一个 [`Dialog`]；独立进入终端的循环在 `standalone_dialog`（F138）。
+//! 照 Puffin 的信任页（docs/specs/rust-cli/workspace-trust.md，壳的 `kept/trust.rs`；tui-kit.md §4.2「工作区信任」）：行是
+//! kit 的 `kept_rows::trust_rows`（中文界面用 `trust_rows_said` 换字），顶上空一行；键照 `trust_key`：↑ ^P 到取消项、↓ ^N
+//! 到信任项，⏎ 选焦点的项，`1` / `2` 直接选，esc 未信任时退出、后备询问时不带授权继续；^C 或 ^D 连按两次退出，按了一次
+//! 之后最后一行说 `^C again to exit`，不会过时，按别的键才清掉（以前过 [`super::notice::DOUBLE`] 就清掉）。应用内切项目时
+//! 的这个对话框与启动前的信任页（`screens::ask_trust`）同一个样子：两处的提示都不到期，所以不用到期重画（F138-2 修的是提示
+//! 到期之后还留在屏上；这里显示与行为一致：提示在，再按一次就退出）。状态是要显示的内容与界面状态（焦点、连按的键）；
+//! 回答交给调用方。
 use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use rust_cli_tui_kit::app::element::{br, stack};
+use rust_cli_tui_kit::app::layout::Layout;
+use rust_cli_tui_kit::app::widgets::kept_rows::{self, TrustWords};
+use rust_cli_tui_kit::render::StyledLine;
 
 use super::i18n::Lang;
 use super::i18n_trust as text;
+use super::ink::Ink;
 use super::keyboard;
-use super::notice::Armed;
-use super::palette::Palette;
-use super::standalone_dialog::{INDENT, Standalone, hint_line};
-use super::text::{truncate_line, wrap};
 use crate::trust::{TrustAnswer, TrustPrompt};
 
-/// 警告色（`/context` 的警告也用它，深浅两种背景都可读）：F26 起只给项目授权那段的 `⚠` 标题。
-const WARNING: Color = Color::Yellow;
-/// 列出的规则最多几个。
-const RULES_SHOWN: usize = 8;
-
-/// 对话框：要显示的内容、焦点（0 是取消项，缺省焦点在取消项）与连按两次退出的提示。
+/// 对话框：要显示的内容、焦点（0 是取消项，缺省焦点在取消项）与连按退出的键（`C` 或 `D`）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dialog {
     prompt: TrustPrompt,
     focus: usize,
-    armed: Option<(Armed, Instant)>,
+    armed: Option<char>,
 }
 
 impl Dialog {
@@ -41,55 +38,26 @@ impl Dialog {
         }
     }
 
-    fn chosen(&self) -> TrustAnswer {
-        match (self.focus, self.prompt.backstop) {
-            (1, _) => TrustAnswer::Trusted,
-            (_, true) => TrustAnswer::WithoutGrants,
-            (_, false) => TrustAnswer::Exit(1),
-        }
-    }
-}
-
-impl Standalone for Dialog {
-    type Answer = TrustAnswer;
-    const NAME: &'static str = "the trust dialog";
-    const CLOSED: TrustAnswer = TrustAnswer::Exit(1);
-
-    /// 连按提示的到期时刻（到期后重画，提示行回到按键说明）。
-    fn redraw_at(&self) -> Option<Instant> {
-        self.armed.map(|(_, until)| until)
-    }
-
-    /// 提示到期：清掉。
-    fn expire(&mut self, now: Instant) {
-        if self.armed.is_some_and(|(_, until)| now >= until) {
-            self.armed = None;
-        }
-    }
-
-    /// 一个按键；给出回答时对话框结束。
-    fn key(&mut self, key: KeyEvent, now: Instant) -> Option<TrustAnswer> {
+    /// 一个按键；给出回答时对话框结束（Puffin `trust_key`）。
+    pub fn key(&mut self, key: KeyEvent, _now: Instant) -> Option<TrustAnswer> {
         let ctrl = keyboard::ctrl(&key);
-        let exit = match key.code {
-            KeyCode::Char('c') if ctrl => Some(Armed::ExitC),
-            KeyCode::Char('d') if ctrl => Some(Armed::ExitD),
-            _ => None,
-        };
-        if let Some(exit) = exit {
-            // 提示期间再按同一个键退出，退出码 1。
-            if self
-                .armed
-                .is_some_and(|(armed, until)| armed == exit && now < until)
-            {
+        if ctrl && let KeyCode::Char(c @ ('c' | 'd')) = key.code {
+            let c = c.to_ascii_uppercase();
+            if self.armed == Some(c) {
                 return Some(TrustAnswer::Exit(1));
             }
-            self.armed = Some((exit, now + super::notice::DOUBLE));
+            self.armed = Some(c);
             return None;
         }
+        self.armed = None;
         match key.code {
             KeyCode::Up => self.focus = 0,
+            KeyCode::Char('p') if ctrl => self.focus = 0,
             KeyCode::Down => self.focus = 1,
-            KeyCode::Enter => return Some(self.chosen()),
+            KeyCode::Char('n') if ctrl => self.focus = 1,
+            KeyCode::Enter => return Some(self.chosen(self.focus)),
+            KeyCode::Char('1') => return Some(self.chosen(0)),
+            KeyCode::Char('2') => return Some(self.chosen(1)),
             // 未信任时 esc 退出（退出码 0）；后备询问时 esc 等于“不带这些权限继续”。
             KeyCode::Esc if self.prompt.backstop => return Some(TrustAnswer::WithoutGrants),
             KeyCode::Esc => return Some(TrustAnswer::Exit(0)),
@@ -98,80 +66,60 @@ impl Standalone for Dialog {
         None
     }
 
-    /// 画面的行（宽度 `width`）。
-    fn lines(&self, palette: &Palette, lang: Lang, width: usize) -> Vec<Line<'static>> {
+    fn chosen(&self, focus: usize) -> TrustAnswer {
+        match (focus, self.prompt.backstop) {
+            (1, _) => TrustAnswer::Trusted,
+            (_, true) => TrustAnswer::WithoutGrants,
+            (_, false) => TrustAnswer::Exit(1),
+        }
+    }
+
+    /// 画面的行（宽度 `width`）：顶上空一行，然后是 kit 的 `trust_rows`。
+    pub fn lines(&self, ink: &Ink, lang: Lang, width: usize) -> Vec<StyledLine> {
         let prompt = &self.prompt;
-        let bold = Style::default().add_modifier(Modifier::BOLD);
-        let dim = Style::default().add_modifier(Modifier::DIM);
-        let paragraph = |content: &str, style: Style| {
-            wrap(
-                &[Span::styled(content.to_owned(), style)],
-                width,
-                &[Span::raw(INDENT)],
-                &[Span::raw(INDENT)],
-            )
+        let grants = prompt.grants.as_ref().map(|g| kept_rows::Grants {
+            count: g.count,
+            rules: &g.rules,
+            sources: &g.sources,
+        });
+        let trust = kept_rows::Trust {
+            path: &prompt.path,
+            backstop: prompt.backstop,
+            grants,
         };
-        // 顶上的线与标题用主题的强调色（修复线 F26，用户决定，workspace-trust.md §2.4；原来是警告色 `WARNING`）。
-        let accent = palette.accent;
-        let mut lines = vec![
-            crate::ui::style::rule(width, Style::default().fg(accent)),
-            truncate_line(
-                Line::from(vec![
-                    Span::raw(INDENT),
-                    Span::styled(text::title(lang), bold.fg(accent)),
-                ]),
-                width,
-            ),
-            Line::default(),
-        ];
-        lines.extend(paragraph(&sanitize(&prompt.path), bold));
-        lines.push(Line::default());
-        lines.extend(paragraph(text::safety_check(lang), Style::default()));
-        lines.push(Line::default());
-        lines.extend(paragraph(text::abilities(lang), Style::default()));
-        if let Some(grants) = &prompt.grants {
-            lines.push(Line::default());
-            let sources = text::list(lang, &grants.sources, None);
-            let title = format!("⚠ {}", text::grants_title(lang, grants.count, &sources));
-            lines.extend(paragraph(&title, bold.fg(WARNING)));
-            let rules = format!(
-                "{INDENT}{}",
-                text::list(lang, &grants.rules, Some(RULES_SHOWN))
-            );
-            lines.extend(paragraph(&rules, Style::default()));
-            lines.extend(paragraph(text::grants_note(lang), dim));
-        }
-        lines.push(Line::default());
-        let labels = [text::cancel(lang, prompt.backstop), text::confirm(lang)];
-        for (index, label) in labels.into_iter().enumerate() {
-            // 选择列表组件（`› ` 加底色条，tui.md §7.4，修复线 F26；原来是强调色的 `❯ `）。
-            let chosen = index == self.focus;
-            let line = Line::from(vec![
-                Span::raw(INDENT),
-                super::pick::pointer(chosen),
-                Span::raw(label),
-            ]);
-            lines.push(super::pick::paint(
-                truncate_line(line, width),
-                chosen,
-                palette,
-                width,
-            ));
-        }
-        lines.push(Line::default());
-        // 按键提示组件（tui.md §7.4）：连按的提示与按键说明都是 `{键}` 模板。
-        let hint = match self.armed {
-            Some((armed, _)) => super::notice::armed_text(lang, armed),
-            None => text::keys_hint(lang),
+        let words = match lang {
+            Lang::En => kept_rows::trust_words(&trust),
+            Lang::Zh => zh_words(prompt, lang),
         };
-        lines.push(hint_line(hint, palette, width));
-        lines
+        let mut rows = vec![br()];
+        rows.extend(kept_rows::trust_rows_said(
+            &ink.theme, &trust, &words, self.focus, self.armed,
+        ));
+        Layout::lay(&stack(rows), width)
     }
 }
 
-/// 控制字符换成 U+FFFD。
-fn sanitize(path: &str) -> String {
-    path.chars()
-        .map(|c| if c.is_control() { '\u{fffd}' } else { c })
-        .collect()
+/// 中文界面的字（`i18n_trust.rs`）。
+fn zh_words(prompt: &TrustPrompt, lang: Lang) -> TrustWords<'static> {
+    let (grants_title, grants_rules) = prompt.grants.as_ref().map_or_else(Default::default, |g| {
+        (
+            text::grants_title(lang, g.count, &text::list(lang, &g.sources, None)),
+            text::list(lang, &g.rules, Some(RULES_SHOWN)),
+        )
+    });
+    TrustWords {
+        title: text::title(lang),
+        safety_check: text::safety_check(lang),
+        abilities: text::abilities(lang),
+        grants_title,
+        grants_rules,
+        grants_note: text::grants_note(lang),
+        cancel: text::cancel(lang, prompt.backstop),
+        confirm: text::confirm(lang),
+        keys: text::keys(lang),
+        again: text::again(lang),
+    }
 }
+
+/// 列出的规则最多几个（同 kit）。
+const RULES_SHOWN: usize = 8;

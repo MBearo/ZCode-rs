@@ -128,7 +128,8 @@ async fn serve(
     let built = assemble::kernel(&spec, facts, ported, clock).await?;
     state.ready().await;
     let defaults = Defaults {
-        selection: built.selection.clone(),
+        // App 模式组装时已等缺省模型定下（`Controller::app` 的 `wait_model`；performance.md §12.3 只改 TUI）。
+        selection: built.selection.current(),
         mode: built.mode,
         environment: EnvironmentId::new(LOCAL_ENVIRONMENT),
     };

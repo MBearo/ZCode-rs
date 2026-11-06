@@ -16,7 +16,7 @@ use rust_cli_kernel_api::store::{Fact, SessionKind, SessionMeta, StoreError};
 use tokio_util::sync::CancellationToken;
 
 use crate::Core;
-use crate::child::{ChildSink, Parent};
+use crate::child::{ChildSink, Parent, tool_use_blocks};
 use crate::context::SubagentContext;
 use crate::live::{AgentState, LiveAgent};
 use crate::report::{self, Ending, Report};
@@ -198,7 +198,7 @@ pub(crate) struct Finished {
 fn abort_of(agent: &LiveAgent) -> Abort {
     match &agent.state {
         AgentState::Running { abort, .. } => abort.clone(),
-        AgentState::Parked(_) | AgentState::Finished(_) => Abort::new(),
+        AgentState::Parked { .. } | AgentState::Finished(_) => Abort::new(),
     }
 }
 
@@ -212,6 +212,18 @@ pub(crate) async fn drive(
 ) -> Finished {
     let Opening { messages, ledger } = opening;
     let started = core.ports.clock.now_ms();
+    // 修正（2026-11-05）：`tool_uses` 是子会话里的 tool_use 块数（agents.md §2），续跑时也算之前几次运行的。以前只数
+    // 这一次运行的，命令保活续跑后的第二次通知少算了第一次运行的工具。之前的从这次运行开头的历史数
+    // （唯一来源是子会话），fork 继承的前缀是父会话的，不算。
+    let inherited = agent.fork_prefix.as_ref().map_or(0, |prefix| prefix.len());
+    let earlier: usize = messages
+        .iter()
+        .skip(inherited)
+        .filter_map(|message| match message {
+            Message::Assistant(assistant) => Some(tool_use_blocks(&assistant.content)),
+            _ => None,
+        })
+        .sum();
     tracing::info!(
         event = "subagent.start",
         session = %agent.parent,
@@ -265,7 +277,8 @@ pub(crate) async fn drive(
     if let Err(error) = sink.commit(vec![Fact::TurnEnded { status }]).await {
         tracing::warn!(%error, "the subagent turn usage could not be stored");
     }
-    let (last, tool_uses) = sink.outcome();
+    let (last, run_tool_uses) = sink.outcome();
+    let tool_uses = earlier + run_tool_uses;
     let mut text = report::final_text(last.as_ref());
     let (ending, error) = match result {
         Ok(QueryStop::Aborted) => (Ending::Killed, None),
@@ -389,7 +402,7 @@ pub(crate) fn background(core: &Arc<Core>, agent: LiveAgent, opening: Opening) {
     let task_core = core.clone();
     let _task = core.ports.spawner.spawn("subagent", async move {
         let finished = drive(&task_core, &agent, opening, None, None).await;
-        let settled = routing::settle(&task_core, &agent.agent, &finished);
+        let settled = routing::settle(&task_core, &agent.agent, &finished).await;
         routing::wake(&task_core, settled.wakes).await;
     });
 }

@@ -5,7 +5,7 @@ use std::time::Duration;
 use rust_cli_machines::{
     MachineEntry, MachineError, MachineState, MachinesError, ProvisionError, Retry, Welcomed,
 };
-use rust_cli_tui::machines::{ConnectStep, MachineFailure, MachineProblem, MachineStatus};
+use rust_cli_tui_ports::machines::{ConnectStep, MachineFailure, MachineProblem, MachineStatus};
 
 use super::{problem, row};
 use crate::machines::{FleetError, Seen};
@@ -223,4 +223,45 @@ fn the_remote_home_reaches_the_tui() {
         shown.executor.and_then(|executor| executor.home).as_deref(),
         Some("/home/dev")
     );
+}
+
+/// `~/.ssh/config` 的主机（remote-exec.md §21.3）：通配与否定不列，HostName / User 取段里第一次的，`Match` 开新段，
+/// 不能当机器名的不列，重名只留第一个。
+#[test]
+fn ssh_hosts_lists_the_hosts_the_tui_can_add_as_they_are() {
+    let text = "\
+# comment
+Host build-arm
+    HostName build-arm.example.com
+    User ubuntu
+    HostName ignored.example.com
+
+Host lab lab2 *.internal !blocked
+  hostname=lab.example.com
+
+Host bare
+Match host foo
+  HostName match.example.com
+Host local bad/name gpu-2
+  User root
+  HostName gpu-2.example.com
+Host build-arm
+  HostName again.example.com
+";
+    let hosts: Vec<(String, String)> = super::ssh_hosts(text)
+        .into_iter()
+        .map(|h| (h.alias, h.target))
+        .collect();
+    let want = [
+        ("build-arm", "ubuntu@build-arm.example.com"),
+        ("lab", "lab.example.com"),
+        ("lab2", "lab.example.com"),
+        ("bare", "bare"),
+        ("gpu-2", "root@gpu-2.example.com"),
+    ];
+    assert_eq!(
+        hosts,
+        want.map(|(a, t)| (a.to_owned(), t.to_owned())).to_vec()
+    );
+    assert!(super::ssh_hosts("").is_empty());
 }

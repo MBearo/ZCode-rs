@@ -41,6 +41,11 @@ fn c1() -> ContextUsage {
             plugin: None,
             tokens: 115,
         }],
+        prompt_sections: Vec::new(),
+        system_tools: Vec::new(),
+        deferred_tools: Vec::new(),
+        messages: Vec::new(),
+        tool_results: Vec::new(),
     }
 }
 

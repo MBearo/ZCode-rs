@@ -150,6 +150,13 @@ impl RunSink for CollectSink {
     /// 摘要请求不压缩自己。
     async fn compact_started(&self, _trigger: rust_cli_kernel_api::message::CompactTrigger) {}
 
+    async fn compact_failed(
+        &self,
+        _trigger: rust_cli_kernel_api::message::CompactTrigger,
+        _message: String,
+    ) {
+    }
+
     /// 摘要请求没有插话与通知。
     async fn take_absorbed(&self) -> Vec<rust_cli_kernel_api::orchestration::Absorbed> {
         Vec::new()

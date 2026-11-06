@@ -8,11 +8,17 @@
 
 use std::time::{Duration, Instant};
 
-use super::palette::{Probed, parse_osc_color};
+use super::probe::{Probed, parse_osc_color};
 
-/// 写给终端的查询：OSC 10（前景）与 OSC 11（背景）。不带 DA1：经 ConPTY 时 DA1 可能由 conhost 先回，早于转给终端的
-/// OSC 回复，读到它就停会漏掉颜色。
-pub(crate) const QUERY: &[u8] = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\";
+/// 写给终端的查询：程序状态（OSC 7501，tui-manage.md §5.4）、OSC 10（前景）与 OSC 11（背景）。7501 在最前：终端按顺序
+/// 回答，两段颜色都到了时它的回答已经到了。不带 DA1：经 ConPTY 时 DA1 可能由 conhost 先回，早于转给终端的 OSC 回复，读到
+/// 它就停会漏掉颜色。
+pub(crate) fn query() -> String {
+    format!(
+        "{}\x1b]10;?\x1b\\\x1b]11;?\x1b\\",
+        super::program_status::QUERY
+    )
+}
 
 /// 回复最多收这么多字节（两段回复只有几十个字节；再多是探测期间的大段输入）。
 const MAX_REPLY: usize = 1024;
@@ -78,6 +84,7 @@ pub(crate) fn parse(reply: &str) -> Probed {
     Probed {
         foreground: complete(reply, "10").and_then(parse_osc_color),
         background: complete(reply, "11").and_then(parse_osc_color),
+        program_status: super::program_status::supported(reply),
     }
 }
 
@@ -91,7 +98,11 @@ pub(crate) fn probe(timeout: Duration) -> Probed {
         return Probed::default();
     };
     let mut out = std::io::stdout();
-    if out.write_all(QUERY).and_then(|()| out.flush()).is_err() {
+    if out
+        .write_all(query().as_bytes())
+        .and_then(|()| out.flush())
+        .is_err()
+    {
         return Probed::default();
     }
     parse(&collect(&mut console, timeout))

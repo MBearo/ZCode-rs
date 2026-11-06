@@ -1,5 +1,6 @@
 //! TUI 的机器服务（docs/specs/rust-cli/remote-exec.md §21.2）：把 Fleet（清单、R2 的状态机、注册表）换算成 tui 自己的
 //! 类型。TUI 不认识 machines crate；换算只在这里。
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
@@ -7,17 +8,82 @@ use futures_util::stream::{BoxStream, StreamExt};
 use rust_cli_machines::{
     MachineEntry, MachineError, MachineState, MachinesError, ProvisionError, Retry,
 };
-use rust_cli_tui::machines::{
+use rust_cli_tui_ports::machines::{
     Changed, ConnectStep, ExecutorInfo, MachineFailure, MachineProblem, MachineRow, MachineStatus,
-    Machines,
+    Machines, SshHost,
 };
 
 use crate::machines::{Fleet, FleetError, Seen};
 
-struct TuiMachines(Arc<Fleet>);
+struct TuiMachines(Arc<Fleet>, Option<PathBuf>);
 
-pub(crate) fn service(fleet: Arc<Fleet>) -> Arc<dyn Machines> {
-    Arc::new(TuiMachines(fleet))
+/// `ssh_config`：列表与添加页建议的主机从这个文件读（remote-exec.md §21.3）；不知道 home 时没有。
+pub(crate) fn service(fleet: Arc<Fleet>, ssh_config: Option<PathBuf>) -> Arc<dyn Machines> {
+    Arc::new(TuiMachines(fleet, ssh_config))
+}
+
+/// `~/.ssh/config` 的主机（remote-exec.md §21.3）：`Host` 行里每个不带通配与否定的名字一项，按出现的次序、去重；
+/// `HostName`、`User` 取那一段里第一次出现的。不跟 `Include`，不展开 `%h` 一类的写法；不能当机器名的别名不列。
+pub(crate) fn ssh_hosts(text: &str) -> Vec<SshHost> {
+    // 一段：它的名字与 HostName、User。
+    let mut blocks: Vec<(Vec<String>, Option<String>, Option<String>)> = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        // 关键字与值之间是空白或 `=`。
+        let (key, value) = match line.split_once(|c: char| c.is_whitespace() || c == '=') {
+            Some((key, value)) => (
+                key,
+                value
+                    .trim_start_matches(|c: char| c.is_whitespace() || c == '=')
+                    .trim(),
+            ),
+            None => continue,
+        };
+        let value = value.trim_matches('"');
+        match key.to_ascii_lowercase().as_str() {
+            "host" => blocks.push((
+                value
+                    .split_whitespace()
+                    .filter(|name| !name.contains(['*', '?', '!']))
+                    .map(str::to_owned)
+                    .collect(),
+                None,
+                None,
+            )),
+            // `Match` 开的段不是主机：它后面的 HostName 不算到前一段上。
+            "match" => blocks.push((Vec::new(), None, None)),
+            "hostname" => {
+                if let Some(block) = blocks.last_mut() {
+                    block.1.get_or_insert_with(|| value.to_owned());
+                }
+            }
+            "user" => {
+                if let Some(block) = blocks.last_mut() {
+                    block.2.get_or_insert_with(|| value.to_owned());
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out: Vec<SshHost> = Vec::new();
+    for (names, hostname, user) in blocks {
+        for alias in names {
+            if !rust_cli_machines::list::valid_name(&alias) || out.iter().any(|h| h.alias == alias)
+            {
+                continue;
+            }
+            let host = hostname.clone().unwrap_or_else(|| alias.clone());
+            let target = match &user {
+                Some(user) => format!("{user}@{host}"),
+                None => host,
+            };
+            out.push(SshHost { alias, target });
+        }
+    }
+    out
 }
 
 fn failure(error: &MachineError) -> MachineFailure {
@@ -26,6 +92,7 @@ fn failure(error: &MachineError) -> MachineFailure {
         MachineError::Unreachable(message) => MachineFailure::Unreachable(message),
         MachineError::Refused(message) => MachineFailure::Refused(message),
         MachineError::Lost(message) => MachineFailure::Lost(message),
+        MachineError::Stopped => MachineFailure::Stopped,
     }
 }
 
@@ -205,6 +272,23 @@ impl Machines for TuiMachines {
     fn remove(&self, name: String) -> BoxFuture<'static, Result<(), MachineProblem>> {
         let fleet = self.0.clone();
         Box::pin(async move { fleet.remove(&name).await.map_err(problem) })
+    }
+
+    fn ssh_hosts(&self) -> BoxFuture<'static, Vec<SshHost>> {
+        let path = self.1.clone();
+        Box::pin(async move {
+            let Some(path) = path else {
+                return Vec::new();
+            };
+            match rust_cli_fs::read_optional(&path).await {
+                Ok(Some(bytes)) => ssh_hosts(&String::from_utf8_lossy(&bytes)),
+                Ok(None) => Vec::new(),
+                Err(error) => {
+                    tracing::warn!(%error, path = %path.display(), "the ssh config could not be read");
+                    Vec::new()
+                }
+            }
+        })
     }
 }
 

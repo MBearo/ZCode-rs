@@ -35,6 +35,8 @@ pub struct Machine {
     scope: TaskScope,
     /// 建过几个客户端：每个新的客户端一个实例（见 `connect`）。
     clients: AtomicU64,
+    /// 断开过几次：只在 `client` 的锁里改与核对，`connect` 走完时据此知道中间断开过没有（§19.10）。
+    stops: AtomicU64,
 }
 
 fn welcomed(client: &ExecClient) -> Option<Welcomed> {
@@ -76,6 +78,7 @@ impl Machine {
             watcher: Mutex::new(None),
             scope,
             clients: AtomicU64::new(0),
+            stops: AtomicU64::new(0),
         }
     }
 
@@ -124,12 +127,45 @@ impl Machine {
         if let Some(client) = self.client() {
             return Ok(client);
         }
+        let stops = self.stops.load(Ordering::SeqCst);
         if !self.apply(MachineEvent::Connect) {
             return Err(MachineError::Lost(format!(
                 "cannot connect while {:?}",
                 self.state()
             )));
         }
+        let established = self.establish().await;
+        // 缺陷修复（2026-10-29，remote-exec.md §19.10）：部署与握手时被断开过，状态已经回到 Unconnected，以前这里照样
+        // 存下新客户端：之后的 connect 见到客户端就直接返回（状态不变、回执说连上了），disconnect 见到 Unconnected 不关
+        // 它，只能重启。现在在存客户端的同一把锁里核对断开的次数（disconnect 在这把锁里加一），断开过就关掉它、回 Stopped。
+        let stopped = {
+            let mut slot = lock(&self.client);
+            let stopped = self.stops.load(Ordering::SeqCst) != stops;
+            if !stopped && let Ok(client) = &established {
+                *slot = Some(client.clone());
+                let watcher = self.scope.spawner().spawn(
+                    "watch",
+                    follow(client.clone(), self.state.clone(), self.endpoint.describe()),
+                );
+                *lock(&self.watcher) = Some(watcher);
+            }
+            stopped
+        };
+        if !stopped {
+            return established;
+        }
+        if let Ok(client) = established {
+            client.close().await;
+        }
+        // 断开在 Connect 之前到的那一刻（上面记下次数之后），状态是这次 Connect 改的：补回 Unconnected。
+        if self.state() != MachineState::Unconnected {
+            self.apply(MachineEvent::Disconnect);
+        }
+        Err(MachineError::Stopped)
+    }
+
+    /// 部署、握手（失败时状态记下错误）；返回握手过的客户端，存不存由 `connect` 决定。
+    async fn establish(&self) -> Result<ExecClient, MachineError> {
         // 下载与上传是单独的步（F98 上传、F100 下载，remote-exec.md §25.4.2、§26.6）：部署器开始时报告。
         let steps = |step: ProvisionStep| {
             self.apply(match step {
@@ -163,12 +199,6 @@ impl Machine {
             ));
         };
         self.apply(MachineEvent::Welcomed(first));
-        let watcher = self.scope.spawner().spawn(
-            "watch",
-            follow(client.clone(), self.state.clone(), self.endpoint.describe()),
-        );
-        *lock(&self.watcher) = Some(watcher);
-        *lock(&self.client) = Some(client.clone());
         Ok(client)
     }
 
@@ -182,12 +212,16 @@ impl Machine {
         self.client().is_some_and(|client| client.retry_now())
     }
 
-    /// 断开：关掉客户端，回到 Unconnected。
+    /// 断开：关掉客户端，回到 Unconnected。正在跑的 connect 走完时看到断开过，不留它的客户端（§19.10）。
     pub async fn disconnect(&self) {
-        if let Some(watcher) = lock(&self.watcher).take() {
+        let (watcher, client) = {
+            let mut slot = lock(&self.client);
+            self.stops.fetch_add(1, Ordering::SeqCst);
+            (lock(&self.watcher).take(), slot.take())
+        };
+        if let Some(watcher) = watcher {
             watcher.abort();
         }
-        let client = lock(&self.client).take();
         if let Some(client) = client {
             client.close().await;
         }

@@ -19,8 +19,8 @@ use rust_cli_base::{Spawner, Task};
 use rust_cli_kernel_api::clock::{Clock, Ids};
 use rust_cli_kernel_api::ids::SessionId;
 use rust_cli_kernel_api::peers::{
-    PeerAddress, PeerIdentity, PeerMessaging, PeerOutbound, PeerRecord, PeerSendError, PeerSignal,
-    PeerStatus, ReceiptStatus, name_prefix,
+    PeerAddress, PeerIdentity, PeerMessaging, PeerOutbound, PeerPresence, PeerRecord,
+    PeerSendError, PeerSignal, PeerStatus, ReceiptStatus, TmuxPlace, name_prefix,
 };
 use tokio::sync::watch;
 
@@ -43,6 +43,8 @@ pub struct PeerConfig {
     /// 进程启动时的工作目录（登记的 `cwd`，名字取它的目录名）。
     pub cwd: String,
     pub version: String,
+    /// 进程在哪个 tmux 窗格里（入口读 `$TMUX`、`$TMUX_PANE`）。
+    pub tmux: Option<TmuxPlace>,
     pub clock: Arc<dyn Clock>,
     pub ids: Arc<dyn Ids>,
     pub spawner: Spawner,
@@ -142,6 +144,8 @@ impl LocalPeers {
             status: Some(PeerStatus::Busy.as_str().to_owned()),
             updated_at: now,
             status_updated_at: Some(now),
+            presence: PeerPresence::default(),
+            tmux: config.tmux.clone(),
         };
         registry::write(&config.registry, &record).await?;
         let inbox = Inbox::new();
@@ -306,7 +310,11 @@ impl PeerMessaging for LocalPeers {
     async fn bind(&self, session: &SessionId) {
         let Some(live) = &self.live else { return };
         live.inbox.bind(session);
-        live.update(|record| record.session_id = Some(session.to_string()));
+        // 现场属于会话：换了主会话时旧的不留（tui-cockpit.md §4）。
+        live.update(|record| {
+            record.session_id = Some(session.to_string());
+            record.presence = PeerPresence::default();
+        });
     }
 
     async fn unbind(&self, session: &SessionId) {
@@ -324,6 +332,34 @@ impl PeerMessaging for LocalPeers {
     async fn ack(&self, _session: &SessionId, seq: u64) {
         if let Some(live) = &self.live {
             live.inbox.ack(seq);
+        }
+    }
+
+    async fn own(&self) -> Option<PeerRecord> {
+        let live = self.live.as_ref()?;
+        let record = live.record.borrow().clone()?;
+        Some(registry::of_record(record))
+    }
+
+    async fn set_presence(&self, session: &SessionId, presence: PeerPresence) {
+        let Some(live) = &self.live else { return };
+        if live.inbox.bound().as_ref() != Some(session) {
+            return;
+        }
+        live.update(|record| record.presence = presence);
+    }
+
+    async fn stop(&self, to: &PeerAddress) -> Result<(), PeerSendError> {
+        let frame = Frame::Control {
+            action: "stop_turn".to_owned(),
+            orig_msg_id: None,
+            status: None,
+        };
+        let socket = PathBuf::from(to.socket());
+        match rust_cli_net::uds::request(&socket, &line(&frame)).await {
+            Ok(Some(_)) => Ok(()),
+            Ok(None) => Err(PeerSendError::Gone),
+            Err(error) => Err(send_error(&error)),
         }
     }
 

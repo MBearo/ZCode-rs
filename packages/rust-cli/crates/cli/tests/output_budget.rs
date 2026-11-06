@@ -135,6 +135,7 @@ impl Sandbox {
                 bigmodel_team_plans: format!("{origin}/coding-plan/team/plans"),
                 bigmodel_api: origin,
                 client_version: "0.0.0-test".to_owned(),
+                usage_quota_url: None,
             },
         };
         let secret = CredentialSecret {
@@ -162,7 +163,7 @@ impl Sandbox {
             ids,
         };
         let defaults = Defaults {
-            selection: selection(),
+            selection: selection().into(),
             mode: PermissionMode::BypassPermissions,
             max_turns: None,
             search_tools: false,

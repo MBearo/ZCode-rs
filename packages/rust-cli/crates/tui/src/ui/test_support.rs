@@ -5,16 +5,16 @@ use rust_cli_kernel_api::testing::selection;
 
 use super::app::App;
 use super::i18n::Lang;
-use super::palette::{ColorLevel, Palette};
+use super::probe::{ColorLevel, Colors};
 use crate::view::Transcript;
 
 /// 真彩、黑底的配色。
-pub(crate) fn palette() -> Palette {
-    Palette::new(ColorLevel::TrueColor, Some((0, 0, 0)))
+pub(crate) fn palette() -> Colors {
+    Colors::new(ColorLevel::TrueColor, Some((0, 0, 0)))
 }
 
 /// 还没有会话的界面：给定的配色、语言与新会话的权限模式；工作区是 `/Users/dev/project`。
-pub(crate) fn app_with(palette: Palette, lang: Lang, mode: PermissionMode) -> App {
+pub(crate) fn app_with(palette: Colors, lang: Lang, mode: PermissionMode) -> App {
     App::new(
         palette,
         lang,

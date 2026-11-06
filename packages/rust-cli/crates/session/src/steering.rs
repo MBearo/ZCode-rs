@@ -4,7 +4,8 @@
 //! 队列与 next 通道只由 actor 持有：主循环经 [`ActorSink`] 先领取（不出队），在主循环的任务里跑 hook
 //! （不挡 actor），再把每条插话的结局交回 actor 出队或留下。通知不跑 hook，交回时 actor 给并入的每条通知一个
 //! attachment 的消息 ID，那条消息提交之后才出通道（lane.rs）。领取与结局之间队列可能被改动，actor 只按命令 ID 处理还在
-//! 队列里的插话、按通知的身份（只在内存的 `NoticeKey`）处理通知。
+//! 队列里的插话、按通知的身份（只在内存的 `NoticeKey`）处理通知；领取之后被取回（`Command::Dequeue`，query.md §4.4）
+//! 的插话不再在队列里，主循环只并入 actor 回复说出了队的插话。
 
 use std::sync::Arc;
 
@@ -32,6 +33,14 @@ pub(crate) struct Claimed {
     pub(crate) items: Vec<ClaimedItem>,
     pub(crate) hooks: Option<Arc<dyn HookRunner>>,
     pub(crate) abort: CancellationToken,
+}
+
+/// 交回结局后 actor 的回复：出了队、可以并入的插话（领取之后被取回的不在其中），与并入的每条通知（按顺序）的
+/// attachment 消息 ID。
+#[derive(Default)]
+pub(crate) struct Settled {
+    pub(crate) absorbed: Vec<CommandId>,
+    pub(crate) notices: Vec<MessageId>,
 }
 
 /// 一条插话的结局。
@@ -92,12 +101,13 @@ impl Actor {
     }
 
     /// 结局：并入与丢弃的出队（丢弃时发提示）；留下的记下结果（回合结束后由 `start_next` 取用）。并入的通知（按顺序）
-    /// 各得到一个 attachment 的消息 ID，返回给主循环；提交之后按它出通道（C8）。
+    /// 各得到一个 attachment 的消息 ID，返回给主循环；提交之后按它出通道（C8）。同时返回出了队、可以并入的插话。
     pub(crate) fn settle_steering(
         &mut self,
         fates: Vec<(CommandId, Fate)>,
         notices: Vec<NoticeKey>,
-    ) -> Vec<MessageId> {
+    ) -> Settled {
+        let mut absorbed = Vec::new();
         for (command, fate) in fates {
             if !self.inbox.contains_input(&command) {
                 continue;
@@ -105,6 +115,7 @@ impl Actor {
             match fate {
                 Fate::Absorbed => {
                     self.inbox.remove_input(&command);
+                    absorbed.push(command);
                 }
                 Fate::Dropped(notice) => {
                     self.inbox.remove_input(&command);
@@ -120,14 +131,15 @@ impl Actor {
             }
         }
         self.emit_queue();
-        notices
+        let notices = notices
             .into_iter()
             .map(|key| {
                 let id = self.deps.ids.message();
                 self.inbox.absorbing(key, id.clone());
                 id
             })
-            .collect()
+            .collect();
+        Settled { absorbed, notices }
     }
 }
 
@@ -137,9 +149,9 @@ enum Screened {
     Notice(NoticeKey, String),
 }
 
-/// 交回之前的并入项：通知的消息 ID 要等 actor 给出。
+/// 交回之前的并入项：插话要等 actor 说出了队才并入，通知的消息 ID 要等 actor 给出。
 enum Taken {
-    Prompt(Steered),
+    Prompt(CommandId, Box<HookOutcome>, String),
     Notice(String),
 }
 
@@ -203,14 +215,8 @@ impl ActorSink {
                 }
                 Screened::Notice(..) if aborted => {}
                 Screened::Prompt(command, text, outcome) => {
-                    if let Some(title) = outcome.session_title.clone() {
-                        self.title(title).await;
-                    }
-                    fates.push((command, Fate::Absorbed));
-                    taken.push(Taken::Prompt(Steered {
-                        text,
-                        after: outcome.messages,
-                    }));
+                    fates.push((command.clone(), Fate::Absorbed));
+                    taken.push(Taken::Prompt(command, outcome, text));
                 }
                 Screened::Notice(key, text) => {
                     notices.push(key);
@@ -219,7 +225,7 @@ impl ActorSink {
             }
         }
         let (reply, answer) = oneshot::channel();
-        let ids = match self
+        let settled = match self
             .sender
             .send(SinkRequest::SettleSteering {
                 fates,
@@ -229,19 +235,35 @@ impl ActorSink {
             .await
         {
             Ok(()) => answer.await.unwrap_or_default(),
-            Err(_) => Vec::new(),
+            Err(_) => Settled::default(),
         };
-        // 回合已经结束（通道关了）时拿不到 ID：主循环自己取，提交时不再有人认它（与回合一起结束）。
-        let mut ids = ids.into_iter();
-        taken
-            .into_iter()
-            .map(|item| match item {
-                Taken::Prompt(steered) => Absorbed::Prompt(steered),
-                Taken::Notice(text) => Absorbed::Notice(AbsorbedNotice {
+        // 修复：以前领取时就定下要并入的插话，不看结局交回时它还在不在队列里。领取与交回之间 actor 照常处理命令
+        // （UPS hook 跑得越久窗口越大），这时取回（`Command::Dequeue`）的插话已回到用户的输入框，却仍被并入本回合：
+        // 同一条消息既取回了又发了出去。现在只并入 actor 回复说出了队的插话：队列只由 actor 持有，出队与取回谁先到谁算。
+        // 回合已经结束（通道关了）时拿不到回复：插话都不并入（留在队列里），通知的 ID 主循环自己取，提交时不再有人认它
+        // （与回合一起结束）。
+        let mut ids = settled.notices.into_iter();
+        let mut absorbed = Vec::new();
+        for item in taken {
+            match item {
+                Taken::Prompt(command, outcome, text) => {
+                    if !settled.absorbed.contains(&command) {
+                        continue;
+                    }
+                    if let Some(title) = outcome.session_title.clone() {
+                        self.title(title).await;
+                    }
+                    absorbed.push(Absorbed::Prompt(Steered {
+                        text,
+                        after: outcome.messages,
+                    }));
+                }
+                Taken::Notice(text) => absorbed.push(Absorbed::Notice(AbsorbedNotice {
                     text,
                     id: ids.next(),
-                }),
-            })
-            .collect()
+                })),
+            }
+        }
+        absorbed
     }
 }

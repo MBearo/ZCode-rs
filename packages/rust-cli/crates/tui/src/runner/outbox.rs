@@ -7,7 +7,6 @@
 use std::sync::Arc;
 
 use rust_cli_kernel_api::session_api::{Command, SessionHandle};
-use rust_cli_kernel_api::user_command::LocalCommandRecord;
 
 use super::session::Sent;
 
@@ -17,14 +16,31 @@ pub(super) struct Outbox {
     session: Option<Arc<dyn SessionHandle>>,
     /// 运行中确认的 rewind：回合结束后发出（回执要用的数据与命令）。
     deferred: Option<(Sent, Command)>,
-    /// 还没有会话时（启动后、`/clear` 之后）完成的本地命令的记录：建会话后、第一条输入之前按顺序发出（修复线 L-A，
-    /// tui-manage.md §11.3；新会话草稿的一部分）。
-    records: Vec<LocalCommandRecord>,
+    /// 还没有会话时（启动后、`/clear` 之后）完成的本地命令要发的命令：记录（`RecordLocalCommand`）与 `/rename 名字` 的
+    /// `RenameRecorded`，建会话后、第一条输入之前按顺序发出（修复线 L-A，tui-manage.md §11.3；新会话草稿的一部分）。
+    held: Vec<(Sent, Command)>,
+    /// 切换会话进行中（`/resume`、`/fork`、启动时的 `--resume` / `-c`）：从发起到 `Done::Switched`。句柄这时为 None，
+    /// 但画面不是新会话的草稿：草稿里的命令要等 `Done::Opened` 才发，切换完成时不发。修复（MR !3465 评审）：以前用
+    /// “界面上有没有会话 ID”推断切换，从空白草稿发起的切换没有 ID，`/rename` 被当作草稿命令，提示成功却没有执行。
+    switching: bool,
 }
 
 impl Outbox {
     pub(super) fn session(&self) -> Option<&Arc<dyn SessionHandle>> {
         self.session.as_ref()
+    }
+
+    pub(super) fn start_switch(&mut self) {
+        self.switching = true;
+    }
+
+    /// 切换完成（成功或失败）。
+    pub(super) fn end_switch(&mut self) {
+        self.switching = false;
+    }
+
+    pub(super) fn switching(&self) -> bool {
+        self.switching
     }
 
     pub(super) fn attach(&mut self, handle: Arc<dyn SessionHandle>) {
@@ -48,16 +64,16 @@ impl Outbox {
         self.deferred.is_some()
     }
 
-    pub(super) fn hold_record(&mut self, record: LocalCommandRecord) {
-        self.records.push(record);
+    pub(super) fn hold(&mut self, sent: Sent, command: Command) {
+        self.held.push((sent, command));
     }
 
-    pub(super) fn take_records(&mut self) -> Vec<LocalCommandRecord> {
-        std::mem::take(&mut self.records)
+    pub(super) fn take_held(&mut self) -> Vec<(Sent, Command)> {
+        std::mem::take(&mut self.held)
     }
 
-    /// `/clear`：之前留在草稿里的记录随旧对话一起清掉。
-    pub(super) fn clear_records(&mut self) {
-        self.records.clear();
+    /// 换掉新会话的草稿（`/clear`、← 看板的 ⌃b）：之前留在草稿里的命令一起清掉。
+    pub(super) fn clear_held(&mut self) {
+        self.held.clear();
     }
 }

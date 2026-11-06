@@ -13,6 +13,7 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+use super::agents_tree::{list, open_list};
 use super::support::{Setup, with_ui};
 
 type Item = Result<ModelStreamItem, ModelError>;
@@ -93,34 +94,41 @@ fn retrying(delay_ms: u64) -> ModelNotice {
     }
 }
 
+/// 重试行（tui-kit.md §4.0「尾巴」，Puffin `retry_line`）：一段重试持续 1 秒之后代替 transcript 末尾的工作光标，原因、倒计时
+/// （失败两次以上才写次数）；拿到响应头时回到光标。以前是板上面常驻的状态行写 `API error · Retrying in … · attempt 1/10`。
 #[tokio::test(flavor = "multi_thread")]
-async fn the_status_line_shows_a_retry_until_the_response_arrives() {
+async fn the_retry_row_replaces_the_cursor_until_the_response_arrives() {
     let (model, senders) = NoticeModel::new(1);
     let main = senders.into_iter().next().unwrap();
     with_ui(model, Setup::default(), |mut ui| async move {
         ui.submit("hello");
         notice(&main, retrying(60_000));
-        let screen = ui.wait_for("✻ API error · Retrying in").await;
-        assert!(screen.contains("attempt 1/10"), "{screen}");
-        // 重发拿到响应头：回到 spinner。
+        let screen = ui
+            .wait_for(" ○ The provider is overloaded  ·  trying again in")
+            .await;
+        assert!(
+            !screen.contains("tried"),
+            "one failure has no count: {screen}"
+        );
+        // 重发拿到响应头：回到光标。
         notice(&main, ModelNotice::Resumed);
-        ui.wait("the spinner", |screen| {
-            !screen.contains("Retrying in") && screen.contains("esc to interrupt")
+        ui.wait("the cursor", |screen| {
+            !screen.contains("trying again") && screen.contains("esc stop")
         })
         .await;
-        // 停顿：等待 API 响应与看门狗的倒计时；之后的流增量清掉它。
+        // 停顿：等不到回答，看门狗的倒计时；之后的流增量清掉它。
         notice(
             &main,
             ModelNotice::Stalled {
                 retry_in_ms: 280_000,
             },
         );
-        ui.wait_for("✻ Waiting for API response · will retry in 4m")
+        ui.wait_for(" ○ The answer stopped coming  ·  trying again in")
             .await;
         events(&main, text_response(&["hi there"]));
         drop(main);
         let screen = ui.wait_for("hi there").await;
-        assert!(!screen.contains("Waiting for API response"), "{screen}");
+        assert!(!screen.contains("The answer stopped coming"), "{screen}");
     })
     .await;
 }
@@ -152,7 +160,10 @@ async fn a_foreground_agent_shows_its_retry_under_the_agent_row() {
             ),
         );
         drop(main);
-        ui.wait_for("Initializing…").await;
+        // transcript 里在跑的子代理是一行调用（Puffin `tool_row::agent_row`：用时、token、速度），它的停顿与重试写在
+        // 子代理的层的行上（↓ 打开，tui-kit.md §4.3）。以前 Agent 行下面另有 `Initializing…` 与 `│ Waiting for API response` 的行。
+        ui.wait_for("Agent  Find callers").await;
+        open_list(&ui).await;
         notice(
             &child,
             ModelNotice::Stalled {
@@ -160,11 +171,20 @@ async fn a_foreground_agent_shows_its_retry_under_the_agent_row() {
             },
         );
         let screen = ui
-            .wait_for("✻ Waiting for API response · will retry in 1m 40s")
+            .wait("the stall in the list", |s| {
+                list(s)
+                    .iter()
+                    .any(|l| l.contains("Explore  Find callers  Waiting for API response"))
+            })
             .await;
-        assert!(screen.contains("Explore(Find callers)"), "{screen}");
+        assert!(!screen.contains("│ Waiting for API response"), "{screen}");
         notice(&child, retrying(30_000));
-        ui.wait_for("✻ API error · Retrying in").await;
+        ui.wait("the retry in the list", |s| {
+            list(s)
+                .iter()
+                .any(|l| l.contains("Find callers  Retrying in"))
+        })
+        .await;
         notice(&child, ModelNotice::Resumed);
         ui.wait("the retry line to go", |screen| {
             !screen.contains("Retrying in")
@@ -262,21 +282,21 @@ async fn a_foreground_agent_shows_its_thinking_in_the_row_only() {
             ),
         );
         drop(main);
-        ui.wait_for("Initializing…").await;
+        ui.wait_for("Agent  Find callers").await;
+        open_list(&ui).await;
         thinking(&child, "Let me   look\naround");
-        // Agent 行：推理项；列表行没有“思考中”（修复线 F26，用户决定）。列表行来自另一份快照（子代理列表的查询），
-        // 也等它画出来再看（修复线 F32：原来只等 Agent 行，列表行还没到时下面的断言空过）。
+        // 列表行没有“思考中”（修复线 F26，用户决定）；transcript 的 Agent 行同 Puffin，不写子代理的思考（以前下面有
+        // `│ ∴ Let me look around`）。列表行来自另一份快照（子代理列表的查询），等它画出来再看（修复线 F32）。
         let screen = ui
-            .wait("thinking in the row", |screen| {
-                screen.contains("⎿  ∴ Let me look around")
-                    && screen
-                        .lines()
-                        .any(|l| l.contains('◯') && l.contains("Find callers"))
+            .wait("the list row", |screen| {
+                list(screen)
+                    .iter()
+                    .any(|l| l.contains("Explore  Find callers"))
             })
             .await;
-        assert!(screen.contains("Explore(Find callers)"), "{screen}");
-        // 只看列表行：主线程的状态行本身可能写着 Thinking。
-        let rows: Vec<&str> = screen.lines().filter(|l| l.contains('◯')).collect();
+        assert!(!screen.contains("Let me look around"), "{screen}");
+        // 只看层的行：主线程的状态行本身可能写着 Thinking。
+        let rows = list(&screen);
         assert!(rows.iter().all(|row| !row.contains("Thinking")), "{screen}");
         // 流停住：Agent 行与列表行都看得到。
         notice(
@@ -285,9 +305,10 @@ async fn a_foreground_agent_shows_its_thinking_in_the_row_only() {
                 retry_in_ms: 100_000,
             },
         );
-        ui.wait("the stall in the row and the list", |screen| {
-            screen.contains("✻ Waiting for API response · will retry in")
-                && screen.contains("· Waiting for API response")
+        ui.wait("the stall in the list", |screen| {
+            list(screen)
+                .iter()
+                .any(|l| l.contains("Find callers  Waiting for API response"))
         })
         .await;
         // 子代理的回复正常收尾（修复线 F113：流在只有 thinking 时断开，主循环会重发同一个请求，provider-errors.md §3.3；
@@ -323,7 +344,8 @@ async fn a_background_agent_row_keeps_its_duration_at_the_right_edge() {
             ),
         );
         senders[0] = None;
-        ui.wait_for("Backgrounded agent").await;
+        // 后台子代理的调用马上结束：这一段工作收成 `Ran 1 subagent`（Puffin 的收拢；以前是 `Backgrounded agent`）。
+        ui.wait_for("Ran 1 subagent").await;
         // 主线程的下一次请求与子代理的请求谁先到不定：按 system 里的子代理权限句找出子代理那一个。
         let requests = loop {
             let requests = probe.requests.lock().unwrap().clone();
@@ -346,6 +368,7 @@ async fn a_background_agent_row_keeps_its_duration_at_the_right_edge() {
         );
         senders[main] = None;
         ui.wait_for("started a review").await;
+        open_list(&ui).await;
         thinking(senders[child].as_ref().unwrap(), "Reading the diff");
         // 修复线 F26：列表行没有“思考中”；用时右对齐在行尾（原来接在活动前面，活动一变就左右跳）。
         let screen = ui
@@ -367,13 +390,17 @@ async fn a_background_agent_row_keeps_its_duration_at_the_right_edge() {
                 },
             },
         );
-        let screen = ui.wait_for("· Retrying in").await;
+        let screen = ui
+            .wait("the retry in the list", |s| {
+                row_of(s, "Review code").is_some_and(|row| row.contains("Retrying in"))
+            })
+            .await;
         let retrying = row_of(&screen, "Review code").unwrap();
-        assert!(retrying.contains("Review code · Retrying in"), "{screen}");
+        assert!(retrying.contains("Review code  Retrying in"), "{screen}");
         assert!(ends_with_duration(&retrying), "{screen}");
         assert_eq!(
-            unicode_width::UnicodeWidthStr::width(retrying.as_str()),
-            unicode_width::UnicodeWidthStr::width(row.as_str()),
+            rust_cli_tui_kit::render::width::string_width(retrying.as_str()),
+            rust_cli_tui_kit::render::width::string_width(row.as_str()),
             "{screen}"
         );
         drop(senders);
@@ -381,12 +408,12 @@ async fn a_background_agent_row_keeps_its_duration_at_the_right_edge() {
     .await;
 }
 
-/// 子代理列表里含 `needle` 的那一行。
+/// 子代理的层里含 `needle` 的那一行（记号在第 3 列，tui-kit.md §4.3；transcript 的工具行的记号在第 1 列）。
 fn row_of(screen: &str, needle: &str) -> Option<String> {
     screen
         .lines()
-        .find(|line| line.contains('◯') && line.contains(needle))
-        .map(str::to_owned)
+        .find(|line| line.starts_with("   ○ ") && line.contains(needle))
+        .map(|line| line.trim_end().to_owned())
 }
 
 /// 行尾是用时（`5s`、`1m 5s`）。

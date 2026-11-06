@@ -75,24 +75,6 @@ pub fn replacement(path: &str, quoted: bool, complete: bool) -> String {
     }
 }
 
-/// 候选的最长公共前缀。
-pub fn common_prefix(items: &[String]) -> String {
-    let Some(first) = items.first() else {
-        return String::new();
-    };
-    let mut prefix = first.as_str();
-    for item in &items[1..] {
-        let shared: usize = prefix
-            .chars()
-            .zip(item.chars())
-            .take_while(|(a, b)| a == b)
-            .map(|(a, _)| a.len_utf8())
-            .sum();
-        prefix = &prefix[..shared];
-    }
-    prefix.to_owned()
-}
-
 #[cfg(test)]
 #[path = "mention_tests.rs"]
 mod tests;

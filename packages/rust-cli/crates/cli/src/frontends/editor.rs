@@ -9,7 +9,7 @@ use futures_util::future::BoxFuture;
 use rust_cli_base::secret::EnvSnapshot;
 use rust_cli_fs::{FileMode, ParentDir, TempName, WriteOptions};
 use rust_cli_node_store::NodeIds;
-use rust_cli_tui::Editor;
+use rust_cli_tui_ports::services::Editor;
 
 const WRITE: WriteOptions = WriteOptions {
     mode: FileMode::Private,

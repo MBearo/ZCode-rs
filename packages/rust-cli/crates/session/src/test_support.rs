@@ -157,6 +157,8 @@ pub(crate) struct Setup {
     pub detached: Option<Arc<crate::DetachedAsks>>,
     /// 共用的存储（重开会话的测试）；缺省每次新建。
     pub store: Option<Arc<MemoryStore>>,
+    /// 会话 actor 看到的存储外面再包一层全委托的代理（记下每一批、让某一批失败，peer_merged_tests.rs）；缺省不包。
+    pub store_hooks: Option<Arc<dyn rust_cli_kernel_api::testing::StoreHooks>>,
     /// 执行环境的注册表（R3）；缺省只有本机（[`Setup::machine`] 与 [`Setup::local`]）。
     pub machines: Option<Arc<dyn rust_cli_kernel_api::env_registry::EnvironmentRegistry>>,
     /// 会话的工作目录；缺省是 [`meta`] 的 `/work`（workspace_tests.rs 的 Windows 用例改它，F57）。
@@ -194,6 +196,7 @@ impl Setup {
             peers: crate::PeerDeps::off(),
             detached: None,
             store: None,
+            store_hooks: None,
             machines: None,
             root: "/work",
             clock: Arc::new(FixedClock(1_000)),
@@ -251,9 +254,16 @@ impl Setup {
             non_interactive: false,
             limits: rust_cli_query::RequestLimits::default(),
         }));
+        let session_store: Arc<dyn SessionStore> = match self.store_hooks {
+            Some(hooks) => Arc::new(rust_cli_kernel_api::testing::StoreProxy::new(
+                store.clone(),
+                hooks,
+            )),
+            None => store.clone(),
+        };
         let session = Session::spawn(
             SessionDeps {
-                store: store.clone(),
+                store: session_store,
                 ids: ids.clone(),
                 runner,
                 compactor: Arc::new(NeverCompact),

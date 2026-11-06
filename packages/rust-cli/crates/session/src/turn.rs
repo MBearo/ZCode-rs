@@ -123,10 +123,11 @@ impl Actor {
                 })
             }))
             .collect();
-        // 一个事务：几条通知一起成立；折叠说明与定时任务的 prompt 一起成立。
-        // checkpoint 挂在这次运行最后一条 user 消息上（drive 的同一规则）。
+        // 一个事务：几条通知一起成立；折叠说明与定时任务的 prompt 一起成立；同伴项“已并入”的事实与它们的 user 消息
+        // 一起成立（cross-session.md §2.4，F139）。checkpoint 挂在这次运行最后一条 user 消息上（drive 的同一规则）。
         let prompt = users.last().map(|message| message.id().clone());
-        let appended = self.append(None, users, Vec::new()).await?;
+        let merged = notices.iter().flat_map(Waiting::merged_facts).collect();
+        let appended = self.append(None, users, merged).await?;
         if let (Some(fired), Some(prompt)) = (fired, &prompt) {
             self.fired(fired, prompt.clone());
         }
@@ -203,6 +204,10 @@ impl Actor {
                 let _ = reply.send(self.record(messages, Vec::new()).await);
             }
             SinkRequest::CompactStarted(trigger) => crate::compact::compact_started(self, trigger),
+            SinkRequest::CompactFailed(trigger, message) => {
+                self.log
+                    .append(KernelEvent::CompactFailed { trigger, message });
+            }
             SinkRequest::SetPlan { enabled, reply } => {
                 let changed = self.change_plan(enabled).await;
                 let _ = reply.send(changed.map_err(failed));

@@ -1,7 +1,7 @@
 //! `App` 的子状态的重置（架构整理 U3）。
 
 use crate::ui::app::App;
-use crate::ui::mouse::{Point, ScreenSelection, Selection};
+use crate::ui::mouse::{Copied, Grain, Point, ScreenSelection, Selection};
 use crate::ui::test_support::app;
 
 fn read_somewhere(app: &mut App) {
@@ -17,9 +17,10 @@ fn read_somewhere(app: &mut App) {
     app.pointer.selection = Some(Selection {
         anchor: point,
         head: point,
+        grain: Grain::Cell,
         dragging: false,
         edge: 0,
-        copied: true,
+        copied: Some(Copied::of("x")),
     });
     app.pointer.screen_selection = Some(ScreenSelection {
         anchor: (0, 1),
@@ -49,7 +50,7 @@ fn changing_the_shown_transcript_resets_the_reading_position_and_both_selections
 fn leaving_the_session_also_clears_its_snapshots() {
     let mut app = app();
     read_somewhere(&mut app);
-    let in_flight = app.snapshots.request_stats.begin();
+    let in_flight = app.snapshots.request_stats.begin(0);
     app.reset();
     assert_eq!(app.port.scroll, 0);
     assert_eq!(app.pointer.screen_selection, None);

@@ -222,6 +222,7 @@ async fn the_revision_counts_state_changes_only() {
     log.append(KernelEvent::ContextUsage {
         used_tokens: 1,
         max_tokens: 2,
+        compact_at: None,
     });
     assert_eq!(log.revision(), 2);
     let replay: Vec<(u64, u64)> = log

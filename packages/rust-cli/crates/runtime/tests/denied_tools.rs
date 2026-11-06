@@ -76,7 +76,7 @@ mod denied_tools {
                 ids: Arc::new(SequentialIds::default()),
             },
             Defaults {
-                selection: selection(),
+                selection: selection().into(),
                 mode: PermissionMode::DontAsk,
                 max_turns: None,
                 search_tools: false,

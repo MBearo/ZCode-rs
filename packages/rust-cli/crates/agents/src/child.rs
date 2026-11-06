@@ -43,6 +43,14 @@ pub(crate) struct Parent {
     pub(crate) progress: mpsc::Sender<ToolProgress>,
 }
 
+/// 一条 assistant 消息里的 tool_use 块数（通知与结果的 `tool_uses`，agents.md §2）。
+pub(crate) fn tool_use_blocks(content: &[ContentBlock]) -> usize {
+    content
+        .iter()
+        .filter(|block| matches!(block, ContentBlock::ToolUse { .. }))
+        .count()
+}
+
 #[derive(Default)]
 struct Record {
     last: Option<AssistantMessage>,
@@ -321,11 +329,7 @@ impl ChildSink {
         self.live.committed(&self.agent, speed);
         if let Message::Assistant(assistant) = message {
             let mut record = self.record();
-            record.tool_uses += assistant
-                .content
-                .iter()
-                .filter(|block| matches!(block, ContentBlock::ToolUse { .. }))
-                .count();
+            record.tool_uses += tool_use_blocks(&assistant.content);
             record.last = Some(assistant);
         }
         Ok(())
@@ -388,6 +392,13 @@ impl RunSink for ChildSink {
 
     /// 子代理里的压缩不显示进度。
     async fn compact_started(&self, _trigger: rust_cli_kernel_api::message::CompactTrigger) {}
+
+    async fn compact_failed(
+        &self,
+        _trigger: rust_cli_kernel_api::message::CompactTrigger,
+        _message: String,
+    ) {
+    }
 
     /// 邮箱里的 SendMessage（插话，没有 UserPromptSubmit）与它派生的后台子代理的通知（agents.md §5.1：全文，在工具
     /// 边界作为 `task-notification` 并入），先插话后通知。

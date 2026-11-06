@@ -2,7 +2,6 @@
 //! 做（回执在事件循环的 `FuturesUnordered` 里，不另起任务），结果写进 transcript；服务的变化通知到了就重取快照。
 use futures_util::FutureExt;
 use futures_util::stream::{self, BoxStream, StreamExt};
-use ratatui::backend::Backend;
 
 use super::Loop;
 use super::session::Done;
@@ -34,6 +33,12 @@ pub(super) enum MachinesDone {
         name: String,
         result: Result<Changed, MachineProblem>,
     },
+    /// 设置页的删掉再加（连接的结果由快照显示，这里只回答清单改成了没有）。
+    Replaced {
+        name: String,
+        result: Result<(), MachineProblem>,
+    },
+    Hosts(Vec<crate::machines::SshHost>),
 }
 
 /// 机器服务的变化通知；没有服务时永远不出项。
@@ -44,7 +49,7 @@ pub(super) fn changes(services: &crate::services::Services) -> BoxStream<'static
     }
 }
 
-impl<B: Backend> Loop<'_, B> {
+impl Loop<'_> {
     /// 启动时：记下有没有服务，取第一份快照。
     pub(super) fn start_machines(&mut self) {
         self.app.machines_enabled = self.options.services.machines.is_some();
@@ -80,6 +85,19 @@ impl<B: Backend> Loop<'_, B> {
                     .collect()
             };
             let changed = kinds(&self.app.machines) != kinds(&fresh);
+            // 连接中的机器记下开始连的时刻（坞行写连了多久）；不在连的去掉。
+            let now_ms = self.now_ms();
+            let since = std::mem::take(&mut self.app.machines_since);
+            self.app.machines_since = fresh
+                .iter()
+                .filter(|row| matches!(row.status, crate::machines::MachineStatus::Connecting(_)))
+                .map(|row| {
+                    (
+                        row.name.clone(),
+                        since.get(&row.name).copied().unwrap_or(now_ms),
+                    )
+                })
+                .collect();
             self.app.machines = fresh;
             self.dirty = true;
             if changed {
@@ -143,6 +161,29 @@ impl<B: Backend> Loop<'_, B> {
                 }
                 .boxed()
             }
+            MachineRequest::Replace {
+                name,
+                ssh,
+                working_directory,
+                reconnect,
+            } => async move {
+                let result = async {
+                    machines.remove(name.clone()).await?;
+                    machines.add(name.clone(), ssh, working_directory).await?;
+                    if reconnect {
+                        // 连不上照常是那台机器的状态（失败的说明在列表与设置页），不算改动没做成。
+                        let _ = machines.connect(name.clone()).await;
+                    }
+                    Ok(())
+                }
+                .await;
+                MachinesDone::Replaced { name, result }
+            }
+            .boxed(),
+            MachineRequest::Hosts => {
+                let reading = machines.ssh_hosts();
+                async move { MachinesDone::Hosts(reading.await) }.boxed()
+            }
         };
         self.pending.push(future.map(Done::Machines).boxed());
     }
@@ -156,7 +197,10 @@ impl<B: Backend> Loop<'_, B> {
                 ssh,
                 result: Ok(()),
             } => {
-                self.app.info(words::added(lang, &name, &ssh));
+                // 设置的添加页加的：回到段，选中它，说 `Added gpu-2. Connecting…`（Puffin `AddVia::Settings`）。
+                if !self.app.settings_machine_added(&name) {
+                    self.app.info(words::added(lang, &name, &ssh));
+                }
                 self.machine_request(MachineRequest::Connect(name));
             }
             MachinesDone::Connected {
@@ -178,7 +222,16 @@ impl<B: Backend> Loop<'_, B> {
             MachinesDone::Removed {
                 name,
                 result: Ok(()),
-            } => self.app.info(words::removed(lang, &name)),
+            } => {
+                self.app.settings_machine_removed(&name);
+                self.app.info(words::removed(lang, &name));
+            }
+            MachinesDone::Replaced { result: Ok(()), .. } => self.app.info("Saved."),
+            MachinesDone::Hosts(hosts) => {
+                self.app.machines_hosts(&hosts);
+                self.app.settings_hosts(hosts);
+                return;
+            }
             MachinesDone::Retried {
                 name,
                 result: Ok(Changed::Done),
@@ -205,6 +258,10 @@ impl<B: Backend> Loop<'_, B> {
                 result: Err(problem),
             }
             | MachinesDone::Retried {
+                name,
+                result: Err(problem),
+            }
+            | MachinesDone::Replaced {
                 name,
                 result: Err(problem),
             } => self.app.error(words::problem(lang, &name, &problem)),

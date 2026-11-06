@@ -229,3 +229,45 @@ async fn concurrent_writes_keep_each_other() {
         );
     }
 }
+
+/// `compact.autoThresholdTokens` 的写回（compact.md §2.3）：只动这一个键，`None` 删掉它，`compact` 空了也删掉；文件
+/// 不存在时从空对象开始；不是对象时不写。
+#[tokio::test]
+async fn the_compact_threshold_is_set_and_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = StoragePaths::resolve(&Default::default(), dir.path(), dir.path());
+    let file = dir.path().join(".zcode/cli/config.json");
+    write_compact_at(&paths, Some(400_000)).await.unwrap();
+    assert_eq!(
+        crate::test_support::read_text(&file).await.unwrap(),
+        "{\n  \"compact\": {\n    \"autoThresholdTokens\": 400000\n  }\n}\n"
+    );
+    write(
+        &file,
+        b"{\"ui\":{\"theme\":\"dark\"},\"compact\":{\"autoThresholdTokens\":1,\"x\":2}}",
+    )
+    .await;
+    write_compact_at(&paths, Some(300_000)).await.unwrap();
+    assert_eq!(
+        crate::test_support::read_text(&file).await.unwrap(),
+        "{\n  \"ui\": {\n    \"theme\": \"dark\"\n  },\n  \"compact\": {\n    \"autoThresholdTokens\": 300000,\n    \"x\": 2\n  }\n}\n"
+    );
+    write_compact_at(&paths, None).await.unwrap();
+    assert_eq!(
+        crate::test_support::read_text(&file).await.unwrap(),
+        "{\n  \"ui\": {\n    \"theme\": \"dark\"\n  },\n  \"compact\": {\n    \"x\": 2\n  }\n}\n"
+    );
+    assert_eq!(
+        compact_at_text(
+            Some(b"{\"compact\":{\"autoThresholdTokens\":5}}"),
+            "/x",
+            None
+        )
+        .unwrap(),
+        "{}\n"
+    );
+    assert!(matches!(
+        compact_at_text(Some(b"[]"), "/x", Some(1)),
+        Err(ConfigWriteError::NotObject(..))
+    ));
+}

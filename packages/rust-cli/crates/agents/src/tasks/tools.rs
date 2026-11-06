@@ -13,17 +13,18 @@ use rust_cli_kernel_api::tool::{
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::Core;
 use crate::tasks::edit::{CreateInput, GetInput, UpdateInput, create, get, list_text, update};
+use crate::{Core, TaskTools};
 use rust_cli_kernel_api::tool_names;
 
-pub(crate) fn tools(core: &Arc<Core>) -> Vec<Arc<dyn Tool>> {
+pub(crate) fn tools(core: &Arc<Core>, switch: &TaskTools) -> Vec<Arc<dyn Tool>> {
     [Kind::Create, Kind::Get, Kind::List, Kind::Update]
         .into_iter()
         .map(|kind| {
             Arc::new(TaskTool {
                 core: core.clone(),
                 kind,
+                switch: switch.clone(),
             }) as Arc<dyn Tool>
         })
         .collect()
@@ -51,6 +52,7 @@ impl Kind {
 struct TaskTool {
     core: Arc<Core>,
     kind: Kind,
+    switch: TaskTools,
 }
 
 fn failed(error: impl std::fmt::Display) -> ToolError {
@@ -77,6 +79,10 @@ impl TaskTool {
 impl Tool for TaskTool {
     fn name(&self) -> &str {
         self.kind.name()
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.switch.enabled()
     }
 
     /// 延迟加载（docs/specs/rust-cli/tools-more.md §3.1）。
